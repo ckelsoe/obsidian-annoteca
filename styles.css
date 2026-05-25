@@ -1,7 +1,420 @@
 /*
  * Annoteca plugin styles.
  *
- * Per-category indicator styles, reviewer pane layout, gutter icon styling, and
- * other visual decorations are added here as features land. See
- * dev-docs/annoteca/architecture.md (workspace) for the surface inventory.
+ * Theme integration uses Obsidian CSS variables so light/dark/custom themes
+ * carry through automatically. Per-category colors fall back to a neutral
+ * theme variable when a category lacks a custom color.
+ *
+ * Style Settings hooks: every category color reads from a CSS variable named
+ * --annoteca-color-<category>. Users can override these via Style Settings
+ * or a vault snippet without editing the plugin.
  */
+
+/* @settings
+name: Annoteca
+id: annoteca
+settings:
+  -
+    id: annoteca-color-tone
+    title: Tone category color
+    type: variable-text
+    default: var(--color-purple)
+  -
+    id: annoteca-color-clarify
+    title: Clarify category color
+    type: variable-text
+    default: var(--color-blue)
+  -
+    id: annoteca-color-cut
+    title: Cut category color
+    type: variable-text
+    default: var(--color-red)
+  -
+    id: annoteca-color-expand
+    title: Expand category color
+    type: variable-text
+    default: var(--color-green)
+  -
+    id: annoteca-color-tighten
+    title: Tighten category color
+    type: variable-text
+    default: var(--color-orange)
+  -
+    id: annoteca-color-source-needed
+    title: Source needed category color
+    type: variable-text
+    default: var(--color-yellow)
+  -
+    id: annoteca-color-uncategorized
+    title: Uncategorized category color
+    type: variable-text
+    default: var(--text-muted)
+  -
+    id: annoteca-color-verse-needed
+    title: Verse needed category color
+    type: variable-text
+    default: var(--color-cyan)
+  -
+    id: annoteca-color-meditation
+    title: Meditation category color
+    type: variable-text
+    default: var(--color-pink)
+*/
+
+.annoteca-marker {
+	border-bottom: 1px dotted var(--text-muted);
+	padding: 0 2px;
+	cursor: pointer;
+	border-radius: 2px;
+}
+
+.annoteca-marker:hover {
+	background-color: var(--background-modifier-hover);
+}
+
+.annoteca-cat-tone { border-bottom-color: var(--annoteca-color-tone, var(--color-purple)); }
+.annoteca-cat-clarify { border-bottom-color: var(--annoteca-color-clarify, var(--color-blue)); }
+.annoteca-cat-cut { border-bottom-color: var(--annoteca-color-cut, var(--color-red)); }
+.annoteca-cat-expand { border-bottom-color: var(--annoteca-color-expand, var(--color-green)); }
+.annoteca-cat-tighten { border-bottom-color: var(--annoteca-color-tighten, var(--color-orange)); }
+.annoteca-cat-source-needed { border-bottom-color: var(--annoteca-color-source-needed, var(--color-yellow)); }
+.annoteca-cat-uncategorized { border-bottom-color: var(--annoteca-color-uncategorized, var(--text-muted)); }
+.annoteca-cat-verse-needed { border-bottom-color: var(--annoteca-color-verse-needed, var(--color-cyan)); }
+.annoteca-cat-meditation { border-bottom-color: var(--annoteca-color-meditation, var(--color-pink)); }
+.annoteca-cat-index-entry { border-bottom-color: var(--text-accent); }
+
+.annoteca-resolved {
+	opacity: 0.5;
+	text-decoration: line-through;
+	text-decoration-color: var(--text-muted);
+}
+
+.annoteca-resolved-hidden {
+	display: none;
+}
+
+.annoteca-hover-preview {
+	max-width: 420px;
+	padding: 8px 10px;
+	background-color: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	font-size: var(--font-ui-small);
+	color: var(--text-normal);
+}
+
+.annoteca-hover-header {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+	margin-bottom: 6px;
+	font-weight: var(--font-semibold);
+}
+
+.annoteca-hover-category {
+	padding: 2px 6px;
+	border-radius: 8px;
+	background-color: var(--background-modifier-active-hover);
+	font-size: var(--font-smaller);
+}
+
+.annoteca-hover-state {
+	color: var(--text-muted);
+	font-style: italic;
+}
+
+.annoteca-hover-date,
+.annoteca-hover-author {
+	color: var(--text-muted);
+	font-size: var(--font-smaller);
+}
+
+.annoteca-hover-body {
+	white-space: pre-wrap;
+	line-height: 1.4;
+}
+
+.annoteca-hover-replies {
+	margin-top: 6px;
+	color: var(--text-muted);
+	font-style: italic;
+	font-size: var(--font-smaller);
+}
+
+.annoteca-view-root {
+	padding: 12px;
+	overflow-y: auto;
+}
+
+.annoteca-empty {
+	color: var(--text-muted);
+	font-style: italic;
+}
+
+.annoteca-group {
+	margin-bottom: 16px;
+}
+
+.annoteca-group-header {
+	display: flex;
+	gap: 6px;
+	align-items: center;
+	margin-bottom: 6px;
+	padding-bottom: 4px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.annoteca-group-label {
+	font-weight: var(--font-semibold);
+	color: var(--text-normal);
+}
+
+.annoteca-group-count {
+	margin-left: auto;
+	color: var(--text-muted);
+	font-size: var(--font-smaller);
+}
+
+.annoteca-row {
+	padding: 8px;
+	margin-bottom: 6px;
+	background-color: var(--background-secondary);
+	border-radius: 6px;
+	cursor: pointer;
+}
+
+.annoteca-row:hover {
+	background-color: var(--background-modifier-hover);
+}
+
+.annoteca-row-resolved {
+	opacity: 0.6;
+}
+
+.annoteca-row-body {
+	white-space: pre-wrap;
+	line-height: 1.4;
+}
+
+.annoteca-row-meta {
+	margin-top: 4px;
+	color: var(--text-muted);
+	font-size: var(--font-smaller);
+}
+
+.annoteca-toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin-bottom: 12px;
+	align-items: center;
+}
+
+.annoteca-filter-path {
+	flex: 1;
+	min-width: 180px;
+	padding: 4px 8px;
+	border-radius: 4px;
+	border: 1px solid var(--background-modifier-border);
+	background-color: var(--background-primary);
+	color: var(--text-normal);
+}
+
+.annoteca-filter-state {
+	padding: 4px 6px;
+	background-color: var(--background-primary);
+	color: var(--text-normal);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 4px;
+}
+
+.annoteca-filter-categories {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	width: 100%;
+}
+
+.annoteca-filter-cat-label {
+	display: inline-flex;
+	gap: 4px;
+	align-items: center;
+	padding: 2px 8px;
+	background-color: var(--background-secondary);
+	border-radius: 12px;
+	font-size: var(--font-smaller);
+	cursor: pointer;
+}
+
+.annoteca-vault-row {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+	padding: 6px 8px;
+	margin-bottom: 4px;
+	background-color: var(--background-secondary);
+	border-radius: 4px;
+	cursor: pointer;
+}
+
+.annoteca-vault-row:hover {
+	background-color: var(--background-modifier-hover);
+}
+
+.annoteca-row-category {
+	padding: 2px 6px;
+	border-radius: 8px;
+	font-size: var(--font-smaller);
+	flex-shrink: 0;
+}
+
+.annoteca-row-path {
+	color: var(--text-muted);
+	font-size: var(--font-smaller);
+	flex-shrink: 0;
+}
+
+.annoteca-reviewer-header {
+	display: flex;
+	gap: 8px;
+	flex-wrap: wrap;
+	align-items: center;
+	margin-bottom: 12px;
+}
+
+.annoteca-reviewer-category {
+	padding: 2px 8px;
+	border-radius: 10px;
+	font-weight: var(--font-semibold);
+	font-size: var(--font-smaller);
+}
+
+.annoteca-reviewer-meta {
+	color: var(--text-muted);
+	font-size: var(--font-smaller);
+}
+
+.annoteca-reviewer-path {
+	width: 100%;
+	color: var(--text-muted);
+	font-size: var(--font-smaller);
+	font-family: var(--font-monospace);
+}
+
+.annoteca-reviewer-pin {
+	margin-left: auto;
+	padding: 4px;
+	background: none;
+	border: none;
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.annoteca-reviewer-pin:hover {
+	color: var(--text-normal);
+}
+
+.annoteca-reviewer-body {
+	padding: 10px;
+	background-color: var(--background-secondary);
+	border-radius: 6px;
+	margin-bottom: 12px;
+	white-space: pre-wrap;
+	line-height: 1.5;
+}
+
+.annoteca-reviewer-resolution {
+	padding: 8px 10px;
+	background-color: var(--background-modifier-success);
+	border-radius: 4px;
+	margin-bottom: 12px;
+	color: var(--text-on-accent);
+	font-size: var(--font-smaller);
+}
+
+.annoteca-reviewer-resolution-note {
+	margin-top: 4px;
+}
+
+.annoteca-reviewer-thread {
+	margin-bottom: 12px;
+}
+
+.annoteca-reply {
+	padding: 8px 10px;
+	background-color: var(--background-secondary);
+	border-radius: 4px;
+	margin-bottom: 6px;
+}
+
+.annoteca-reply-meta {
+	display: flex;
+	gap: 8px;
+	margin-bottom: 4px;
+	color: var(--text-muted);
+	font-size: var(--font-smaller);
+}
+
+.annoteca-reply-body {
+	white-space: pre-wrap;
+	line-height: 1.4;
+}
+
+.annoteca-reply-input-wrap {
+	margin-bottom: 12px;
+}
+
+.annoteca-reply-input {
+	width: 100%;
+	resize: vertical;
+	padding: 6px 8px;
+	background-color: var(--background-primary);
+	color: var(--text-normal);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 4px;
+	font-family: inherit;
+}
+
+.annoteca-reply-submit {
+	margin-top: 6px;
+	padding: 4px 12px;
+	background-color: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border: none;
+	border-radius: 4px;
+	cursor: pointer;
+}
+
+.annoteca-reviewer-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.annoteca-action-btn {
+	display: inline-flex;
+	gap: 4px;
+	align-items: center;
+	padding: 4px 10px;
+	background-color: var(--background-secondary);
+	color: var(--text-normal);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 4px;
+	cursor: pointer;
+	font-size: var(--font-smaller);
+}
+
+.annoteca-action-btn:hover {
+	background-color: var(--background-modifier-hover);
+}
+
+.annoteca-modal-body {
+	width: 100%;
+	min-height: 120px;
+	resize: vertical;
+	font-family: inherit;
+}
+
+.annoteca-category-list {
+	margin-bottom: 12px;
+}
