@@ -26,6 +26,8 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 
 	resolvedDisplay: "dim",
 
+	composerLocation: "modal",
+
 	enableAuthorTag: false,
 	authorTag: "",
 
@@ -228,6 +230,18 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.resolvedDisplay)
 				.onChange(async value => {
 					this.plugin.settings.resolvedDisplay = value as AnnotecaSettings["resolvedDisplay"];
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(container)
+			.setName("Composer location")
+			.setDesc("Where the add-comment form appears. The side panel keeps the document visible while you draft.")
+			.addDropdown(d => d
+				.addOption("modal", "Modal dialog")
+				.addOption("panel", "Right side panel")
+				.setValue(this.plugin.settings.composerLocation)
+				.onChange(async value => {
+					this.plugin.settings.composerLocation = value as AnnotecaSettings["composerLocation"];
 					await this.plugin.saveSettings();
 				}));
 	}

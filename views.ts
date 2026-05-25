@@ -17,6 +17,7 @@ export const VAULT_UNRESOLVED_VIEW_TYPE = "annoteca-vault-unresolved-view";
 export const REVIEWER_PANE_VIEW_TYPE = "annoteca-reviewer-pane-view";
 export const OUTLINE_DENSITY_VIEW_TYPE = "annoteca-outline-density-view";
 export const INDEX_VIEW_TYPE = "annoteca-index-view";
+export const COMPOSER_PANEL_VIEW_TYPE = "annoteca-composer-panel-view";
 
 // Per-file sidebar (F-046, F-047) ------------------------------------------------
 
@@ -604,6 +605,62 @@ export class IndexEntryView extends ItemView {
 				});
 			}
 		}
+	}
+}
+
+// Composer side-panel view (alternate to the modal) -----------------------------
+
+import { ComposerForm, type ComposerRequest } from "./composer";
+
+export class ComposerPanelView extends ItemView {
+	private readonly plugin: AnnotecaPlugin;
+	private pendingRequest: ComposerRequest | undefined;
+
+	constructor(leaf: WorkspaceLeaf, plugin: AnnotecaPlugin) {
+		super(leaf);
+		this.plugin = plugin;
+	}
+
+	getViewType(): string { return COMPOSER_PANEL_VIEW_TYPE; }
+	getDisplayText(): string { return "Compose comment"; }
+	getIcon(): string { return "message-square-plus"; }
+
+	setRequest(request: ComposerRequest): void {
+		this.pendingRequest = request;
+		this.refresh();
+	}
+
+	async onOpen(): Promise<void> {
+		this.refresh();
+	}
+
+	async onClose(): Promise<void> {
+		this.contentEl.empty();
+	}
+
+	private refresh(): void {
+		const container = this.contentEl;
+		container.empty();
+		container.addClass("annoteca-view-root");
+
+		if (!this.pendingRequest) {
+			container.createEl("p", {
+				text: "Trigger the add-comment command from the editor to start a new comment here.",
+				cls: "annoteca-empty",
+			});
+			return;
+		}
+
+		const form = new ComposerForm(this.plugin, this.pendingRequest, {
+			close: () => {
+				this.pendingRequest = undefined;
+				this.refresh();
+			},
+			onSubmitted: (filePath, markerStart) => {
+				void this.plugin.notifyComposerSubmitted(filePath, markerStart);
+			},
+		});
+		form.render(container);
 	}
 }
 

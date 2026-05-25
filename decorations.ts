@@ -4,14 +4,15 @@
 
 import {
 	StateField,
-	RangeSetBuilder,
 	StateEffect,
 	type Extension,
+	type Range,
 	type Transaction,
 } from "@codemirror/state";
 import {
 	Decoration,
 	EditorView,
+	WidgetType,
 	hoverTooltip,
 	type Tooltip,
 } from "@codemirror/view";
@@ -40,12 +41,7 @@ export function isHideAllComments(): boolean {
 	return hideAllFlag.value;
 }
 
-interface MarkerCacheEntry {
-	docVersion: number;
-	comments: Comment[];
-}
-
-const markerStateField = (ctx: DecorationContext) => StateField.define<Comment[]>({
+const markerStateField = (_ctx: DecorationContext) => StateField.define<Comment[]>({
 	create(state) {
 		return parseAll(state.doc.toString());
 	},
@@ -60,6 +56,42 @@ const markerStateField = (ctx: DecorationContext) => StateField.define<Comment[]
 	},
 });
 
+class MarkerIconWidget extends WidgetType {
+	constructor(private readonly marker: Comment) {
+		super();
+	}
+
+	override eq(other: WidgetType): boolean {
+		if (!(other instanceof MarkerIconWidget)) return false;
+		const o = other.marker;
+		const m = this.marker;
+		return o.marker.start === m.marker.start
+			&& o.marker.end === m.marker.end
+			&& o.category === m.category
+			&& o.body === m.body
+			&& o.resolution === m.resolution;
+	}
+
+	override toDOM(view: EditorView): HTMLElement {
+		const el = view.dom.ownerDocument.createElement("span");
+		el.className = `annoteca-icon annoteca-cat-${this.marker.category}`;
+		el.setAttribute("data-annoteca-marker-start", String(this.marker.marker.start));
+		el.setAttribute("data-annoteca-marker-end", String(this.marker.marker.end));
+		if (this.marker.resolution) el.classList.add("annoteca-resolved");
+		if (this.marker.replies.length > 0) el.classList.add("annoteca-has-replies");
+		el.title = `${this.marker.category}: ${this.marker.body.slice(0, 80)}`;
+		// Small bullet character; styled in CSS for size/color.
+		el.textContent = this.marker.resolution ? "●" : "◆";
+		return el;
+	}
+
+	override ignoreEvent(): boolean {
+		// The plugin's editor click handler consumes the click via the
+		// data-annoteca-marker-start attribute, so cm6 doesn't need to forward.
+		return false;
+	}
+}
+
 function classListForMarker(c: Comment, ctxSettings: AnnotecaSettings): string {
 	const classes = ["annoteca-marker", `annoteca-cat-${c.category}`];
 	if (c.resolution) {
@@ -69,29 +101,53 @@ function classListForMarker(c: Comment, ctxSettings: AnnotecaSettings): string {
 	return classes.join(" ");
 }
 
+function selectionTouches(state: { selection: { ranges: ReadonlyArray<{ from: number; to: number }> } }, m: Comment): boolean {
+	for (const r of state.selection.ranges) {
+		if (r.from <= m.marker.end && r.to >= m.marker.start) return true;
+	}
+	return false;
+}
+
 function decorationsCompute(ctx: DecorationContext, field: StateField<Comment[]>): Extension {
-	return EditorView.decorations.compute([field], state => {
+	return EditorView.decorations.compute([field, "selection"], state => {
 		if (hideAllFlag.value) return Decoration.none;
 		const markers = state.field(field);
 		const settings = ctx.getSettings();
 		if (settings.indicatorStyle === "none") return Decoration.none;
 
-		const builder = new RangeSetBuilder<Decoration>();
-		for (const m of markers) {
-			const cls = classListForMarker(m, settings);
-			builder.add(
-				m.marker.start,
-				m.marker.end,
-				Decoration.mark({
-					class: cls,
-					attributes: {
-						"data-annoteca-marker-start": String(m.marker.start),
-						"data-annoteca-marker-end": String(m.marker.end),
-					},
-				}),
-			);
+		// Build a list sorted by start, since RangeSetBuilder requires monotone
+		// order. parseAll returns markers in document order already, but sort
+		// defensively in case the parser ever changes.
+		const sorted = [...markers].sort((a, b) => a.marker.start - b.marker.start);
+		const decorations: Range<Decoration>[] = [];
+		for (const m of sorted) {
+			const touched = selectionTouches(state, m);
+			if (touched) {
+				// Cursor is inside the marker — show the raw text so the user
+				// can edit it directly. Style it so it stays readable.
+				decorations.push(
+					Decoration.mark({
+						class: classListForMarker(m, settings),
+						attributes: {
+							"data-annoteca-marker-start": String(m.marker.start),
+							"data-annoteca-marker-end": String(m.marker.end),
+						},
+					}).range(m.marker.start, m.marker.end),
+				);
+			} else {
+				// Cursor is outside — replace the raw text with a single icon
+				// widget. This is the live-preview behavior the spec asks for:
+				// "invisible in rendered markdown and decorated in editing
+				// modes as small icons".
+				decorations.push(
+					Decoration.replace({
+						widget: new MarkerIconWidget(m),
+						inclusive: false,
+					}).range(m.marker.start, m.marker.end),
+				);
+			}
 		}
-		return builder.finish();
+		return Decoration.set(decorations, true);
 	});
 }
 
@@ -149,7 +205,7 @@ function clickHandlerExtension(ctx: DecorationContext, field: StateField<Comment
 			if (hideAllFlag.value) return false;
 			const target = event.target as HTMLElement | null;
 			if (!target) return false;
-			const markerEl = target.closest(".annoteca-marker");
+			const markerEl = target.closest(".annoteca-marker, .annoteca-icon");
 			if (!markerEl) return false;
 			if (event.button !== 0) return false;
 			const startAttr = markerEl.getAttribute("data-annoteca-marker-start");
@@ -182,7 +238,3 @@ export function buildAnnotecaExtension(ctx: DecorationContext): Extension {
 export function findMarkersInDoc(content: string): Comment[] {
 	return parseAll(content);
 }
-
-// Sentinel used by the StateField to bypass a no-op transaction. Exported for
-// tests; ignored at runtime.
-export const __markerCacheSentinel: MarkerCacheEntry = { docVersion: -1, comments: [] };

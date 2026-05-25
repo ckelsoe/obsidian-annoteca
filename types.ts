@@ -55,6 +55,8 @@ export interface AnnotecaSettings {
 	enableAuthorTag: boolean;
 	authorTag: string;
 
+	composerLocation: "modal" | "panel";
+
 	debugMode: boolean;
 	debugLogTarget: "console" | "vault";
 

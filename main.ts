@@ -28,7 +28,10 @@ import {
 	OutlineDensityView,
 	INDEX_VIEW_TYPE,
 	IndexEntryView,
+	COMPOSER_PANEL_VIEW_TYPE,
+	ComposerPanelView,
 } from "./views";
+import type { ComposerRequest } from "./composer";
 import {
 	detectMarkerConflicts,
 	detectOrphans,
@@ -69,6 +72,7 @@ export default class AnnotecaPlugin extends Plugin {
 		this.registerView(REVIEWER_PANE_VIEW_TYPE, leaf => new ReviewerPaneView(leaf, this));
 		this.registerView(OUTLINE_DENSITY_VIEW_TYPE, leaf => new OutlineDensityView(leaf, this));
 		this.registerView(INDEX_VIEW_TYPE, leaf => new IndexEntryView(leaf, this));
+		this.registerView(COMPOSER_PANEL_VIEW_TYPE, leaf => new ComposerPanelView(leaf, this));
 
 		this.addSettingTab(new AnnotecaSettingTab(this.app, this));
 
@@ -385,27 +389,63 @@ export default class AnnotecaPlugin extends Plugin {
 		}
 	}
 
-	// Modal openers -------------------------------------------------------
+	// Composer openers (modal or side panel based on setting) -----------
 
 	private openModalAtCursor(editor: Editor): void {
-		new AddCommentModal(this.app, this, { editor }).open();
+		const path = this.app.workspace.getActiveFile()?.path;
+		if (!path) return;
+		this.openComposer({ editor, filePath: path });
 	}
 
 	private openModalForSelection(editor: Editor): void {
-		new AddCommentModal(this.app, this, { editor }).open();
+		const path = this.app.workspace.getActiveFile()?.path;
+		if (!path) return;
+		this.openComposer({ editor, filePath: path });
 	}
 
 	private openScratchpadModal(editor: Editor): void {
-		new AddCommentModal(this.app, this, { editor, scratchpad: true }).open();
+		const path = this.app.workspace.getActiveFile()?.path;
+		if (!path) return;
+		this.openComposer({ editor, filePath: path, scratchpad: true });
 	}
 
 	private openEditModal(editor: Editor, path: string, comment: Comment): void {
 		const from = editor.offsetToPos(comment.marker.start);
 		const to = editor.offsetToPos(comment.marker.end);
-		new AddCommentModal(this.app, this, {
+		this.openComposer({
 			editor,
+			filePath: path,
 			editing: { comment, from, to },
-		}).open();
+		});
+	}
+
+	private openComposer(request: ComposerRequest): void {
+		if (this.settings.composerLocation === "panel") {
+			void this.openComposerPanel(request);
+		} else {
+			new AddCommentModal(this.app, this, request).open();
+		}
+	}
+
+	private async openComposerPanel(request: ComposerRequest): Promise<void> {
+		await this.activateView(COMPOSER_PANEL_VIEW_TYPE, "right");
+		const leaves = this.app.workspace.getLeavesOfType(COMPOSER_PANEL_VIEW_TYPE);
+		const view = leaves[0]?.view;
+		if (view instanceof ComposerPanelView) view.setRequest(request);
+	}
+
+	async notifyComposerSubmitted(path: string, markerStart: number): Promise<void> {
+		// Snapshot the current editor text and rebuild the index so the new
+		// (or edited) marker is queryable before the vault.modify event lands.
+		const file = this.app.vault.getAbstractFileByPath(path);
+		if (file instanceof TFile) {
+			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+			const content = view?.editor.getValue() ?? await this.app.vault.cachedRead(file);
+			this.commentIndex.rebuild(path, content);
+		}
+		this.events.emit("index-changed", { path });
+		this.events.emit("active-comment-changed", { path, start: markerStart });
+		await this.activateView(REVIEWER_PANE_VIEW_TYPE, "right");
 	}
 
 	// Comment lifecycle operations ---------------------------------------
