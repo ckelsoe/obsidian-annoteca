@@ -15,6 +15,8 @@ import { serialize, todayISO } from "./parser";
 export const PER_FILE_VIEW_TYPE = "annoteca-per-file-view";
 export const VAULT_UNRESOLVED_VIEW_TYPE = "annoteca-vault-unresolved-view";
 export const REVIEWER_PANE_VIEW_TYPE = "annoteca-reviewer-pane-view";
+export const OUTLINE_DENSITY_VIEW_TYPE = "annoteca-outline-density-view";
+export const INDEX_VIEW_TYPE = "annoteca-index-view";
 
 // Per-file sidebar (F-046, F-047) ------------------------------------------------
 
@@ -96,6 +98,10 @@ export class PerFileSidebarView extends ItemView {
 	): void {
 		const section = container.createDiv({ cls: "annoteca-group" });
 		const header = section.createDiv({ cls: "annoteca-group-header" });
+		if (def.icon) {
+			const iconEl = header.createSpan({ cls: "annoteca-group-icon" });
+			setIcon(iconEl, def.icon);
+		}
 		header.createSpan({
 			cls: `annoteca-group-label annoteca-cat-${def.id}`,
 			text: def.displayName,
@@ -340,10 +346,14 @@ export class ReviewerPaneView extends ItemView {
 		const def = getCategoryOrFallback(c.category, enabled);
 
 		const header = container.createDiv({ cls: "annoteca-reviewer-header" });
-		header.createSpan({
+		const catBadge = header.createSpan({
 			cls: `annoteca-reviewer-category annoteca-cat-${def.id}`,
-			text: def.displayName,
 		});
+		if (def.icon) {
+			const iconEl = catBadge.createSpan({ cls: "annoteca-reviewer-category-icon" });
+			setIcon(iconEl, def.icon);
+		}
+		catBadge.createSpan({ text: def.displayName });
 		if (c.date) header.createSpan({ cls: "annoteca-reviewer-meta", text: c.date });
 		if (c.author) header.createSpan({ cls: "annoteca-reviewer-meta", text: c.author });
 		if (c.id) header.createSpan({ cls: "annoteca-reviewer-meta", text: `id:${c.id}` });
@@ -444,10 +454,195 @@ export class ReviewerPaneView extends ItemView {
 	}
 }
 
+// Outline-density view (F-048) -----------------------------------------------
+
+export class OutlineDensityView extends ItemView {
+	private readonly plugin: AnnotecaPlugin;
+
+	constructor(leaf: WorkspaceLeaf, plugin: AnnotecaPlugin) {
+		super(leaf);
+		this.plugin = plugin;
+	}
+
+	getViewType(): string { return OUTLINE_DENSITY_VIEW_TYPE; }
+	getDisplayText(): string { return "Comment density"; }
+	getIcon(): string { return "bar-chart-2"; }
+
+	async onOpen(): Promise<void> {
+		this.refresh();
+		this.registerEvent(this.plugin.events.on("index-changed", () => this.refresh()));
+		this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.refresh()));
+	}
+
+	async onClose(): Promise<void> {
+		this.contentEl.empty();
+	}
+
+	private refresh(): void {
+		const container = this.contentEl;
+		container.empty();
+		container.addClass("annoteca-view-root");
+
+		const file = this.app.workspace.getActiveFile();
+		if (!file) {
+			container.createEl("p", { text: "No file open.", cls: "annoteca-empty" });
+			return;
+		}
+
+		container.createEl("h4", { text: file.basename });
+
+		const cache = this.app.metadataCache.getFileCache(file);
+		const headings = cache?.headings ?? [];
+		const idx = this.plugin.commentIndex.get(file.path);
+		const comments = idx?.comments ?? [];
+
+		if (headings.length === 0) {
+			container.createEl("p", {
+				text: `No headings. ${comments.length} comment(s) total.`,
+				cls: "annoteca-empty",
+			});
+			return;
+		}
+
+		const buckets = bucketCommentsByHeading(headings, comments);
+
+		for (let i = 0; i < headings.length; i++) {
+			const h = headings[i];
+			if (!h) continue;
+			const open = buckets[i]?.open ?? 0;
+			const resolved = buckets[i]?.resolved ?? 0;
+			const row = container.createDiv({
+				cls: "annoteca-density-row",
+				attr: { "data-level": String(h.level) },
+			});
+			row.createSpan({ cls: "annoteca-density-heading", text: h.heading });
+			const counts = row.createSpan({ cls: "annoteca-density-counts" });
+			if (open > 0) {
+				counts.createSpan({ cls: "annoteca-density-open", text: `${open} open` });
+			}
+			if (resolved > 0) {
+				counts.createSpan({ cls: "annoteca-density-resolved", text: `${resolved} resolved` });
+			}
+			row.addEventListener("click", () => {
+				void this.plugin.navigateToOffset(file.path, h.position.start.offset);
+			});
+		}
+	}
+}
+
 // Helper used by the plugin to ensure the reviewer pane shows a specific
 // comment. Centralized so commands and clicks share one path.
 export function openReviewerOnComment(plugin: AnnotecaPlugin, path: string, comment: Comment): void {
 	plugin.events.emit("active-comment-changed", { path, start: comment.marker.start });
+}
+
+// Index entry view (F-260) -----------------------------------------------------
+
+export class IndexEntryView extends ItemView {
+	private readonly plugin: AnnotecaPlugin;
+
+	constructor(leaf: WorkspaceLeaf, plugin: AnnotecaPlugin) {
+		super(leaf);
+		this.plugin = plugin;
+	}
+
+	getViewType(): string { return INDEX_VIEW_TYPE; }
+	getDisplayText(): string { return "Index entries"; }
+	getIcon(): string { return "list"; }
+
+	async onOpen(): Promise<void> {
+		await this.plugin.scanVaultIfNeeded();
+		this.refresh();
+		this.registerEvent(this.plugin.events.on("index-changed", () => this.refresh()));
+	}
+
+	async onClose(): Promise<void> {
+		this.contentEl.empty();
+	}
+
+	private refresh(): void {
+		const container = this.contentEl;
+		container.empty();
+		container.addClass("annoteca-view-root");
+		container.createEl("h4", { text: "Index entries" });
+
+		const entries = this.plugin.commentIndex.queryUnresolved({
+			resolved: "all",
+			categories: new Set(["index-entry"]),
+		});
+		if (entries.length === 0) {
+			container.createEl("p", {
+				text: "No index entries in this vault yet. Tag concepts with the index-entry category to populate this view.",
+				cls: "annoteca-empty",
+			});
+			return;
+		}
+
+		const byTerm = new Map<string, typeof entries>();
+		for (const e of entries) {
+			const term = extractIndexTerm(e.comment.body);
+			const bucket = byTerm.get(term) ?? [];
+			bucket.push(e);
+			byTerm.set(term, bucket);
+		}
+
+		const sortedTerms = Array.from(byTerm.keys()).sort();
+		for (const term of sortedTerms) {
+			const bucket = byTerm.get(term);
+			if (!bucket) continue;
+			const section = container.createDiv({ cls: "annoteca-index-section" });
+			section.createEl("h5", { text: term });
+			for (const located of bucket) {
+				const row = section.createDiv({ cls: "annoteca-vault-row" });
+				row.createSpan({ cls: "annoteca-row-path", text: located.path });
+				row.createSpan({
+					cls: "annoteca-row-body",
+					text: located.comment.body,
+				});
+				row.addEventListener("click", () => {
+					void this.plugin.navigateToComment(located.path, located.comment.marker.start, located.comment);
+				});
+			}
+		}
+	}
+}
+
+export function extractIndexTerm(body: string): string {
+	// The modal template emits `<term> > <subterm> — <body>` or `<term> — <body>`.
+	// Strip the post-em-dash body if present; return the term/subterm chain.
+	const dashIdx = body.indexOf(" — ");
+	const head = dashIdx === -1 ? body : body.slice(0, dashIdx);
+	return head.trim() || "(unspecified)";
+}
+
+interface HeadingBucket { open: number; resolved: number; }
+
+interface HeadingShape {
+	heading: string;
+	level: number;
+	position: { start: { offset: number } };
+}
+
+export function bucketCommentsByHeading(
+	headings: HeadingShape[],
+	comments: Comment[],
+): HeadingBucket[] {
+	const buckets: HeadingBucket[] = headings.map(() => ({ open: 0, resolved: 0 }));
+	for (const c of comments) {
+		let bucketIdx = -1;
+		for (let i = 0; i < headings.length; i++) {
+			const h = headings[i];
+			if (!h) continue;
+			if (h.position.start.offset > c.marker.start) break;
+			bucketIdx = i;
+		}
+		if (bucketIdx === -1) continue;
+		const bucket = buckets[bucketIdx];
+		if (!bucket) continue;
+		if (c.resolution) bucket.resolved += 1;
+		else bucket.open += 1;
+	}
+	return buckets;
 }
 
 export function serializeReplyAppended(c: Comment, reply: { author: string; date: string; body: string }): string {

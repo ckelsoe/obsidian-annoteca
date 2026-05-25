@@ -11,6 +11,7 @@ import type AnnotecaPlugin from "./main";
 import type { CategoryDefinition, Comment } from "./types";
 import { generateId, serialize, todayISO } from "./parser";
 import { resolveSettingsCategories } from "./settings";
+import { getTemplate, type ModalTemplate } from "./templates";
 
 interface ModalOptions {
 	editor: Editor;
@@ -33,6 +34,7 @@ export class AddCommentModal extends Modal {
 	private selectedCategory: string;
 	private body: string;
 	private scratchpad: boolean;
+	private templateValues: Record<string, string> = {};
 
 	constructor(app: App, plugin: AnnotecaPlugin, opts: ModalOptions) {
 		super(app);
@@ -46,6 +48,14 @@ export class AddCommentModal extends Modal {
 	}
 
 	onOpen(): void {
+		this.render();
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+	}
+
+	private render(): void {
 		const { contentEl } = this;
 		contentEl.empty();
 
@@ -61,7 +71,10 @@ export class AddCommentModal extends Modal {
 				.addDropdown(d => {
 					for (const c of enabled) d.addOption(c.id, c.displayName);
 					d.setValue(this.selectedCategory);
-					d.onChange(v => { this.selectedCategory = v; });
+					d.onChange(v => {
+						this.selectedCategory = v;
+						this.render();
+					});
 				});
 
 			if (!this.opts.editing) {
@@ -73,10 +86,13 @@ export class AddCommentModal extends Modal {
 						.onChange(value => {
 							this.scratchpad = value;
 							this.selectedCategory = value ? "uncategorized" : this.plugin.settings.defaultCategory;
-							this.onOpen();
+							this.render();
 						}));
 			}
 		}
+
+		const template = !this.opts.editing ? getTemplate(this.selectedCategory) : undefined;
+		if (template) this.renderTemplateFields(contentEl, template);
 
 		new Setting(contentEl)
 			.setName("Body")
@@ -99,8 +115,25 @@ export class AddCommentModal extends Modal {
 				.onClick(() => this.close()));
 	}
 
-	onClose(): void {
-		this.contentEl.empty();
+	private renderTemplateFields(container: HTMLElement, template: ModalTemplate): void {
+		const fieldsContainer = container.createDiv({ cls: "annoteca-template-fields" });
+		fieldsContainer.createEl("h4", { text: "Details" });
+		for (const field of template.fields) {
+			const setting = new Setting(fieldsContainer).setName(field.label);
+			if (field.type === "textarea") {
+				setting.addTextArea(t => {
+					t.setPlaceholder(field.placeholder ?? "")
+						.setValue(this.templateValues[field.id] ?? "")
+						.onChange(v => { this.templateValues[field.id] = v; });
+					t.inputEl.rows = 3;
+				});
+			} else {
+				setting.addText(t => t
+					.setPlaceholder(field.placeholder ?? "")
+					.setValue(this.templateValues[field.id] ?? "")
+					.onChange(v => { this.templateValues[field.id] = v; }));
+			}
+		}
 	}
 
 	private buildCommentForCreate(category: string, body: string): Comment {
@@ -131,9 +164,19 @@ export class AddCommentModal extends Modal {
 		return id;
 	}
 
-	private async submit(): Promise<void> {
+	private composeFinalBody(): string {
 		const trimmed = this.body.trim();
-		if (trimmed === "") {
+		const template = !this.opts.editing ? getTemplate(this.selectedCategory) : undefined;
+		if (template) {
+			const composed = template.compose(this.templateValues, trimmed);
+			return composed.trim();
+		}
+		return trimmed;
+	}
+
+	private async submit(): Promise<void> {
+		const finalBody = this.composeFinalBody();
+		if (finalBody === "") {
 			new Notice("Comment body is empty.");
 			return;
 		}
@@ -152,7 +195,7 @@ export class AddCommentModal extends Modal {
 			const updated: Comment = {
 				...existing,
 				category,
-				body: trimmed,
+				body: finalBody,
 			};
 			const serialized = serialize({
 				id: updated.id,
@@ -168,7 +211,7 @@ export class AddCommentModal extends Modal {
 			return;
 		}
 
-		const comment = this.buildCommentForCreate(category, trimmed);
+		const comment = this.buildCommentForCreate(category, finalBody);
 		const text = serialize({
 			id: comment.id,
 			category: comment.category,
@@ -179,11 +222,9 @@ export class AddCommentModal extends Modal {
 
 		const selection = editor.getSelection();
 		if (selection.length > 0) {
-			// Range comment: insert AFTER the selection (with a single space).
 			const to = editor.getCursor("to");
 			editor.replaceRange(` ${text}`, to);
 		} else {
-			// Point comment: insert at the cursor.
 			const cursor = editor.getCursor();
 			editor.replaceRange(`${text}`, cursor);
 		}

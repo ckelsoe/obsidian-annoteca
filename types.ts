@@ -45,6 +45,7 @@ export interface AnnotecaSettings {
 	categories: CategoryDefinition[];
 	defaultCategory: string;
 	enableScholarlyPreset: boolean;
+	enableIndexEntryPreset: boolean;
 
 	indicatorStyle: "gutter" | "inline" | "both" | "none";
 	defaultVisibility: "show" | "hide" | "last";
@@ -58,4 +59,8 @@ export interface AnnotecaSettings {
 	debugLogTarget: "console" | "vault";
 
 	settingsBackupPath: string | undefined;
+
+	// Position drift snapshots keyed by comment id (F-234). Captured on demand
+	// by the detection command; not user-editable.
+	driftSnapshots?: Record<string, { before: string; after: string }>;
 }

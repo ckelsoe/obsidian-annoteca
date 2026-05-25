@@ -418,3 +418,56 @@ settings:
 .annoteca-category-list {
 	margin-bottom: 12px;
 }
+
+.annoteca-density-row {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+	padding: 4px 8px;
+	margin-bottom: 2px;
+	border-radius: 4px;
+	cursor: pointer;
+}
+
+.annoteca-density-row:hover {
+	background-color: var(--background-modifier-hover);
+}
+
+.annoteca-density-row[data-level="2"] { padding-left: 12px; }
+.annoteca-density-row[data-level="3"] { padding-left: 24px; }
+.annoteca-density-row[data-level="4"] { padding-left: 36px; }
+.annoteca-density-row[data-level="5"] { padding-left: 48px; }
+.annoteca-density-row[data-level="6"] { padding-left: 60px; }
+
+.annoteca-density-heading {
+	flex: 1;
+	color: var(--text-normal);
+}
+
+.annoteca-density-counts {
+	display: flex;
+	gap: 6px;
+	font-size: var(--font-smaller);
+}
+
+.annoteca-density-open {
+	color: var(--text-accent);
+	font-weight: var(--font-semibold);
+}
+
+.annoteca-density-resolved {
+	color: var(--text-muted);
+}
+
+.annoteca-template-fields {
+	margin: 8px 0;
+	padding: 8px;
+	background-color: var(--background-secondary);
+	border-radius: 6px;
+}
+
+.annoteca-group-icon,
+.annoteca-reviewer-category-icon {
+	display: inline-flex;
+	align-items: center;
+}

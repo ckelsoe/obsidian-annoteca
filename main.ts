@@ -24,6 +24,10 @@ import {
 	VaultUnresolvedView,
 	REVIEWER_PANE_VIEW_TYPE,
 	ReviewerPaneView,
+	OUTLINE_DENSITY_VIEW_TYPE,
+	OutlineDensityView,
+	INDEX_VIEW_TYPE,
+	IndexEntryView,
 } from "./views";
 import {
 	detectMarkerConflicts,
@@ -34,6 +38,10 @@ import {
 	type ValidationFinding,
 } from "./diagnostics";
 import { serialize, todayISO } from "./parser";
+import { convertAllComments, type ImportFormat } from "./imports";
+import { ConfirmBackupModal } from "./confirm-modal";
+import { detectDrift, type DriftFinding, type PositionSnapshot } from "./drift";
+import { formatScripture } from "./scripture";
 
 class AnnotecaEvents extends Events {
 	emit(name: string, ...data: unknown[]): void {
@@ -59,6 +67,8 @@ export default class AnnotecaPlugin extends Plugin {
 		this.registerView(PER_FILE_VIEW_TYPE, leaf => new PerFileSidebarView(leaf, this));
 		this.registerView(VAULT_UNRESOLVED_VIEW_TYPE, leaf => new VaultUnresolvedView(leaf, this));
 		this.registerView(REVIEWER_PANE_VIEW_TYPE, leaf => new ReviewerPaneView(leaf, this));
+		this.registerView(OUTLINE_DENSITY_VIEW_TYPE, leaf => new OutlineDensityView(leaf, this));
+		this.registerView(INDEX_VIEW_TYPE, leaf => new IndexEntryView(leaf, this));
 
 		this.addSettingTab(new AnnotecaSettingTab(this.app, this));
 
@@ -267,6 +277,16 @@ export default class AnnotecaPlugin extends Plugin {
 			callback: () => { void this.activateView(REVIEWER_PANE_VIEW_TYPE, "right"); },
 		});
 		this.addCommand({
+			id: "open-outline-density-view",
+			name: "Open comment density outline",
+			callback: () => { void this.activateView(OUTLINE_DENSITY_VIEW_TYPE, "right"); },
+		});
+		this.addCommand({
+			id: "open-index-view",
+			name: "Open index entries view",
+			callback: () => { void this.activateView(INDEX_VIEW_TYPE, "tab"); },
+		});
+		this.addCommand({
 			id: "toggle-reviewer-pin",
 			name: "Pin or unpin the reviewer pane",
 			callback: () => this.toggleReviewerPin(),
@@ -285,6 +305,57 @@ export default class AnnotecaPlugin extends Plugin {
 			id: "validate-marker-format",
 			name: "Validate marker format",
 			callback: () => { void this.runMarkerValidation(); },
+		});
+		this.addCommand({
+			id: "format-scripture-references",
+			name: "Format scripture references in current file",
+			editorCallback: (editor: Editor, view: MarkdownView) => {
+				const file = view.file;
+				if (!file) return;
+				const text = editor.getValue();
+				const r = formatScripture(text);
+				if (r.changes === 0) {
+					new Notice("No scripture references to format.");
+					return;
+				}
+				editor.setValue(r.updated);
+				new Notice(`Formatted ${r.changes} reference(s).`);
+			},
+		});
+		this.addCommand({
+			id: "backup-settings",
+			name: "Back up settings",
+			callback: () => { void this.backupSettings(); },
+		});
+		this.addCommand({
+			id: "restore-settings",
+			name: "Restore settings from backup",
+			callback: () => { void this.restoreSettings(); },
+		});
+		this.addCommand({
+			id: "self-diagnostic",
+			name: "Run self-diagnostic",
+			callback: () => { void this.runSelfDiagnostic(); },
+		});
+		this.addCommand({
+			id: "detect-position-drift",
+			name: "Detect position drift",
+			callback: () => { void this.runDriftCheck(); },
+		});
+		this.addCommand({
+			id: "import-native-comments",
+			name: "Import native Obsidian comments",
+			callback: () => this.confirmAndConvert("native"),
+		});
+		this.addCommand({
+			id: "import-html-comments",
+			name: "Import generic HTML comments",
+			callback: () => this.confirmAndConvert("html"),
+		});
+		this.addCommand({
+			id: "import-all-comments",
+			name: "Convert every comment to the canonical format",
+			callback: () => this.confirmAndConvert("all"),
 		});
 	}
 
@@ -432,6 +503,11 @@ export default class AnnotecaPlugin extends Plugin {
 	// Navigation ---------------------------------------------------------
 
 	async navigateToComment(path: string, start: number, comment?: Comment): Promise<void> {
+		await this.navigateToOffset(path, start);
+		if (comment) this.openReviewerOnComment(comment, path);
+	}
+
+	async navigateToOffset(path: string, offset: number): Promise<void> {
 		const file = this.app.vault.getAbstractFileByPath(path);
 		if (!(file instanceof TFile)) {
 			new Notice("File not found.");
@@ -441,11 +517,10 @@ export default class AnnotecaPlugin extends Plugin {
 		await leaf.openFile(file);
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (view) {
-			const pos = view.editor.offsetToPos(start);
+			const pos = view.editor.offsetToPos(offset);
 			view.editor.setCursor(pos);
 			view.editor.scrollIntoView({ from: pos, to: pos }, true);
 		}
-		if (comment) this.openReviewerOnComment(comment, path);
 	}
 
 	private jumpToAdjacentComment(
@@ -562,6 +637,86 @@ export default class AnnotecaPlugin extends Plugin {
 		new Notice(`Found ${findings.length} orphan(s). See the diagnostics note in the vault.`);
 	}
 
+	private async backupSettings(): Promise<void> {
+		const filename = this.settings.settingsBackupPath ?? `Annoteca settings backup.json`;
+		const exportable = { ...this.settings };
+		delete exportable.driftSnapshots;
+		const body = JSON.stringify(exportable, null, 2);
+		const existing = this.app.vault.getAbstractFileByPath(filename);
+		if (existing instanceof TFile) {
+			await this.app.vault.modify(existing, body);
+		} else {
+			await this.app.vault.create(filename, body);
+		}
+		new Notice(`Backed up to ${filename}.`);
+	}
+
+	private async restoreSettings(): Promise<void> {
+		const filename = this.settings.settingsBackupPath ?? `Annoteca settings backup.json`;
+		const file = this.app.vault.getAbstractFileByPath(filename);
+		if (!(file instanceof TFile)) {
+			new Notice(`Backup file not found: ${filename}.`);
+			return;
+		}
+		const body = await this.app.vault.read(file);
+		try {
+			const parsed = JSON.parse(body) as Partial<AnnotecaSettings>;
+			this.settings = { ...DEFAULT_SETTINGS, ...this.settings, ...parsed };
+			await this.saveSettings();
+			new Notice("Settings restored.");
+		} catch {
+			new Notice("Backup file is not valid JSON.");
+		}
+	}
+
+	private async runSelfDiagnostic(): Promise<void> {
+		await this.scanVaultIfNeeded();
+		const stats = this.commentIndex.stats();
+		const enabled = this.settings.categories.length;
+		const summary = {
+			fileCount: stats.fileCount,
+			commentCount: stats.commentCount,
+			unresolvedCount: stats.unresolvedCount,
+			enabledCategories: enabled,
+			scholarlyPreset: this.settings.enableScholarlyPreset,
+			indicatorStyle: this.settings.indicatorStyle,
+			authorTagEnabled: this.settings.enableAuthorTag,
+			debugMode: this.settings.debugMode,
+		};
+		await this.writeDiagnosticsReport("Self-diagnostic", [summary]);
+		new Notice(`Plugin healthy. ${stats.commentCount} comment(s) indexed across ${stats.fileCount} file(s).`);
+	}
+
+	private async runDriftCheck(): Promise<void> {
+		await this.scanVaultIfNeeded();
+		const prior: Record<string, PositionSnapshot> = this.settings.driftSnapshots ?? {};
+		const allFindings: DriftFinding[] = [];
+		let refreshed: Record<string, PositionSnapshot> = { ...prior };
+		const files = this.app.vault.getMarkdownFiles();
+		const liveIds = new Set<string>();
+		for (const f of files) {
+			const content = await this.app.vault.cachedRead(f);
+			const idx = this.commentIndex.get(f.path);
+			const comments = idx?.comments ?? [];
+			for (const c of comments) if (c.id) liveIds.add(c.id);
+			const r = detectDrift(content, f.path, comments, refreshed);
+			refreshed = r.refreshedSnapshots;
+			allFindings.push(...r.findings);
+		}
+		for (const id of Object.keys(refreshed)) {
+			if (!liveIds.has(id)) delete refreshed[id];
+		}
+		this.settings.driftSnapshots = refreshed;
+		await this.saveSettings();
+
+		if (allFindings.length === 0) {
+			new Notice("No position drift detected. Snapshots refreshed.");
+			return;
+		}
+		await this.writeDiagnosticsReport("Position drift", allFindings);
+		new Notice(`Found ${allFindings.length} drift finding(s). See the diagnostics note in the vault.`);
+	}
+
 	private async runMarkerValidation(): Promise<void> {
 		const findings: ValidationFinding[] = [];
 		const files = this.app.vault.getMarkdownFiles();
@@ -575,6 +730,34 @@ export default class AnnotecaPlugin extends Plugin {
 		}
 		await this.writeDiagnosticsReport("Malformed markers", findings);
 		new Notice(`Found ${findings.length} malformed marker(s). See the diagnostics note in the vault.`);
+	}
+
+	private confirmAndConvert(format: ImportFormat): void {
+		const description = format === "native"
+			? "Convert every %%comment%% in the vault into an Annoteca marker with the 'uncategorized' category."
+			: format === "html"
+				? "Convert every plain HTML comment in the vault (anything not already in Annoteca format) into an Annoteca marker with the 'uncategorized' category."
+				: "Convert every native and plain HTML comment in the vault into Annoteca markers with the 'uncategorized' category.";
+		new ConfirmBackupModal(this.app, "Convert comments", description, () => {
+			void this.runBulkConvert(format);
+		}).open();
+	}
+
+	private async runBulkConvert(format: ImportFormat): Promise<void> {
+		const files = this.app.vault.getMarkdownFiles();
+		let totalConverted = 0;
+		let filesTouched = 0;
+		for (const f of files) {
+			const content = await this.app.vault.read(f);
+			const result = convertAllComments(content, format, "uncategorized");
+			if (result.converted === 0) continue;
+			await this.app.vault.modify(f, result.updated);
+			this.commentIndex.rebuild(f.path, result.updated);
+			totalConverted += result.converted;
+			filesTouched += 1;
+		}
+		this.events.emit("index-changed");
+		new Notice(`Converted ${totalConverted} comment(s) across ${filesTouched} file(s).`);
 	}
 
 	private async writeDiagnosticsReport(label: string, findings: unknown[]): Promise<void> {

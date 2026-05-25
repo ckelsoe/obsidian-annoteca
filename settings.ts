@@ -19,6 +19,7 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 	categories: DEFAULT_CATEGORIES.map(c => ({ ...c })),
 	defaultCategory: "clarify",
 	enableScholarlyPreset: false,
+	enableIndexEntryPreset: false,
 
 	indicatorStyle: "both",
 	defaultVisibility: "show",
@@ -37,7 +38,16 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 // Resolve the active category list given current settings. Centralized so the
 // modal, decorations, and views consume one source of truth.
 export function resolveSettingsCategories(s: AnnotecaSettings): CategoryDefinition[] {
-	return resolveEnabledCategories(s.categories, s.enableScholarlyPreset);
+	const base = resolveEnabledCategories(s.categories, s.enableScholarlyPreset);
+	if (s.enableIndexEntryPreset && !base.find(c => c.id === "index-entry")) {
+		base.push({
+			id: "index-entry",
+			displayName: "Index entry",
+			icon: "list",
+			color: "var(--text-accent)",
+		});
+	}
+	return base;
 }
 
 export class AnnotecaSettingTab extends PluginSettingTab {
@@ -70,6 +80,17 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.enableScholarlyPreset)
 				.onChange(async value => {
 					this.plugin.settings.enableScholarlyPreset = value;
+					await this.plugin.saveSettings();
+					this.display();
+				}));
+
+		new Setting(container)
+			.setName("Index-entry preset")
+			.setDesc("Add an index-entry category for tagging concepts that should appear in a printed index. Pairs with the pandoc filter shipped under docs in the plugin repository.")
+			.addToggle(t => t
+				.setValue(this.plugin.settings.enableIndexEntryPreset)
+				.onChange(async value => {
+					this.plugin.settings.enableIndexEntryPreset = value;
 					await this.plugin.saveSettings();
 					this.display();
 				}));
@@ -131,6 +152,14 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			const row = new Setting(list)
 				.setName(cat.displayName)
 				.setDesc(`Identifier: ${cat.id}`);
+
+			row.addText(t => t
+				.setPlaceholder("Icon name")
+				.setValue(cat.icon ?? "")
+				.onChange(async value => {
+					cat.icon = value.trim() === "" ? undefined : value.trim();
+					await this.plugin.saveSettings();
+				}));
 
 			row.addText(t => t
 				.setPlaceholder("CSS color or variable")
