@@ -280,7 +280,7 @@ export class ReviewerPaneView extends ItemView {
 	getIcon(): string { return "message-square"; }
 
 	async onOpen(): Promise<void> {
-		this.renderEmpty();
+		this.refresh();
 		this.registerEvent(this.plugin.events.on("active-comment-changed", (payload) => {
 			const event = payload as { path: string; start: number };
 			if (this.pinned && this.activeStart !== undefined && event.start !== this.activeStart) {
@@ -292,6 +292,16 @@ export class ReviewerPaneView extends ItemView {
 			this.refresh();
 		}));
 		this.registerEvent(this.plugin.events.on("index-changed", () => this.refresh()));
+		this.registerEvent(this.app.workspace.on("active-leaf-change", () => {
+			if (!this.pinned) {
+				const file = this.app.workspace.getActiveFile();
+				if (file) {
+					this.activePath = file.path;
+					this.activeStart = undefined;
+					this.refresh();
+				}
+			}
+		}));
 	}
 
 	async onClose(): Promise<void> {
@@ -304,14 +314,8 @@ export class ReviewerPaneView extends ItemView {
 		return this.pinned;
 	}
 
-	private renderEmpty(): void {
-		const container = this.contentEl;
-		container.empty();
-		container.addClass("annoteca-view-root");
-		container.createEl("p", {
-			text: "Click a comment indicator to open it here.",
-			cls: "annoteca-empty",
-		});
+	private renderEmpty(container: HTMLElement, message: string): void {
+		container.createEl("p", { text: message, cls: "annoteca-empty" });
 	}
 
 	private refresh(): void {
@@ -319,35 +323,54 @@ export class ReviewerPaneView extends ItemView {
 		container.empty();
 		container.addClass("annoteca-view-root");
 
-		if (this.activePath === undefined || this.activeStart === undefined) {
-			this.renderEmpty();
+		const path = this.activePath ?? this.app.workspace.getActiveFile()?.path;
+		if (!path) {
+			this.renderEmpty(container, "No file open.");
 			return;
 		}
 
-		const idx = this.plugin.commentIndex.get(this.activePath);
-		if (!idx) {
-			this.renderEmpty();
-			return;
-		}
-		const comment = idx.comments.find(c => c.marker.start === this.activeStart);
-		if (!comment) {
-			this.renderEmpty();
+		const idx = this.plugin.commentIndex.get(path);
+		const comments = idx?.comments ?? [];
+
+		// Pane header with file name + pin
+		const paneHeader = container.createDiv({ cls: "annoteca-pane-header" });
+		paneHeader.createSpan({ cls: "annoteca-pane-title", text: "Comments" });
+		paneHeader.createSpan({ cls: "annoteca-pane-count", text: `${comments.length}` });
+		const pinBtn = paneHeader.createEl("button", { cls: "annoteca-reviewer-pin" });
+		setIcon(pinBtn, this.pinned ? "pin" : "pin-off");
+		pinBtn.setAttribute("aria-label", this.pinned ? "Unpin" : "Pin");
+		pinBtn.addEventListener("click", () => this.togglePinned());
+
+		if (comments.length === 0) {
+			this.renderEmpty(container, "No comments in this file. Use the add-comment command to start one.");
 			return;
 		}
 
-		this.renderHeader(container, comment);
-		this.renderBody(container, comment);
-		this.renderThread(container, comment);
-		this.renderReplyInput(container, comment);
-		this.renderActions(container, comment);
+		// Pick an active comment if none is set yet, defaulting to the first.
+		const activeComment = comments.find(c => c.marker.start === this.activeStart) ?? comments[0];
+		if (!activeComment) {
+			this.renderEmpty(container, "No comments in this file.");
+			return;
+		}
+		if (this.activeStart === undefined) this.activeStart = activeComment.marker.start;
+
+		// Render every comment as a card. Active one is expanded; others are
+		// collapsed and clickable to become the active one.
+		const list = container.createDiv({ cls: "annoteca-reviewer-list" });
+		for (const c of comments) {
+			const isActive = c.marker.start === this.activeStart;
+			const card = list.createDiv({ cls: `annoteca-reviewer-card${isActive ? " is-active" : ""}` });
+			this.renderCommentCard(card, c, path, isActive);
+		}
 	}
 
-	private renderHeader(container: HTMLElement, c: Comment): void {
+	private renderCommentCard(card: HTMLElement, c: Comment, path: string, expanded: boolean): void {
 		const enabled = resolveSettingsCategories(this.plugin.settings);
 		const def = getCategoryOrFallback(c.category, enabled);
 
-		const header = container.createDiv({ cls: "annoteca-reviewer-header" });
-		const catBadge = header.createSpan({
+		// Compact header is always visible.
+		const compact = card.createDiv({ cls: "annoteca-reviewer-compact" });
+		const catBadge = compact.createSpan({
 			cls: `annoteca-reviewer-category annoteca-cat-${def.id}`,
 		});
 		if (def.icon) {
@@ -355,43 +378,53 @@ export class ReviewerPaneView extends ItemView {
 			setIcon(iconEl, def.icon);
 		}
 		catBadge.createSpan({ text: def.displayName });
-		if (c.date) header.createSpan({ cls: "annoteca-reviewer-meta", text: c.date });
-		if (c.author) header.createSpan({ cls: "annoteca-reviewer-meta", text: c.author });
-		if (c.id) header.createSpan({ cls: "annoteca-reviewer-meta", text: `id:${c.id}` });
+		if (c.resolution) compact.createSpan({ cls: "annoteca-reviewer-state", text: "resolved" });
+		if (c.date) compact.createSpan({ cls: "annoteca-reviewer-meta", text: c.date });
+		if (c.author) compact.createSpan({ cls: "annoteca-reviewer-meta", text: c.author });
 
-		const pinBtn = header.createEl("button", { cls: "annoteca-reviewer-pin" });
-		setIcon(pinBtn, this.pinned ? "pin" : "pin-off");
-		pinBtn.addEventListener("click", () => this.togglePinned());
+		const excerpt = c.body.length > 100 ? c.body.slice(0, 100) + "…" : c.body;
+		compact.createDiv({ cls: "annoteca-reviewer-excerpt", text: excerpt });
+		if (c.replies.length > 0) {
+			compact.createSpan({
+				cls: "annoteca-reviewer-replies-badge",
+				text: `${c.replies.length} repl${c.replies.length === 1 ? "y" : "ies"}`,
+			});
+		}
 
-		header.createDiv({
-			cls: "annoteca-reviewer-path",
-			text: this.activePath ?? "",
-		});
-	}
+		if (!expanded) {
+			compact.addEventListener("click", () => {
+				this.activeStart = c.marker.start;
+				this.refresh();
+			});
+			return;
+		}
 
-	private renderBody(container: HTMLElement, c: Comment): void {
-		const body = container.createDiv({ cls: "annoteca-reviewer-body" });
-		body.setText(c.body);
+		// Expanded section for the active comment.
+		const expandedSection = card.createDiv({ cls: "annoteca-reviewer-expanded" });
+		expandedSection.createDiv({ cls: "annoteca-reviewer-body", text: c.body });
+
 		if (c.resolution) {
-			const res = container.createDiv({ cls: "annoteca-reviewer-resolution" });
+			const res = expandedSection.createDiv({ cls: "annoteca-reviewer-resolution" });
 			res.createSpan({ text: `Resolved ${c.resolution.date} by ${c.resolution.author}` });
 			if (c.resolution.note) {
 				res.createDiv({ cls: "annoteca-reviewer-resolution-note", text: c.resolution.note });
 			}
 		}
-	}
 
-	private renderThread(container: HTMLElement, c: Comment): void {
-		if (c.replies.length === 0) return;
-		const thread = container.createDiv({ cls: "annoteca-reviewer-thread" });
-		thread.createEl("h5", { text: "Replies" });
-		for (const r of c.replies) {
-			const item = thread.createDiv({ cls: "annoteca-reply" });
-			const meta = item.createDiv({ cls: "annoteca-reply-meta" });
-			meta.createSpan({ text: r.author });
-			meta.createSpan({ text: r.date });
-			item.createDiv({ cls: "annoteca-reply-body", text: r.body });
+		if (c.replies.length > 0) {
+			const thread = expandedSection.createDiv({ cls: "annoteca-reviewer-thread" });
+			thread.createEl("h5", { text: "Replies" });
+			for (const r of c.replies) {
+				const item = thread.createDiv({ cls: "annoteca-reply" });
+				const meta = item.createDiv({ cls: "annoteca-reply-meta" });
+				meta.createSpan({ text: r.author });
+				meta.createSpan({ text: r.date });
+				item.createDiv({ cls: "annoteca-reply-body", text: r.body });
+			}
 		}
+
+		this.renderReplyInput(expandedSection, c);
+		this.renderActions(expandedSection, c, path);
 	}
 
 	private renderReplyInput(container: HTMLElement, c: Comment): void {
@@ -414,10 +447,8 @@ export class ReviewerPaneView extends ItemView {
 		});
 	}
 
-	private renderActions(container: HTMLElement, c: Comment): void {
+	private renderActions(container: HTMLElement, c: Comment, path: string): void {
 		const actions = container.createDiv({ cls: "annoteca-reviewer-actions" });
-		const path = this.activePath;
-		if (!path) return;
 
 		if (c.resolution) {
 			this.createActionButton(actions, "Reopen", "rotate-ccw", () => {
