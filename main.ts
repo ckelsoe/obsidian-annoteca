@@ -80,9 +80,27 @@ export default class AnnotecaPlugin extends Plugin {
 		this.registerFileEvents();
 		this.registerEditorMenu();
 
+		this.addRibbonIcon("message-square", "Annoteca: open comments pane", () => {
+			void this.activateView(REVIEWER_PANE_VIEW_TYPE, "right");
+		});
+
 		this.app.workspace.onLayoutReady(() => {
 			this.refreshActiveFileIndex();
+			this.ensureRightSidebarTab();
 		});
+	}
+
+	private ensureRightSidebarTab(): void {
+		// Place the reviewer pane in the right sidebar on first load so its
+		// tab icon shows up alongside backlinks, tags, and the other native
+		// right-pane tools. If a user has explicitly closed it, this won't
+		// reopen on subsequent loads because the leaf record persists across
+		// sessions and we only add when none exists.
+		const existing = this.app.workspace.getLeavesOfType(REVIEWER_PANE_VIEW_TYPE);
+		if (existing.length > 0) return;
+		const leaf = this.app.workspace.getRightLeaf(false);
+		if (!leaf) return;
+		void leaf.setViewState({ type: REVIEWER_PANE_VIEW_TYPE, active: false });
 	}
 
 	onunload(): void {
