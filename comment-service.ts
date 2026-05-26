@@ -187,15 +187,21 @@ export class CommentService {
 		}
 
 		if (view) {
-			// editor.transaction applies all changes atomically and keeps the
-			// CodeMirror EditorState authoritative — Obsidian writes the
-			// editor's content back to disk, so vault.modify is not needed.
-			const changes = sorted.map(s => ({
-				from: view.editor.offsetToPos(s.from),
-				to: view.editor.offsetToPos(s.to),
-				text: s.insert,
-			}));
-			view.editor.transaction({ changes });
+			// Apply via editor.replaceRange in reverse order so earlier
+			// splices do not shift later offsets. This is the same API the
+			// edit composer uses (composer.ts) and keeps the CodeMirror
+			// EditorState authoritative — Obsidian persists the editor's
+			// content, so vault.modify is not needed (and would race the
+			// editor's autosave).
+			for (let i = sorted.length - 1; i >= 0; i--) {
+				const s = sorted[i];
+				if (!s) continue;
+				view.editor.replaceRange(
+					s.insert,
+					view.editor.offsetToPos(s.from),
+					view.editor.offsetToPos(s.to),
+				);
+			}
 		} else {
 			await this.plugin.app.vault.modify(file, updated);
 		}
