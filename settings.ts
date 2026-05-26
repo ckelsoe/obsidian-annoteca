@@ -68,6 +68,10 @@ export function resolveSettingsCategories(s: AnnotecaSettings): CategoryDefiniti
 
 export class AnnotecaSettingTab extends PluginSettingTab {
 	private readonly plugin: AnnotecaPlugin;
+	// Which category rows are expanded. Lives on the tab instance only so
+	// re-renders (after saves) preserve expansion, but opening Settings fresh
+	// starts collapsed. Not persisted to data.json.
+	private readonly expandedCategoryIds = new Set<string>();
 
 	constructor(app: App, plugin: AnnotecaPlugin) {
 		super(app, plugin);
@@ -272,77 +276,151 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 	private renderCategoryList(container: HTMLElement): void {
 		const list = container.createDiv({ cls: "annoteca-category-list" });
 		for (const cat of this.plugin.settings.categories) {
-			// Heading uses the immutable identifier rather than the display
-			// name. Repeating the display name in the heading made categories
-			// feel like fixed labels (the input below looked like a search
-			// field, not an editable rename). Now the identifier anchors the
-			// row and the display-name input is the only source of truth.
-			const isProtected = cat.id === "uncategorized";
-			const { content } = createStackedRow(list, {
-				name: `Identifier: ${cat.id}`,
-				description: isProtected
-					? "Used as the scratchpad fallback; this category cannot be removed."
-					: "Rename, change the icon and color, or remove this category.",
-				cls: "annoteca-category-row",
-			});
+			this.renderCategoryRow(list, cat);
+		}
+	}
 
-			const controls = content.createDiv({ cls: "annoteca-category-controls" });
+	// Accordion row: collapsed summary (icon + name + color dot + identifier
+	// + chevron) plus a hidden detail panel with the full editor. Expansion
+	// state lives in `expandedCategoryIds` so it survives re-renders.
+	private renderCategoryRow(list: HTMLElement, cat: CategoryDefinition): void {
+		const isProtected = cat.id === "uncategorized";
+		const isExpanded = this.expandedCategoryIds.has(cat.id);
 
-			// Display name editing.
-			const nameWrap = controls.createDiv({ cls: "annoteca-category-control" });
-			nameWrap.createDiv({ cls: "annoteca-category-control-label", text: "Display name" });
-			const nameInput = nameWrap.createEl("input", {
-				cls: "annoteca-category-name",
-				attr: { type: "text", value: cat.displayName },
-			});
-			nameInput.addEventListener("input", () => {
-				const v = nameInput.value.trim();
-				if (v.length === 0) return;
-				cat.displayName = v;
-				void this.plugin.saveSettings();
-			});
+		const row = list.createDiv({
+			cls: `annoteca-category-row${isExpanded ? " is-expanded" : ""}`,
+		});
 
-			// Icon picker.
-			const iconWrap = controls.createDiv({ cls: "annoteca-category-control" });
-			iconWrap.createDiv({ cls: "annoteca-category-control-label", text: "Icon" });
-			createIconPicker(iconWrap, {
-				app: this.app,
-				current: cat.icon,
-				onChange: async next => {
-					cat.icon = next;
-					await this.plugin.saveSettings();
-				},
-			});
+		// --- Summary row ------------------------------------------------
+		const summary = row.createEl("button", {
+			cls: "annoteca-category-summary",
+			attr: {
+				type: "button",
+				"aria-expanded": isExpanded ? "true" : "false",
+			},
+		});
 
-			// Color picker.
-			const colorWrap = controls.createDiv({ cls: "annoteca-category-control" });
-			colorWrap.createDiv({ cls: "annoteca-category-control-label", text: "Color" });
-			createColorPicker(colorWrap, {
-				current: cat.color,
-				onChange: async next => {
-					cat.color = next;
-					await this.plugin.saveSettings();
-				},
-			});
+		const summaryIcon = summary.createSpan({ cls: "annoteca-category-summary-icon" });
+		if (cat.icon) {
+			setIcon(summaryIcon, cat.icon);
+		} else {
+			summaryIcon.addClass("is-empty");
+			summaryIcon.setText("?");
+		}
 
-			// Remove button.
-			const actions = content.createDiv({ cls: "annoteca-category-actions" });
+		summary.createSpan({
+			cls: "annoteca-category-summary-name",
+			text: cat.displayName,
+		});
+
+		const colorDot = summary.createSpan({ cls: "annoteca-category-summary-color" });
+		if (cat.color) {
+			colorDot.style.backgroundColor = cat.color;
+		} else {
+			colorDot.addClass("is-empty");
+		}
+
+		summary.createSpan({
+			cls: "annoteca-category-summary-id",
+			text: cat.id,
+		});
+
+		const chevron = summary.createSpan({ cls: "annoteca-category-summary-chevron" });
+		setIcon(chevron, "chevron-down");
+
+		// --- Detail panel -----------------------------------------------
+		const detail = row.createDiv({ cls: "annoteca-category-detail" });
+
+		summary.addEventListener("click", () => {
+			const nowExpanded = !this.expandedCategoryIds.has(cat.id);
+			if (nowExpanded) {
+				this.expandedCategoryIds.add(cat.id);
+			} else {
+				this.expandedCategoryIds.delete(cat.id);
+			}
+			row.toggleClass("is-expanded", nowExpanded);
+			summary.setAttribute("aria-expanded", nowExpanded ? "true" : "false");
+		});
+
+		const controls = detail.createDiv({ cls: "annoteca-category-controls" });
+
+		// Display name editing.
+		const nameWrap = controls.createDiv({ cls: "annoteca-category-control" });
+		nameWrap.createDiv({ cls: "annoteca-category-control-label", text: "Display name" });
+		const nameInput = nameWrap.createEl("input", {
+			cls: "annoteca-category-name",
+			attr: { type: "text", value: cat.displayName },
+		});
+		nameInput.addEventListener("input", () => {
+			const v = nameInput.value.trim();
+			if (v.length === 0) return;
+			cat.displayName = v;
+			// Keep the summary label in sync without re-rendering the tab.
+			const summaryName = summary.querySelector(".annoteca-category-summary-name");
+			if (summaryName) summaryName.setText(v);
+			void this.plugin.saveSettings();
+		});
+
+		// Icon picker.
+		const iconWrap = controls.createDiv({ cls: "annoteca-category-control" });
+		iconWrap.createDiv({ cls: "annoteca-category-control-label", text: "Icon" });
+		createIconPicker(iconWrap, {
+			app: this.app,
+			current: cat.icon,
+			onChange: async next => {
+				cat.icon = next;
+				await this.plugin.saveSettings();
+				// Reflect the change in the summary icon without a re-render.
+				summaryIcon.empty();
+				summaryIcon.removeClass("is-empty");
+				if (next) {
+					setIcon(summaryIcon, next);
+				} else {
+					summaryIcon.addClass("is-empty");
+					summaryIcon.setText("?");
+				}
+			},
+		});
+
+		// Color picker.
+		const colorWrap = controls.createDiv({ cls: "annoteca-category-control" });
+		colorWrap.createDiv({ cls: "annoteca-category-control-label", text: "Color" });
+		createColorPicker(colorWrap, {
+			current: cat.color,
+			onChange: async next => {
+				cat.color = next;
+				await this.plugin.saveSettings();
+				if (next) {
+					colorDot.style.backgroundColor = next;
+					colorDot.removeClass("is-empty");
+				} else {
+					colorDot.style.removeProperty("background-color");
+					colorDot.addClass("is-empty");
+				}
+			},
+		});
+
+		// Actions: either Remove or the protected note.
+		const actions = detail.createDiv({ cls: "annoteca-category-actions" });
+		if (isProtected) {
+			actions.createDiv({
+				cls: "annoteca-category-protected-note",
+				text: "Used as the scratchpad fallback; this category cannot be removed.",
+			});
+		} else {
 			const removeBtn = actions.createEl("button", {
 				cls: "annoteca-category-remove",
 				text: "Remove category",
 				attr: { type: "button" },
 			});
 			removeBtn.addEventListener("click", () => {
-				if (cat.id === "uncategorized") {
-					new Notice("The uncategorized category cannot be removed (used by the scratchpad).");
-					return;
-				}
 				if (this.plugin.settings.defaultCategory === cat.id) {
 					new Notice("Cannot remove the default category. Pick a different default first.");
 					return;
 				}
 				this.plugin.settings.categories =
 					this.plugin.settings.categories.filter(c => c.id !== cat.id);
+				this.expandedCategoryIds.delete(cat.id);
 				void this.plugin.saveSettings();
 				this.display();
 			});

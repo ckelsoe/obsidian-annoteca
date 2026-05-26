@@ -1088,7 +1088,21 @@ settings:
 .annoteca-color-picker {
 	display: flex;
 	flex-direction: column;
-	gap: 8px;
+	gap: 6px;
+}
+
+.annoteca-color-row {
+	display: flex;
+	gap: 10px;
+	align-items: center;
+}
+
+.annoteca-color-row-caption {
+	min-width: 56px;
+	font-size: var(--font-smaller);
+	color: var(--text-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
 }
 
 .annoteca-color-swatches {
@@ -1098,8 +1112,8 @@ settings:
 }
 
 .annoteca-color-swatch {
-	width: 26px;
-	height: 26px;
+	width: 24px;
+	height: 24px;
 	padding: 0;
 	border-radius: 50%;
 	border: 2px solid var(--background-modifier-border);
@@ -1123,14 +1137,45 @@ settings:
 	align-items: center;
 }
 
+/* The chip is a swatch-sized round affordance that hosts the native color
+ * input. The native input itself is positioned over the chip so the OS color
+ * picker still opens, but the visible shape matches the theme swatches above
+ * (a clear "I am also a picker" hint instead of an invisible black dot). */
+.annoteca-color-custom-chip {
+	position: relative;
+	width: 24px;
+	height: 24px;
+	border-radius: 50%;
+	border: 2px dashed var(--text-muted);
+	background:
+		linear-gradient(45deg, transparent 45%, var(--text-muted) 45%, var(--text-muted) 55%, transparent 55%),
+		linear-gradient(135deg, transparent 45%, var(--text-muted) 45%, var(--text-muted) 55%, transparent 55%),
+		var(--background-primary);
+	cursor: pointer;
+	overflow: hidden;
+}
+
+.annoteca-color-custom-chip.has-value {
+	border-style: solid;
+	border-color: var(--background-modifier-border);
+	background: var(--background-primary);
+}
+
+.annoteca-color-custom-chip.has-value .annoteca-color-native {
+	opacity: 1;
+}
+
 .annoteca-color-native {
-	width: 36px;
-	height: 28px;
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
 	padding: 0;
-	border: 1px solid var(--background-modifier-border);
-	border-radius: var(--radius-s, 4px);
+	border: none;
+	border-radius: 50%;
 	cursor: pointer;
 	background: none;
+	opacity: 0;
 }
 
 .annoteca-color-reset {
@@ -1147,9 +1192,11 @@ settings:
 
 .annoteca-icon-picker-trigger {
 	display: inline-flex;
-	gap: 6px;
 	align-items: center;
-	padding: 4px 10px;
+	justify-content: center;
+	width: 32px;
+	height: 32px;
+	padding: 0;
 	background-color: var(--background-modifier-form-field, var(--background-primary));
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-s, 4px);
@@ -1164,18 +1211,13 @@ settings:
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 18px;
-	height: 18px;
+	width: 20px;
+	height: 20px;
 }
 
 .annoteca-icon-picker-preview.is-empty {
 	color: var(--text-muted);
 	font-size: var(--font-smaller);
-}
-
-.annoteca-icon-picker-label {
-	font-size: var(--font-smaller);
-	color: var(--text-muted);
 }
 
 .annoteca-icon-picker-clear {
@@ -1207,18 +1249,18 @@ settings:
 
 .annoteca-icon-picker-grid {
 	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
-	gap: 6px;
+	grid-template-columns: repeat(auto-fill, minmax(40px, 1fr));
+	gap: 4px;
 	max-height: 480px;
 	overflow-y: auto;
 }
 
 .annoteca-icon-picker-cell {
 	display: flex;
-	flex-direction: column;
 	align-items: center;
-	gap: 4px;
-	padding: 8px;
+	justify-content: center;
+	aspect-ratio: 1 / 1;
+	padding: 0;
 	background: none;
 	border: 1px solid transparent;
 	border-radius: var(--radius-s, 4px);
@@ -1242,16 +1284,8 @@ settings:
 }
 
 .annoteca-icon-picker-cell-icon svg {
-	width: 20px;
-	height: 20px;
-}
-
-.annoteca-icon-picker-cell-label {
-	font-size: var(--font-smaller);
-	color: var(--text-muted);
-	text-align: center;
-	word-break: break-all;
-	line-height: 1.2;
+	width: 18px;
+	height: 18px;
 }
 
 .annoteca-icon-picker-empty {
@@ -1261,10 +1295,103 @@ settings:
 	font-style: italic;
 }
 
-/* Category v2 layout ------------------------------------------------------ */
+/* Category accordion ------------------------------------------------------ */
+
+.annoteca-category-list {
+	display: flex;
+	flex-direction: column;
+	border-top: 1px solid var(--background-modifier-border);
+}
 
 .annoteca-category-row {
-	padding: 16px 0;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.annoteca-category-summary {
+	display: flex;
+	gap: 10px;
+	align-items: center;
+	width: 100%;
+	padding: 8px 4px;
+	background: none;
+	border: none;
+	border-radius: 0;
+	cursor: pointer;
+	text-align: left;
+	color: var(--text-normal);
+}
+
+.annoteca-category-summary:hover {
+	background-color: var(--background-modifier-hover);
+}
+
+.annoteca-category-summary-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 20px;
+	color: var(--text-muted);
+	flex: 0 0 auto;
+}
+
+.annoteca-category-summary-icon.is-empty {
+	font-size: var(--font-smaller);
+}
+
+.annoteca-category-summary-icon svg {
+	width: 18px;
+	height: 18px;
+}
+
+.annoteca-category-summary-name {
+	flex: 1 1 auto;
+	font-weight: var(--font-semibold);
+}
+
+.annoteca-category-summary-color {
+	display: inline-block;
+	width: 14px;
+	height: 14px;
+	border-radius: 50%;
+	border: 1px solid var(--background-modifier-border);
+	flex: 0 0 auto;
+}
+
+.annoteca-category-summary-color.is-empty {
+	background:
+		linear-gradient(45deg, transparent 45%, var(--text-muted) 45%, var(--text-muted) 55%, transparent 55%);
+}
+
+.annoteca-category-summary-id {
+	font-size: var(--font-smaller);
+	color: var(--text-muted);
+	font-family: var(--font-monospace, monospace);
+	flex: 0 0 auto;
+}
+
+.annoteca-category-summary-chevron {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
+	height: 18px;
+	color: var(--text-muted);
+	transition: transform 120ms ease;
+	flex: 0 0 auto;
+}
+
+.annoteca-category-row.is-expanded .annoteca-category-summary-chevron {
+	transform: rotate(180deg);
+}
+
+.annoteca-category-detail {
+	display: none;
+	padding: 4px 4px 16px 30px;
+}
+
+.annoteca-category-row.is-expanded .annoteca-category-detail {
+	display: block;
 }
 
 .annoteca-category-controls {
@@ -1309,6 +1436,12 @@ settings:
 
 .annoteca-category-remove:hover {
 	background-color: var(--background-modifier-error-hover, var(--background-modifier-hover));
+}
+
+.annoteca-category-protected-note {
+	font-size: var(--font-smaller);
+	color: var(--text-muted);
+	font-style: italic;
 }
 
 /* Preset browser ---------------------------------------------------------- */

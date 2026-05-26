@@ -52,13 +52,41 @@ export interface ColorPickerOpts {
 	onChange: (next: string | undefined) => void | Promise<void>;
 }
 
-// Render a color picker control: row of theme swatches + native color picker
-// + a Reset button. The active swatch is highlighted when current matches a
-// var() form; otherwise the native picker reflects the current hex value.
+// Render a color picker control: theme swatches above, a custom-color chip
+// (styled native picker) + Reset below. Section captions disambiguate
+// "these are theme-adaptive colors" from "pick a literal hex".
 export function createColorPicker(parent: HTMLElement, opts: ColorPickerOpts): HTMLDivElement {
 	const wrap = parent.createDiv({ cls: "annoteca-color-picker" });
 
-	const swatchRow = wrap.createDiv({ cls: "annoteca-color-swatches" });
+	const themeRow = wrap.createDiv({ cls: "annoteca-color-row" });
+	themeRow.createDiv({ cls: "annoteca-color-row-caption", text: "Theme" });
+	const swatchRow = themeRow.createDiv({ cls: "annoteca-color-swatches" });
+
+	const customRow = wrap.createDiv({ cls: "annoteca-color-row" });
+	customRow.createDiv({ cls: "annoteca-color-row-caption", text: "Custom" });
+	const customGroup = customRow.createDiv({ cls: "annoteca-color-custom" });
+	const chip = customGroup.createDiv({
+		cls: "annoteca-color-custom-chip",
+		attr: { "aria-label": "Pick a custom color" },
+	});
+	const native = chip.createEl("input", {
+		cls: "annoteca-color-native",
+		attr: { type: "color", "aria-label": "Pick a custom color" },
+	});
+
+	const showHex = (hex: string): void => {
+		native.value = hex;
+		chip.style.backgroundColor = hex;
+		chip.addClass("has-value");
+	};
+	const clearChip = (): void => {
+		chip.style.removeProperty("background-color");
+		chip.removeClass("has-value");
+	};
+	const clearSwatches = (): void => {
+		for (const s of Array.from(swatchRow.children)) s.removeClass?.("is-active");
+	};
+
 	for (const v of THEME_COLOR_VARS) {
 		const swatch = swatchRow.createEl("button", {
 			cls: "annoteca-color-swatch",
@@ -73,34 +101,31 @@ export function createColorPicker(parent: HTMLElement, opts: ColorPickerOpts): H
 		if (opts.current === target) swatch.addClass("is-active");
 		swatch.addEventListener("click", () => {
 			void opts.onChange(target);
-			// Update local active state without waiting for a re-render.
-			for (const s of Array.from(swatchRow.children)) s.removeClass?.("is-active");
+			clearSwatches();
 			swatch.addClass("is-active");
+			clearChip();
 		});
 	}
 
-	const customWrap = wrap.createDiv({ cls: "annoteca-color-custom" });
-	const native = customWrap.createEl("input", {
-		cls: "annoteca-color-native",
-		attr: { type: "color" },
-	});
-	// Pre-populate the native picker from a hex value if that is what we have;
-	// otherwise leave the default (the browser usually shows black).
+	// Pre-populate the chip when current is a custom hex value.
 	const currentHex = opts.current && opts.current.startsWith("#") ? opts.current : "";
-	if (currentHex) native.value = currentHex;
+	if (currentHex) showHex(currentHex);
+
 	native.addEventListener("input", () => {
 		void opts.onChange(native.value);
-		for (const s of Array.from(swatchRow.children)) s.removeClass?.("is-active");
+		showHex(native.value);
+		clearSwatches();
 	});
 
-	const resetBtn = customWrap.createEl("button", {
+	const resetBtn = customGroup.createEl("button", {
 		cls: "annoteca-color-reset",
 		text: "Reset",
 		attr: { type: "button" },
 	});
 	resetBtn.addEventListener("click", () => {
 		void opts.onChange(undefined);
-		for (const s of Array.from(swatchRow.children)) s.removeClass?.("is-active");
+		clearChip();
+		clearSwatches();
 	});
 
 	return wrap;
@@ -112,17 +137,19 @@ export interface IconPickerOpts {
 	onChange: (next: string | undefined) => void | Promise<void>;
 }
 
-// Render an icon picker control: button showing the current icon (or a hint
-// if none); clicking opens a modal with a searchable grid of every Obsidian
-// icon. Selecting an icon updates the value and closes the modal.
+// Render an icon picker control: a square button showing just the current
+// icon (no ID text — the icon ID is implementation detail, not a label).
+// Clicking opens a modal with a searchable grid. The icon ID is exposed via
+// the trigger's tooltip and aria-label for hover/a11y.
 export function createIconPicker(parent: HTMLElement, opts: IconPickerOpts): HTMLDivElement {
 	const wrap = parent.createDiv({ cls: "annoteca-icon-picker" });
 
 	const renderTrigger = (iconId: string | undefined): void => {
 		wrap.empty();
+		const tooltip = iconId ? `Icon: ${iconId}` : "Pick an icon";
 		const trigger = wrap.createEl("button", {
 			cls: "annoteca-icon-picker-trigger",
-			attr: { type: "button" },
+			attr: { type: "button", title: tooltip, "aria-label": tooltip },
 		});
 		const preview = trigger.createSpan({ cls: "annoteca-icon-picker-preview" });
 		if (iconId) {
@@ -131,10 +158,6 @@ export function createIconPicker(parent: HTMLElement, opts: IconPickerOpts): HTM
 			preview.setText("?");
 			preview.addClass("is-empty");
 		}
-		trigger.createSpan({
-			cls: "annoteca-icon-picker-label",
-			text: iconId ?? "Pick an icon",
-		});
 		trigger.addEventListener("click", () => {
 			new IconPickerModal(opts.app, iconId, async next => {
 				await opts.onChange(next);
@@ -207,7 +230,6 @@ class IconPickerModal extends Modal {
 				});
 				const iconEl = cell.createSpan({ cls: "annoteca-icon-picker-cell-icon" });
 				setIcon(iconEl, id);
-				cell.createSpan({ cls: "annoteca-icon-picker-cell-label", text: id });
 				cell.addEventListener("click", () => {
 					void this.onPick(id);
 					this.close();
