@@ -15,7 +15,6 @@ import {
 	WidgetType,
 	hoverTooltip,
 	showTooltip,
-	tooltips,
 	type Tooltip,
 } from "@codemirror/view";
 
@@ -633,12 +632,13 @@ export function buildAnnotecaExtension(ctx: DecorationContext): Extension {
 	return [
 		field,
 		replyField,
-		// Render tooltips into document.body instead of the editor's DOM so
-		// they can escape the sidebar leaf bounds. Without this override,
-		// markers near the right edge of a narrow sidebar leaf produce a
-		// vertically tall, horizontally squeezed popup because CodeMirror
-		// shrinks the tooltip to fit available leaf width.
-		tooltips({ parent: activeDocument.body }),
+		// NOTE: previously we set tooltips({ parent: activeDocument.body }) so
+		// the hover popup could escape narrow sidebar leaves, but that broke
+		// the hover keepalive — the mouse cannot reliably reach the popup
+		// before CodeMirror dismisses it once the tooltip lives outside the
+		// editor's DOM. Restore the default parent so hover works; the
+		// narrow-leaf squeeze should be addressed in CSS (e.g. positioning
+		// the tooltip with overflow allowed) rather than DOM-reparenting.
 		decorationsCompute(ctx, field),
 		hoverTooltipExtension(ctx, field),
 		clickHandlerExtension(ctx, field),
