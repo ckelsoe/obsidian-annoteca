@@ -7,8 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-26
+
+This release bundles several distinct feature themes that landed on `main` before a release boundary was cut. Going forward, plugin releases will partition per feature theme; see the workspace `CLAUDE.md` "Release cadence" note.
+
 ### Added
-- New command `Delete all resolved comments in this file`. Shows a confirmation modal sized to the count, removes every resolved marker from the active file in a single write, and rebuilds the index. No bulk operation across files yet.
+
+#### Hub panel overhaul
+- Replaced the three earlier sidebar views with a single right-sidebar hub (`Annoteca` view) containing Thread / Outline / Starred internal tabs.
+- **Scope selector** on the Thread tab: This file, This folder (with and without subfolders), Vault, Property `key = value` (frontmatter-driven), Tag. Property and Tag option lists populate from the active file. Scope state persists across restarts; auto-collapses to "this file" when the active file moves outside the current scope and scope is unpinned.
+- **Pin button** on the scope toolbar to lock scope to a specific path; pinned scope ignores file changes.
+- **Multi-file scope rendering**: comments group by file with per-file header + count badge. Single-file scope renders without the per-file header since the panel header already implies the file.
+- **Starred (bookmarked) comments** persisted in settings. Star toggle in three places: hover popup header, Thread tab card header, Starred tab card. Comments without an ID cannot be starred. Starred tab lists most-recently-starred first.
+- **Reply drafts**: in-progress reply text persists to vault-local storage (not `data.json`, so it does not propagate via Obsidian Sync). Debounced on input, restored on composer open, cleared on send. Composer outside-click no longer dismisses a non-empty composer.
+- **Outline tab interactions**: open/resolved count badges per heading are clickable — click navigates to the first matching comment in that section. Row containing the cursor is highlighted.
+- Internal tab selection persists across restarts (`settings.lastHubTab`); marker clicks force the Thread tab.
+- Next/previous comment commands respect scope and walk across files within scope.
+- **Delete all resolved comments in this file** command (confirmation modal sized to count, single write, rebuild index).
+
+#### Settings UX
+- **Accordion category rows**: only the active category expands; others collapse to a single-line summary.
+- **Leaner icon and color pickers**: the icon picker is now a stacked search-and-grid, the color picker shows theme-adaptive swatches with a custom-color chip beneath.
+- **Browse presets**: cherry-pick categories from `general`, `scholarly`, `fiction`, `code-review`, and `project-planning` presets into the working list (additive, not destructive). User-saved presets persist in `settings.customPresets`.
+- Removed the `enableScholarlyPreset` boolean toggle; its categories now live inside the `scholarly` preset.
+- Long-form settings rows (textareas, multi-control rows) now use a stacked layout (label/description above, control below) rather than fighting Obsidian's narrow right-rail `Setting` widget.
+
+#### Color picker (custom chip seeding)
+- Native `<input type="color">` chip is silently seeded from the currently active theme swatch (resolved to hex via `getComputedStyle`), so opening the OS picker opens it on the theme color, ready to nudge into a variation.
+
+#### Anchor underlines for commented text
+- New marker syntax tail line `[anchor=<commented text>]` captures the text the comment was attached to at creation.
+- Renders a category-tinted underline over the anchor range in the editor; clicking or hovering the underline triggers the same comment popup as the inline marker.
+- Configurable indicator style includes a new `"underline"` option (in addition to `"icon"`, `"gutter"`, `"both"`, `"none"`).
+
+#### Resolved-state polish
+- Resolved comments always show an icon (no longer category-toggled).
+- Resolved comments in scope lists render with strikethrough.
+- New brightness toggle controls dimming of resolved entries.
+
+### Fixed
+- **Hide-all-comments was global with confused bookkeeping**: a per-view `__annotecaHidden` field was being written but never read; the decoration compute only consulted a module-level singleton. A toggle in pane B would silently affect pane A. Per-view writes have been removed; the toggle is now unambiguously global (one switch, all editors).
+- **`rgbStringToHex` no longer silently returns `#000000` on malformed input**. Returns `undefined` instead, so callers can skip the assignment rather than seeding black on a `transparent` or `display:none` swatch.
+
+### Changed
+- Removed the `AnnotecaEvents` class wrapper around Obsidian's `Events`. Call sites now use `events.trigger(...)` directly.
+- Type augmentations for the Obsidian API moved from `types.d.ts` (which was being shadowed by the runtime `types.ts`) to `globals.d.ts`. Added a proper `Editor.cm` augmentation that removes four `as unknown as` double-casts from `main.ts` and one from `decorations.ts`.
+- `tsconfig.json` `include` now lists `**/*.d.ts` explicitly so ambient declaration files compile (TypeScript's `**/*.ts` glob does not match `.d.ts`).
+- Pure helpers extracted for unit-testability:
+  - `scope.ts` — scope-shape dispatch (`computeScopeFileSet`).
+  - `view-utils.ts` — `extractIndexTerm`, `bucketCommentsByHeading`.
+  - `rgbStringToHex` exported from `ui-helpers.ts`.
+- New test suite `__tests__/helpers.test.ts` covers all four (30 new tests).
 
 ## [0.2.0] - 2026-05-26
 

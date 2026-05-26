@@ -17,6 +17,7 @@ import { AddCommentModal } from "./modal";
 import {
 	buildAnnotecaExtension,
 	setHideAllComments,
+	isHideAllComments,
 } from "./decorations";
 import {
 	VAULT_UNRESOLVED_VIEW_TYPE,
@@ -42,17 +43,12 @@ import { convertAllComments, type ImportFormat } from "./imports";
 import { ConfirmBackupModal, ConfirmDeleteResolvedModal } from "./confirm-modal";
 import { detectDrift, type DriftFinding, type PositionSnapshot } from "./drift";
 import { formatScripture } from "./scripture";
-
-class AnnotecaEvents extends Events {
-	emit(name: string, ...data: unknown[]): void {
-		this.trigger(name, ...data);
-	}
-}
+import { computeScopeFileSet, type ScopeFile } from "./scope";
 
 export default class AnnotecaPlugin extends Plugin {
 	settings!: AnnotecaSettings;
 	commentIndex = new CommentIndex();
-	events = new AnnotecaEvents();
+	events = new Events();
 	private vaultScanned = false;
 
 	async onload(): Promise<void> {
@@ -180,7 +176,7 @@ export default class AnnotecaPlugin extends Plugin {
 
 	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
-		this.events.emit("settings-changed");
+		this.events.trigger("settings-changed");
 	}
 
 	private registerFileEvents(): void {
@@ -192,13 +188,13 @@ export default class AnnotecaPlugin extends Plugin {
 		this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
 			if (file instanceof TFile) {
 				this.commentIndex.rename(oldPath, file.path);
-				this.events.emit("index-changed");
+				this.events.trigger("index-changed");
 			}
 		}));
 		this.registerEvent(this.app.vault.on("delete", (file) => {
 			if (file instanceof TFile) {
 				this.commentIndex.remove(file.path);
-				this.events.emit("index-changed");
+				this.events.trigger("index-changed");
 			}
 		}));
 		this.registerEvent(this.app.workspace.on("file-open", (file) => {
@@ -357,7 +353,7 @@ export default class AnnotecaPlugin extends Plugin {
 			id: "toggle-hide-all-comments",
 			name: "Toggle hide-all-comments mode",
 			editorCallback: (editor: Editor, view: MarkdownView) => {
-				const cm = (view.editor as unknown as { cm?: unknown }).cm;
+				const cm = view.editor.cm;
 				if (!cm) return;
 				const currentlyHidden = this.toggleHideAllForActiveView(view);
 				new Notice(currentlyHidden ? "Comments hidden." : "Comments visible.");
@@ -456,7 +452,7 @@ export default class AnnotecaPlugin extends Plugin {
 	private async rebuildIndexForFile(file: TFile): Promise<void> {
 		const content = await this.app.vault.cachedRead(file);
 		this.commentIndex.rebuild(file.path, content);
-		this.events.emit("index-changed", { path: file.path });
+		this.events.trigger("index-changed", { path: file.path });
 	}
 
 	async scanVaultIfNeeded(): Promise<void> {
@@ -467,7 +463,7 @@ export default class AnnotecaPlugin extends Plugin {
 			this.commentIndex.rebuild(f.path, content);
 		}
 		this.vaultScanned = true;
-		this.events.emit("index-changed");
+		this.events.trigger("index-changed");
 	}
 
 	private refreshActiveFileIndex(): void {
@@ -531,8 +527,8 @@ export default class AnnotecaPlugin extends Plugin {
 			const content = view?.editor.getValue() ?? await this.app.vault.cachedRead(file);
 			this.commentIndex.rebuild(path, content);
 		}
-		this.events.emit("index-changed", { path });
-		this.events.emit("active-comment-changed", { path, start: markerStart });
+		this.events.trigger("index-changed", { path });
+		this.events.trigger("active-comment-changed", { path, start: markerStart });
 		await this.activateView(ANNOTECA_HUB_VIEW_TYPE, "right");
 	}
 
@@ -567,7 +563,7 @@ export default class AnnotecaPlugin extends Plugin {
 		const updated = content.slice(0, start) + content.slice(end);
 		await this.app.vault.modify(file, updated);
 		this.commentIndex.rebuild(path, updated);
-		this.events.emit("index-changed", { path });
+		this.events.trigger("index-changed", { path });
 		new Notice("Deleted.");
 	}
 
@@ -613,7 +609,7 @@ export default class AnnotecaPlugin extends Plugin {
 
 		await this.app.vault.modify(file, updated);
 		this.commentIndex.rebuild(path, updated);
-		this.events.emit("index-changed", { path });
+		this.events.trigger("index-changed", { path });
 		return resolved.length;
 	}
 
@@ -678,7 +674,7 @@ export default class AnnotecaPlugin extends Plugin {
 			current.push(comment.id);
 		}
 		await this.saveSettings();
-		this.events.emit("starred-changed", { id: comment.id });
+		this.events.trigger("starred-changed", { id: comment.id });
 	}
 
 	async setLastHubTab(tab: AnnotecaSettings["lastHubTab"]): Promise<void> {
@@ -742,7 +738,7 @@ export default class AnnotecaPlugin extends Plugin {
 		const updated = content.slice(0, prev.marker.start) + serialized + content.slice(prev.marker.end);
 		await this.app.vault.modify(file, updated);
 		this.commentIndex.rebuild(path, updated);
-		this.events.emit("index-changed", { path });
+		this.events.trigger("index-changed", { path });
 	}
 
 	private resolvedAuthor(): string {
@@ -766,20 +762,20 @@ export default class AnnotecaPlugin extends Plugin {
 	async setScopeShape(shape: ScopeShape, anchorPath: string): Promise<void> {
 		this.settings.scopeState = { shape, anchorPath, pinned: this.settings.scopeState.pinned };
 		await this.saveSettings();
-		this.events.emit("scope-changed");
+		this.events.trigger("scope-changed");
 	}
 
 	async togglePinScope(): Promise<void> {
 		this.settings.scopeState.pinned = !this.settings.scopeState.pinned;
 		await this.saveSettings();
-		this.events.emit("scope-changed");
+		this.events.trigger("scope-changed");
 	}
 
 	async setStatusFilter(f: StatusFilter): Promise<void> {
 		if (this.settings.statusFilter === f) return;
 		this.settings.statusFilter = f;
 		await this.saveSettings();
-		this.events.emit("scope-changed");
+		this.events.trigger("scope-changed");
 	}
 
 	// Returns the set of vault-relative file paths that satisfy the current
@@ -788,60 +784,28 @@ export default class AnnotecaPlugin extends Plugin {
 	// returns every markdown file.
 	computeScopeFiles(): Set<string> {
 		const state = this.settings.scopeState;
-		const out = new Set<string>();
-		const allFiles = this.app.vault.getMarkdownFiles();
 
-		switch (state.shape.kind) {
-			case "file": {
-				if (state.anchorPath) out.add(state.anchorPath);
-				else {
-					const active = this.app.workspace.getActiveFile();
-					if (active) out.add(active.path);
-				}
-				break;
-			}
-			case "folder": {
-				const folder = state.anchorPath;
-				const subfolders = state.shape.subfolders;
-				for (const f of allFiles) {
-					if (subfolders) {
-						if (folder === "" || f.path.startsWith(folder + "/") || f.parent?.path === folder) {
-							out.add(f.path);
-						}
-					} else {
-						if ((folder === "" && f.parent?.isRoot()) || f.parent?.path === folder) {
-							out.add(f.path);
-						}
-					}
-				}
-				break;
-			}
-			case "vault": {
-				for (const f of allFiles) out.add(f.path);
-				break;
-			}
-			case "property": {
-				const { key, value } = state.shape;
-				for (const f of allFiles) {
-					const fm = this.app.metadataCache.getFileCache(f)?.frontmatter;
-					if (!fm) continue;
-					const v: unknown = fm[key];
-					if (Array.isArray(v) ? v.includes(value) : v === value) out.add(f.path);
-				}
-				break;
-			}
-			case "tag": {
-				const target = state.shape.tag.startsWith("#") ? state.shape.tag : "#" + state.shape.tag;
-				for (const f of allFiles) {
-					const cache = this.app.metadataCache.getFileCache(f);
-					if (!cache) continue;
-					const tags = getAllTags(cache);
-					if (tags && tags.includes(target)) out.add(f.path);
-				}
-				break;
-			}
+		// Single-file scope falls back to the active file when no anchor is
+		// stored. Resolve that here so the pure dispatch sees a concrete path.
+		let anchorPath: string | undefined = state.anchorPath || undefined;
+		if (state.shape.kind === "file" && !anchorPath) {
+			const active = this.app.workspace.getActiveFile();
+			if (active) anchorPath = active.path;
 		}
-		return out;
+
+		const allFiles = this.app.vault.getMarkdownFiles();
+		const files: ScopeFile[] = allFiles.map(f => {
+			const cache = this.app.metadataCache.getFileCache(f);
+			return {
+				path: f.path,
+				parentPath: f.parent?.path,
+				isInRoot: f.parent?.isRoot() ?? false,
+				frontmatter: cache?.frontmatter,
+				tags: cache ? (getAllTags(cache) ?? []) : [],
+			};
+		});
+
+		return computeScopeFileSet(files, state.shape, anchorPath);
 	}
 
 	// Called when the workspace's active file changes. If the new file falls
@@ -1013,17 +977,16 @@ export default class AnnotecaPlugin extends Plugin {
 		// Emitting before activation lost the event on first open and made
 		// the panel fall back to comments[0] (the first item).
 		void this.activateView(ANNOTECA_HUB_VIEW_TYPE, "right").then(() => {
-			this.events.emit("active-comment-changed", { path: filePath, start });
+			this.events.trigger("active-comment-changed", { path: filePath, start });
 		});
 	}
 
 	// Display toggles ----------------------------------------------------
 
 	private toggleHideAllForActiveView(view: MarkdownView): boolean {
-		const cmView = (view.editor as unknown as { cm: import("@codemirror/view").EditorView }).cm;
-		const currentlyHidden = (cmView as unknown as { __annotecaHidden?: boolean }).__annotecaHidden ?? false;
-		const next = !currentlyHidden;
-		(cmView as unknown as { __annotecaHidden?: boolean }).__annotecaHidden = next;
+		const cmView = view.editor.cm;
+		if (!cmView) return isHideAllComments();
+		const next = !isHideAllComments();
 		setHideAllComments(cmView, next);
 		return next;
 	}
@@ -1190,7 +1153,7 @@ export default class AnnotecaPlugin extends Plugin {
 			totalConverted += result.converted;
 			filesTouched += 1;
 		}
-		this.events.emit("index-changed");
+		this.events.trigger("index-changed");
 		new Notice(`Converted ${totalConverted} comment(s) across ${filesTouched} file(s).`);
 	}
 

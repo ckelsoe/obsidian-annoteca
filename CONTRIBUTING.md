@@ -35,7 +35,7 @@ All three must pass. Pull requests that break CI will not be reviewed until gree
 
 ## Coding conventions
 
-- TypeScript strict mode is on. Never use `as any` casting. If types are missing, add declarations to `types.d.ts`.
+- TypeScript strict mode is on. Never use `as any` casting. If types are missing, add declarations to `globals.d.ts`.
 - Follow [Obsidian's plugin guidelines](https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines).
 - Prefer `containerEl.createDiv()` / `createSpan()` over generic `createEl('div'|'span')`.
 - Do not import Node built-ins (`path`, `fs`, etc.) at the top of `main.ts`. Use a `Platform.isDesktop`-guarded `require()` instead.

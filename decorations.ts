@@ -569,7 +569,9 @@ function dismissReplyOnOutsideClick(): Extension {
 			const target = event.target as HTMLElement | null;
 			if (!target) return false;
 			if (target.closest(".annoteca-reply-composer")) return false;
-			const open = view.state.field(replyComposerStateRef.field, false);
+			const field = replyComposerStateRef.field;
+			if (!field) return false;
+			const open = view.state.field(field, false);
 			if (open == null) return false;
 			// Preserve in-progress text. If the user has typed anything into
 			// the composer, treat outside-click as a no-op so a misclick does
@@ -587,10 +589,9 @@ function dismissReplyOnOutsideClick(): Extension {
 }
 
 // Tiny ref so dismissReplyOnOutsideClick can read the state field without a
-// circular import between the field constructor and the handler.
-const replyComposerStateRef: { field: StateField<number | null> } = {
-	field: undefined as unknown as StateField<number | null>,
-};
+// circular import between the field constructor and the handler. Assigned
+// inside buildAnnotecaExtension once replyField has been constructed.
+const replyComposerStateRef: { field?: StateField<number | null> } = {};
 
 function clickHandlerExtension(ctx: DecorationContext, field: StateField<Comment[]>): Extension {
 	return EditorView.domEventHandlers({

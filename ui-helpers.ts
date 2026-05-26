@@ -54,10 +54,13 @@ export interface ColorPickerOpts {
 
 // Convert "rgb(R, G, B)" or "rgba(R, G, B, A)" (whatever the browser
 // normalizes a CSS variable to) to a 6-digit hex string the native
-// <input type="color"> accepts.
-function rgbStringToHex(rgb: string): string {
+// <input type="color"> accepts. Returns undefined if the input does not
+// look like a parseable rgb/rgba string (e.g. "transparent", "" from a
+// display:none swatch) so callers can skip the assignment rather than
+// silently seeding black.
+export function rgbStringToHex(rgb: string): string | undefined {
 	const m = rgb.match(/\d+(?:\.\d+)?/g);
-	if (!m || m.length < 3) return "#000000";
+	if (!m || m.length < 3) return undefined;
 	const [r, g, b] = m;
 	const toHex = (raw: string | undefined): string => {
 		const n = Math.max(0, Math.min(255, Math.round(parseFloat(raw ?? "0"))));
@@ -110,7 +113,7 @@ export function createColorPicker(parent: HTMLElement, opts: ColorPickerOpts): H
 	const seedFromSwatch = (swatch: HTMLElement): void => {
 		const computed = getComputedStyle(swatch).backgroundColor;
 		const hex = rgbStringToHex(computed);
-		native.value = hex;
+		if (hex !== undefined) native.value = hex;
 	};
 
 	let activeSwatch: HTMLElement | null = null;

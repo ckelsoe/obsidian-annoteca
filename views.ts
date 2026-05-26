@@ -12,6 +12,10 @@ import type { Comment, LocatedComment, CategoryDefinition, ScopeState, StatusFil
 import { getCategoryOrFallback } from "./categories";
 import { resolveSettingsCategories } from "./settings";
 import { serialize, todayISO } from "./parser";
+import { extractIndexTerm, bucketCommentsByHeading, type HeadingShape, type HeadingBucket } from "./view-utils";
+
+export { extractIndexTerm, bucketCommentsByHeading };
+export type { HeadingShape, HeadingBucket };
 
 export const VAULT_UNRESOLVED_VIEW_TYPE = "annoteca-vault-unresolved-view";
 export const INDEX_VIEW_TYPE = "annoteca-index-view";
@@ -282,44 +286,6 @@ export class ComposerPanelView extends ItemView {
 		});
 		form.render(container);
 	}
-}
-
-export function extractIndexTerm(body: string): string {
-	// The modal template emits `<term> > <subterm> — <body>` or `<term> — <body>`.
-	// Strip the post-em-dash body if present; return the term/subterm chain.
-	const dashIdx = body.indexOf(" — ");
-	const head = dashIdx === -1 ? body : body.slice(0, dashIdx);
-	return head.trim() || "(unspecified)";
-}
-
-interface HeadingBucket { open: number; resolved: number; }
-
-interface HeadingShape {
-	heading: string;
-	level: number;
-	position: { start: { offset: number } };
-}
-
-export function bucketCommentsByHeading(
-	headings: HeadingShape[],
-	comments: Comment[],
-): HeadingBucket[] {
-	const buckets: HeadingBucket[] = headings.map(() => ({ open: 0, resolved: 0 }));
-	for (const c of comments) {
-		let bucketIdx = -1;
-		for (let i = 0; i < headings.length; i++) {
-			const h = headings[i];
-			if (!h) continue;
-			if (h.position.start.offset > c.marker.start) break;
-			bucketIdx = i;
-		}
-		if (bucketIdx === -1) continue;
-		const bucket = buckets[bucketIdx];
-		if (!bucket) continue;
-		if (c.resolution) bucket.resolved += 1;
-		else bucket.open += 1;
-	}
-	return buckets;
 }
 
 export function serializeReplyAppended(c: Comment, reply: { author: string; date: string; body: string }): string {
