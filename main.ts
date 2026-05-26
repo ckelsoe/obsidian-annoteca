@@ -38,21 +38,24 @@ import {
 	type ConflictFinding,
 	type ValidationFinding,
 } from "./diagnostics";
-import { parseAll, serialize, todayISO } from "./parser";
+import { todayISO } from "./parser";
 import { convertAllComments, type ImportFormat } from "./imports";
 import { ConfirmBackupModal, ConfirmDeleteResolvedModal } from "./confirm-modal";
 import { detectDrift, type DriftFinding, type PositionSnapshot } from "./drift";
 import { formatScripture } from "./scripture";
 import { computeScopeFileSet, type ScopeFile } from "./scope";
+import { CommentService } from "./comment-service";
 
 export default class AnnotecaPlugin extends Plugin {
 	settings!: AnnotecaSettings;
 	commentIndex = new CommentIndex();
 	events = new Events();
+	comments!: CommentService;
 	private vaultScanned = false;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
+		this.comments = new CommentService(this);
 
 		this.registerEditorExtension(buildAnnotecaExtension({
 			getSettings: () => this.settings,
@@ -61,7 +64,7 @@ export default class AnnotecaPlugin extends Plugin {
 			toggleResolution: (m) => { void this.toggleResolutionFromPopup(m); },
 			copyPermalink: (m) => { void this.copyCommentId(m); },
 			submitReply: (m, body) => { void this.submitReplyFromPopup(m, body); },
-			getAuthorTag: () => this.resolvedAuthor(),
+			getAuthorTag: () => this.comments.resolvedAuthor(),
 			isStarred: (m) => this.isStarred(m),
 			toggleStarred: (m) => { void this.toggleStarred(m); },
 			loadDraft: (id) => this.loadDraft(id),
@@ -534,93 +537,33 @@ export default class AnnotecaPlugin extends Plugin {
 
 	// Comment lifecycle operations ---------------------------------------
 
+	// Public lifecycle verbs are thin pass-throughs to CommentService. The
+	// service owns the actual marker read/serialize/write + index rebuild
+	// + event emission. Keeping the plugin facade stable so external callers
+	// (hub Thread tab, popup handlers) do not need to know about the split.
+
 	async resolveComment(path: string, comment: Comment): Promise<void> {
-		if (comment.resolution) return;
-		const author = this.resolvedAuthor();
-		const resolved: Comment = {
-			...comment,
-			resolution: { author, date: todayISO(), note: "" },
-		};
-		await this.replaceMarker(path, comment, resolved);
-		new Notice("Resolved.");
+		await this.comments.resolveComment(path, comment);
 	}
 
 	async reopenComment(path: string, comment: Comment): Promise<void> {
-		if (!comment.resolution) return;
-		const reopened: Comment = { ...comment, resolution: undefined };
-		await this.replaceMarker(path, comment, reopened);
-		new Notice("Reopened.");
+		await this.comments.reopenComment(path, comment);
 	}
 
 	async deleteComment(path: string, comment: Comment): Promise<void> {
-		const file = this.app.vault.getAbstractFileByPath(path);
-		if (!(file instanceof TFile)) return;
-		const content = await this.app.vault.read(file);
-		// Drop the marker plus any trailing space introduced by range insertion.
-		let start = comment.marker.start;
-		let end = comment.marker.end;
-		if (start > 0 && content.charAt(start - 1) === " ") start -= 1;
-		const updated = content.slice(0, start) + content.slice(end);
-		await this.app.vault.modify(file, updated);
-		this.commentIndex.rebuild(path, updated);
-		this.events.trigger("index-changed", { path });
-		new Notice("Deleted.");
+		await this.comments.deleteComment(path, comment);
 	}
 
-	// Returns the resolved comments in `path` without modifying the file.
-	// Used by the delete-all-resolved command to size its confirmation modal.
 	async listResolvedInFile(path: string): Promise<Comment[]> {
-		const file = this.app.vault.getAbstractFileByPath(path);
-		if (!(file instanceof TFile)) return [];
-		const content = await this.app.vault.read(file);
-		return parseAll(content).filter(c => c.resolution !== undefined);
+		return this.comments.listResolvedInFile(path);
 	}
 
-	// Strips every resolved marker from `path` in a single file write. Returns
-	// the number of markers removed. Caller is responsible for confirmation
-	// and for showing a user-facing Notice.
 	async deleteAllResolvedInFile(path: string): Promise<number> {
-		const file = this.app.vault.getAbstractFileByPath(path);
-		if (!(file instanceof TFile)) return 0;
-		const content = await this.app.vault.read(file);
-		const resolved = parseAll(content).filter(c => c.resolution !== undefined);
-		if (resolved.length === 0) return 0;
-
-		// Walk in reverse so earlier splices do not shift later offsets.
-		// Mirror deleteComment's leading-space cleanup for inline markers,
-		// and also strip the trailing newline when the marker occupies its
-		// own line — bulk cleanup intent is "tidy the file", not "remove
-		// this exact span", so a stranded blank line would be a surprise.
-		let updated = content;
-		for (let i = resolved.length - 1; i >= 0; i--) {
-			const c = resolved[i];
-			if (!c) continue;
-			let start = c.marker.start;
-			let end = c.marker.end;
-			const standsAlone = (start === 0 || updated.charAt(start - 1) === "\n")
-				&& (end === updated.length || updated.charAt(end) === "\n");
-			if (standsAlone && end < updated.length) {
-				end += 1;
-			} else if (start > 0 && updated.charAt(start - 1) === " ") {
-				start -= 1;
-			}
-			updated = updated.slice(0, start) + updated.slice(end);
-		}
-
-		await this.app.vault.modify(file, updated);
-		this.commentIndex.rebuild(path, updated);
-		this.events.trigger("index-changed", { path });
-		return resolved.length;
+		return this.comments.deleteAllResolvedInFile(path);
 	}
 
 	async appendReply(comment: Comment, reply: Reply): Promise<void> {
-		const path = this.app.workspace.getActiveFile()?.path;
-		if (!path) return;
-		const updated: Comment = {
-			...comment,
-			replies: [...comment.replies, reply],
-		};
-		await this.replaceMarker(path, comment, updated);
+		await this.comments.appendReply(comment, reply);
 	}
 
 	async toggleResolutionFromPopup(comment: Comment): Promise<void> {
@@ -637,11 +580,11 @@ export default class AnnotecaPlugin extends Plugin {
 		const trimmed = body.trim();
 		if (trimmed.length === 0) return;
 		const reply: Reply = {
-			author: this.resolvedAuthor(),
+			author: this.comments.resolvedAuthor(),
 			date: todayISO(),
 			body: trimmed,
 		};
-		await this.appendReply(comment, reply);
+		await this.comments.appendReply(comment, reply);
 		new Notice("Reply added.");
 	}
 
@@ -717,34 +660,6 @@ export default class AnnotecaPlugin extends Plugin {
 			return;
 		}
 		this.openEditModal(view.editor, path, comment);
-	}
-
-	// Marker replacement (shared by resolve / reopen / reply / edit) ------
-
-	private async replaceMarker(path: string, prev: Comment, next: Comment): Promise<void> {
-		const file = this.app.vault.getAbstractFileByPath(path);
-		if (!(file instanceof TFile)) return;
-		const content = await this.app.vault.read(file);
-		const serialized = serialize({
-			id: next.id,
-			category: next.category,
-			body: next.body,
-			date: next.date,
-			author: next.author,
-			anchor: next.anchor,
-			replies: next.replies,
-			resolution: next.resolution,
-		});
-		const updated = content.slice(0, prev.marker.start) + serialized + content.slice(prev.marker.end);
-		await this.app.vault.modify(file, updated);
-		this.commentIndex.rebuild(path, updated);
-		this.events.trigger("index-changed", { path });
-	}
-
-	private resolvedAuthor(): string {
-		const tag = this.settings.authorTag.trim();
-		if (this.settings.enableAuthorTag && tag !== "") return tag;
-		return "user";
 	}
 
 	// Scope state --------------------------------------------------------
