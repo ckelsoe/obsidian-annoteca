@@ -1,4 +1,4 @@
-import { parseAll, parseAt, serialize, generateId, todayISO, findMalformedMarkers } from "../parser";
+import { parseAll, parseAt, serialize, generateId, todayISO, findMalformedMarkers, buildAnchorFromSelection, ANCHOR_MAX_CHARS } from "../parser";
 import type { Comment } from "../types";
 
 describe("parser: single-line markers", () => {
@@ -116,6 +116,91 @@ but here is a non-structured line, which means everything above is body
 	});
 });
 
+describe("parser: anchor", () => {
+	it("parses a tail [anchor=...] line into a Comment.anchor object", () => {
+		const text = [
+			`<!-- annoteca/clarify: which products?`,
+			`[id=a3b9c2x7]`,
+			`[anchor=quantitative targets such as reduced review time]`,
+			`-->`,
+		].join("\n");
+		const [c] = parseAll(text);
+		expect(c).toBeDefined();
+		if (!c) return;
+		expect(c.anchor).toBeDefined();
+		expect(c.anchor?.text).toBe("quantitative targets such as reduced review time");
+		expect(c.anchor?.truncated).toBe(false);
+	});
+
+	it("treats an anchor containing a U+2026 ellipsis as truncated", () => {
+		const text = [
+			`<!-- annoteca/clarify: x`,
+			`[anchor=opening words…closing words]`,
+			`-->`,
+		].join("\n");
+		const [c] = parseAll(text);
+		expect(c?.anchor?.truncated).toBe(true);
+	});
+
+	it("round-trips a comment with an anchor through serialize and parseAll", () => {
+		const s = serialize({
+			category: "tone",
+			body: "needs work",
+			id: "a3b9c2x7",
+			date: "2026-05-26",
+			anchor: { text: "the cold morning air", truncated: false },
+		});
+		const [c] = parseAll(s);
+		expect(c?.anchor).toEqual({ text: "the cold morning air", truncated: false });
+	});
+
+	it("emits no [anchor=...] line when the comment has no anchor", () => {
+		const s = serialize({
+			category: "tone",
+			body: "needs work",
+			id: "a3b9c2x7",
+			date: "2026-05-26",
+		});
+		expect(s).not.toContain("[anchor=");
+	});
+});
+
+describe("buildAnchorFromSelection", () => {
+	it("returns undefined for empty or whitespace-only selections", () => {
+		expect(buildAnchorFromSelection("")).toBeUndefined();
+		expect(buildAnchorFromSelection("   \n\t")).toBeUndefined();
+	});
+
+	it("strips line breaks and `]` characters from the captured text", () => {
+		const a = buildAnchorFromSelection("first line\nsecond ]line]");
+		expect(a?.text).toBe("first line second line");
+		expect(a?.truncated).toBe(false);
+	});
+
+	it("collapses internal whitespace to single spaces", () => {
+		const a = buildAnchorFromSelection("a    b\t\tc");
+		expect(a?.text).toBe("a b c");
+	});
+
+	it("returns the cleaned text untruncated when within the cap", () => {
+		const a = buildAnchorFromSelection("short selection");
+		expect(a?.truncated).toBe(false);
+		expect(a?.text).toBe("short selection");
+	});
+
+	it("mid-truncates with a single U+2026 when over the cap", () => {
+		const long = "x".repeat(60) + " middle " + "y".repeat(60);
+		const a = buildAnchorFromSelection(long);
+		expect(a?.truncated).toBe(true);
+		expect(a?.text.includes("…")).toBe(true);
+		// The stored value must not exceed the cap.
+		expect(a?.text.length).toBeLessThanOrEqual(ANCHOR_MAX_CHARS);
+		// Both ends are preserved.
+		expect(a?.text.startsWith("x")).toBe(true);
+		expect(a?.text.endsWith("y")).toBe(true);
+	});
+});
+
 describe("parser: serialize", () => {
 	it("emits the single-line form when there is no metadata", () => {
 		const s = serialize({ category: "clarify", body: "which products?" });
@@ -155,13 +240,13 @@ describe("parser: round-trip property", () => {
 	const cases: Comment[] = [
 		{
 			id: undefined, category: "tone", body: "short body",
-			date: undefined, author: undefined,
+			date: undefined, author: undefined, anchor: undefined,
 			replies: [], resolution: undefined,
 			marker: { start: 0, end: 0 },
 		},
 		{
 			id: "a3b9c2x7", category: "tone", body: "doesn't sound like me",
-			date: "2026-05-23", author: "charles",
+			date: "2026-05-23", author: "charles", anchor: undefined,
 			replies: [
 				{ author: "ai", date: "2026-05-23", body: "consider X" },
 				{ author: "charles", date: "2026-05-24", body: "trying it" },
@@ -171,9 +256,16 @@ describe("parser: round-trip property", () => {
 		},
 		{
 			id: "z1z1z1z1", category: "source-needed", body: "needs citation",
-			date: "2026-05-25", author: "ai",
+			date: "2026-05-25", author: "ai", anchor: undefined,
 			replies: [],
 			resolution: { author: "charles", date: "2026-05-25", note: "added in revision pass" },
+			marker: { start: 0, end: 0 },
+		},
+		{
+			id: "anchor01", category: "clarify", body: "be specific",
+			date: "2026-05-26", author: undefined,
+			anchor: { text: "the cold morning air", truncated: false },
+			replies: [], resolution: undefined,
 			marker: { start: 0, end: 0 },
 		},
 	];
@@ -185,6 +277,7 @@ describe("parser: round-trip property", () => {
 			const s = serialize({
 				id: c.id, category: c.category, body: c.body,
 				date: c.date, author: c.author,
+				anchor: c.anchor,
 				replies: c.replies,
 				resolution: c.resolution,
 			});
@@ -198,6 +291,7 @@ describe("parser: round-trip property", () => {
 			expect(got.id).toBe(c.id);
 			expect(got.date).toBe(c.date);
 			expect(got.author).toBe(c.author);
+			expect(got.anchor).toEqual(c.anchor);
 			expect(got.replies).toEqual(c.replies);
 			expect(got.resolution).toEqual(c.resolution);
 		});

@@ -89,6 +89,7 @@ export default class AnnotecaPlugin extends Plugin {
 		});
 
 		this.applyIndicatorSize();
+		this.applyAnchorAppearance();
 
 		this.app.workspace.onLayoutReady(() => {
 			this.refreshActiveFileIndex();
@@ -108,6 +109,25 @@ export default class AnnotecaPlugin extends Plugin {
 		activeDocument.body.style.setProperty(
 			"--annoteca-indicator-size",
 			sizes[this.settings.indicatorSize],
+		);
+	}
+
+	// Apply the anchor-underline style + baseline thickness to body-level CSS
+	// variables. styles.css consumes them for the .annoteca-anchor rule and
+	// per-tier overrides. Called on load and on settings change.
+	applyAnchorAppearance(): void {
+		const thicknesses: Record<AnnotecaSettings["anchorThickness"], string> = {
+			thin: "1px",
+			medium: "2px",
+			thick: "3px",
+		};
+		activeDocument.body.style.setProperty(
+			"--annoteca-anchor-style",
+			this.settings.anchorStyle,
+		);
+		activeDocument.body.style.setProperty(
+			"--annoteca-anchor-thickness-normal",
+			thicknesses[this.settings.anchorThickness],
 		);
 	}
 
@@ -131,7 +151,19 @@ export default class AnnotecaPlugin extends Plugin {
 
 	async loadSettings(): Promise<void> {
 		const loaded = (await this.loadData()) as Partial<AnnotecaSettings> | null;
-		this.settings = { ...DEFAULT_SETTINGS, ...(loaded ?? {}) };
+		this.settings = { ...DEFAULT_SETTINGS, ...(loaded ?? {}), indicatorStyle: DEFAULT_SETTINGS.indicatorStyle };
+
+		// Migrate legacy indicatorStyle values. Prior to the underline rewrite,
+		// "gutter" meant the (misplaced) left-margin dot and "inline" meant the
+		// in-prose ◆ widget. New names are "icon" and "underline" respectively.
+		// Use unknown-string compares so TypeScript doesn't narrow the union.
+		const legacy = (loaded?.indicatorStyle as string | undefined);
+		if (legacy === "gutter") this.settings.indicatorStyle = "icon";
+		else if (legacy === "inline") this.settings.indicatorStyle = "underline";
+		else if (legacy === "icon" || legacy === "underline" || legacy === "both" || legacy === "none") {
+			this.settings.indicatorStyle = legacy;
+		}
+
 		if (!this.settings.categories || this.settings.categories.length === 0) {
 			this.settings.categories = [...DEFAULT_SETTINGS.categories];
 		}
@@ -626,6 +658,7 @@ export default class AnnotecaPlugin extends Plugin {
 			body: next.body,
 			date: next.date,
 			author: next.author,
+			anchor: next.anchor,
 			replies: next.replies,
 			resolution: next.resolution,
 		});
@@ -919,7 +952,7 @@ export default class AnnotecaPlugin extends Plugin {
 	}
 
 	private async cycleIndicatorStyle(): Promise<void> {
-		const order: AnnotecaSettings["indicatorStyle"][] = ["both", "gutter", "inline", "none"];
+		const order: AnnotecaSettings["indicatorStyle"][] = ["both", "icon", "underline", "none"];
 		const idx = order.indexOf(this.settings.indicatorStyle);
 		const next = order[(idx + 1) % order.length] ?? "both";
 		this.settings.indicatorStyle = next;

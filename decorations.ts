@@ -143,23 +143,125 @@ function selectionTouches(state: { selection: { ranges: ReadonlyArray<{ from: nu
 	return false;
 }
 
+// Locate the doc range immediately preceding the marker that matches the
+// stored anchor text. Returns null when:
+//  - the marker has no anchor, OR
+//  - the chars before the marker do not match the anchor text.
+//
+// Truncated anchors are matched in two halves around the U+2026 ellipsis: the
+// tail must sit flush against the marker, and the head must appear somewhere
+// in the preceding window. The matched range is "head start" → "tail end" so
+// the underline covers everything the comment is about, including any prose
+// the truncation skipped over.
+function findAnchorRange(doc: import("@codemirror/state").Text, m: Comment): { from: number; to: number } | null {
+	const a = m.anchor;
+	if (!a) return null;
+	const text = a.text;
+	if (text.length === 0) return null;
+
+	const markerStart = m.marker.start;
+
+	// Look back a reasonable window: enough to cover the longest legal anchor
+	// (80 chars) plus a small slack for whitespace differences. 200 chars is
+	// safe and bounded.
+	const windowStart = Math.max(0, markerStart - 200);
+	const window = doc.sliceString(windowStart, markerStart);
+
+	const ellipsisIdx = text.indexOf("…");
+	if (ellipsisIdx === -1) {
+		// Non-truncated: anchor sits flush against the marker, possibly with
+		// a single space introduced by the composer when inserting after a
+		// selection.
+		if (window.endsWith(text)) {
+			const from = markerStart - text.length;
+			return { from, to: markerStart };
+		}
+		if (window.endsWith(text + " ")) {
+			const from = markerStart - text.length - 1;
+			return { from, to: markerStart - 1 };
+		}
+		return null;
+	}
+
+	// Truncated: head ... tail. Tail flushes the marker; head sits earlier
+	// in the same window.
+	const head = text.slice(0, ellipsisIdx);
+	const tail = text.slice(ellipsisIdx + 1);
+	if (head.length === 0 || tail.length === 0) return null;
+
+	let tailEnd: number;
+	if (window.endsWith(tail)) {
+		tailEnd = markerStart;
+	} else if (window.endsWith(tail + " ")) {
+		tailEnd = markerStart - 1;
+	} else {
+		return null;
+	}
+	const tailStart = tailEnd - tail.length;
+	const headHaystack = window.slice(0, tailStart - windowStart);
+	const headIdxLocal = headHaystack.lastIndexOf(head);
+	if (headIdxLocal === -1) return null;
+	const from = windowStart + headIdxLocal;
+	return { from, to: tailEnd };
+}
+
+function anchorClassesFor(c: Comment, settings: AnnotecaSettings): string {
+	const tier = resolveTier(c.category, settings);
+	const classes = [
+		"annoteca-anchor",
+		`annoteca-cat-${c.category}`,
+		`annoteca-anchor-tier-${tier}`,
+	];
+	if (c.resolution) classes.push("annoteca-resolved");
+	return classes.join(" ");
+}
+
+function resolveTier(categoryId: string, settings: AnnotecaSettings): "subtle" | "normal" | "strong" {
+	const def = settings.categories.find(c => c.id === categoryId);
+	return def?.tier ?? "normal";
+}
+
 function decorationsCompute(ctx: DecorationContext, field: StateField<Comment[]>): Extension {
 	return EditorView.decorations.compute([field, "selection"], state => {
 		if (hideAllFlag.value) return Decoration.none;
 		const markers = state.field(field);
 		const settings = ctx.getSettings();
-		// "gutter" mode: gutter shows the markers; suppress inline decorations.
-		if (settings.indicatorStyle === "none" || settings.indicatorStyle === "gutter") {
-			return Decoration.none;
-		}
+		if (settings.indicatorStyle === "none") return Decoration.none;
+
+		const showIcon = settings.indicatorStyle === "icon" || settings.indicatorStyle === "both";
+		const showUnderline = settings.indicatorStyle === "underline" || settings.indicatorStyle === "both";
 
 		// Build a list sorted by start, since RangeSetBuilder requires monotone
 		// order. parseAll returns markers in document order already, but sort
 		// defensively in case the parser ever changes.
 		const sorted = [...markers].sort((a, b) => a.marker.start - b.marker.start);
+
+		// Two streams of decorations: anchor underlines (Decoration.mark, can
+		// start before the marker) and marker icons (Decoration.replace at the
+		// marker range itself). They go into the same sorted output but the
+		// underline is emitted first when it starts earlier — CM6 requires
+		// monotone start order.
 		const decorations: Range<Decoration>[] = [];
+
 		for (const m of sorted) {
 			const touched = selectionTouches(state, m);
+
+			if (showUnderline) {
+				const range = findAnchorRange(state.doc, m);
+				if (range && range.from < range.to) {
+					decorations.push(
+						Decoration.mark({
+							class: anchorClassesFor(m, settings),
+							attributes: {
+								"data-annoteca-anchor-for": String(m.marker.start),
+							},
+						}).range(range.from, range.to),
+					);
+				}
+			}
+
+			if (!showIcon) continue;
+
 			if (touched) {
 				// Cursor is inside the marker — show the raw text so the user
 				// can edit it directly. Style it so it stays readable.
@@ -174,9 +276,7 @@ function decorationsCompute(ctx: DecorationContext, field: StateField<Comment[]>
 				);
 			} else {
 				// Cursor is outside — replace the raw text with a single icon
-				// widget. This is the live-preview behavior the spec asks for:
-				// "invisible in rendered markdown and decorated in editing
-				// modes as small icons".
+				// widget.
 				decorations.push(
 					Decoration.replace({
 						widget: new MarkerIconWidget(m),
@@ -516,13 +616,22 @@ function clickHandlerExtension(ctx: DecorationContext, field: StateField<Comment
 			if (hideAllFlag.value) return false;
 			const target = event.target as HTMLElement | null;
 			if (!target) return false;
-			const markerEl = target.closest(".annoteca-marker, .annoteca-icon");
-			if (!markerEl) return false;
 			if (event.button !== 0) return false;
-			const startAttr = markerEl.getAttribute("data-annoteca-marker-start");
+
+			const markerEl = target.closest(".annoteca-marker, .annoteca-icon, .annoteca-anchor");
+			if (!markerEl) return false;
+
+			// The icon/marker spans carry `data-annoteca-marker-start`. The
+			// anchor underline spans carry `data-annoteca-anchor-for`, which
+			// also stores the marker's start offset. Either resolves the same
+			// way.
+			const startAttr =
+				markerEl.getAttribute("data-annoteca-marker-start") ??
+				markerEl.getAttribute("data-annoteca-anchor-for");
 			if (!startAttr) return false;
 			const start = Number.parseInt(startAttr, 10);
 			if (Number.isNaN(start)) return false;
+
 			const markers = view.state.field(field);
 			const m = markers.find(c => c.marker.start === start);
 			if (!m) return false;
@@ -531,61 +640,6 @@ function clickHandlerExtension(ctx: DecorationContext, field: StateField<Comment
 			event.stopPropagation();
 			return true;
 		},
-	});
-}
-
-// --------------------------------------------------------------------------
-// Line decorations for gutter-style markers. CM6's gutter() extension does
-// not render reliably in Obsidian's Live Preview mode (the gutter container
-// is hidden by Obsidian's CSS unless line numbers are enabled, and even
-// then it does not always show custom gutters). Instead, we tag each line
-// containing a marker with a CSS class and use a ::before pseudo-element
-// positioned in the line's left margin via negative `left` to render the
-// colored dot. The pseudo-element is non-interactive — clicks happen on
-// the inline marker icon as usual.
-// --------------------------------------------------------------------------
-
-function lineMarkersCompute(ctx: DecorationContext, field: StateField<Comment[]>): Extension {
-	return EditorView.decorations.compute([field], state => {
-		if (hideAllFlag.value) return Decoration.none;
-		const settings = ctx.getSettings();
-		if (settings.indicatorStyle === "inline" || settings.indicatorStyle === "none") {
-			return Decoration.none;
-		}
-		const markers = state.field(field);
-		if (markers.length === 0) return Decoration.none;
-
-		// Group markers by the line they sit on. First marker on each line
-		// determines the dot color (the most common case is one marker per
-		// line; multi-marker lines pick the first marker's category and
-		// ignore subsequent for the dot, which keeps the visual simple).
-		const byLine = new Map<number, Comment[]>();
-		const doc = state.doc;
-		for (const m of markers) {
-			const line = doc.lineAt(m.marker.start);
-			const arr = byLine.get(line.from) ?? [];
-			arr.push(m);
-			byLine.set(line.from, arr);
-		}
-
-		const decos: Range<Decoration>[] = [];
-		const sortedStarts = Array.from(byLine.keys()).sort((a, b) => a - b);
-		for (const lineStart of sortedStarts) {
-			const lineMarkers = byLine.get(lineStart);
-			if (!lineMarkers || lineMarkers.length === 0) continue;
-			const first = lineMarkers[0];
-			if (!first) continue;
-			const allResolved = lineMarkers.every(m => m.resolution !== undefined);
-			const cls = [
-				"annoteca-line-with-marker",
-				`annoteca-cat-${first.category}`,
-			];
-			if (allResolved) cls.push("annoteca-resolved");
-			decos.push(
-				Decoration.line({ class: cls.join(" ") }).range(lineStart),
-			);
-		}
-		return Decoration.set(decos, true);
 	});
 }
 
@@ -603,7 +657,6 @@ export function buildAnnotecaExtension(ctx: DecorationContext): Extension {
 		// shrinks the tooltip to fit available leaf width.
 		tooltips({ parent: activeDocument.body }),
 		decorationsCompute(ctx, field),
-		lineMarkersCompute(ctx, field),
 		hoverTooltipExtension(ctx, field),
 		clickHandlerExtension(ctx, field),
 		dismissReplyOnOutsideClick(),

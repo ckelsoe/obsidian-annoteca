@@ -1,7 +1,7 @@
 // Parser and serializer for the Annoteca marker format. No Obsidian dependency.
 // The format contract this implements is in dev-docs/annoteca/data-format.md.
 
-import type { Comment, Reply, Resolution } from "./types";
+import type { AnchorText, Comment, Reply, Resolution } from "./types";
 
 // Canonical regex from data-format.md "greppable regex" section. Matches the
 // entire marker, opening through closing. The category is captured; the rest of
@@ -14,8 +14,19 @@ const MARKER_RE = /<!--\s*annoteca\/([a-z][a-z0-9-]*)\s*:([\s\S]*?)-->/g;
 const ID_LINE_RE = /^\s*\[id=([a-z0-9]{1,32})\]\s*$/;
 const DATE_LINE_RE = /^\s*\[date=(\d{4}-\d{2}-\d{2})\]\s*$/;
 const AUTHOR_LINE_RE = /^\s*\[author=([a-z0-9-]{1,32})\]\s*$/;
+// Anchor value is permissive: anything but `]` or a line break. Length is
+// capped to 80 visible chars + an optional single ellipsis character to
+// indicate truncation (per data-format.md). Longer values are still parsed —
+// forward-compat — but the cap is enforced at serialize time.
+const ANCHOR_LINE_RE = /^\s*\[anchor=([^\]\r\n]{1,200})\]\s*$/;
 const REPLY_LINE_RE = /^\s*\[reply\s+([a-z0-9-]{1,32})\s+(\d{4}-\d{2}-\d{2})\]:\s?([\s\S]*)$/;
 const RESOLVED_LINE_RE = /^\s*\[resolved\s+([a-z0-9-]{1,32})\s+(\d{4}-\d{2}-\d{2})\]:\s?([\s\S]*)$/;
+
+// Maximum visible characters in an anchor value before mid-truncation kicks
+// in. 80 strikes the balance between "disambiguate the commented words" and
+// "keep the marker file compact." Mirrors data-format.md.
+export const ANCHOR_MAX_CHARS = 80;
+const ANCHOR_ELLIPSIS = "…";
 
 const ID_BASE36_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz";
 
@@ -50,6 +61,7 @@ interface ParsedTail {
 	id: string | undefined;
 	date: string | undefined;
 	author: string | undefined;
+	anchor: AnchorText | undefined;
 	replies: Reply[];
 	resolution: Resolution | undefined;
 }
@@ -59,6 +71,7 @@ function parseInnerContent(inner: string): ParsedTail {
 	let id: string | undefined;
 	let date: string | undefined;
 	let author: string | undefined;
+	let anchor: AnchorText | undefined;
 	const replies: Reply[] = [];
 	let resolution: Resolution | undefined;
 
@@ -90,6 +103,15 @@ function parseInnerContent(inner: string): ParsedTail {
 		const authorMatch = AUTHOR_LINE_RE.exec(line);
 		if (authorMatch && authorMatch[1] !== undefined) {
 			author = authorMatch[1];
+			bodyEndExclusive = i;
+			continue;
+		}
+
+		const anchorMatch = ANCHOR_LINE_RE.exec(line);
+		if (anchorMatch && anchorMatch[1] !== undefined) {
+			const raw = anchorMatch[1];
+			const truncated = raw.includes(ANCHOR_ELLIPSIS);
+			anchor = { text: raw, truncated };
 			bodyEndExclusive = i;
 			continue;
 		}
@@ -137,7 +159,7 @@ function parseInnerContent(inner: string): ParsedTail {
 
 	replies.reverse();
 
-	return { body, id, date, author, replies, resolution };
+	return { body, id, date, author, anchor, replies, resolution };
 }
 
 export function parseAll(content: string): Comment[] {
@@ -150,6 +172,7 @@ export function parseAll(content: string): Comment[] {
 			body: tail.body,
 			date: tail.date,
 			author: tail.author,
+			anchor: tail.anchor,
 			replies: tail.replies,
 			resolution: tail.resolution,
 			marker: { start: raw.start, end: raw.end },
@@ -172,6 +195,7 @@ export function parseAt(content: string, start: number): Comment | undefined {
 		body: tail.body,
 		date: tail.date,
 		author: tail.author,
+		anchor: tail.anchor,
 		replies: tail.replies,
 		resolution: tail.resolution,
 		marker: { start: match.index, end: match.index + match[0].length },
@@ -184,12 +208,13 @@ export interface SerializeInput {
 	body: string;
 	date?: string;
 	author?: string;
+	anchor?: AnchorText;
 	replies?: readonly Reply[];
 	resolution?: Resolution;
 }
 
 export function serialize(c: SerializeInput): string {
-	const hasMetadata = c.id !== undefined || c.date !== undefined || c.author !== undefined;
+	const hasMetadata = c.id !== undefined || c.date !== undefined || c.author !== undefined || c.anchor !== undefined;
 	const hasReplies = (c.replies?.length ?? 0) > 0;
 	const hasResolution = c.resolution !== undefined;
 	const bodyMultiline = c.body.includes("\n");
@@ -203,6 +228,7 @@ export function serialize(c: SerializeInput): string {
 	if (c.id !== undefined) lines.push(`[id=${c.id}]`);
 	if (c.date !== undefined) lines.push(`[date=${c.date}]`);
 	if (c.author !== undefined) lines.push(`[author=${c.author}]`);
+	if (c.anchor !== undefined) lines.push(`[anchor=${c.anchor.text}]`);
 	for (const r of c.replies ?? []) {
 		lines.push(`[reply ${r.author} ${r.date}]: ${r.body}`);
 	}
@@ -212,6 +238,34 @@ export function serialize(c: SerializeInput): string {
 	}
 	lines.push(`-->`);
 	return lines.join("\n");
+}
+
+// Normalize a selected text range into a storable anchor. Strips `]` and
+// line breaks (the parser's tail regex requires single-line, non-`]` values),
+// collapses internal whitespace, and mid-truncates to ANCHOR_MAX_CHARS when
+// the selection is longer.
+//
+// Returns undefined for empty or whitespace-only selections, which the
+// composer treats as "no anchor" (cursor-position comment).
+export function buildAnchorFromSelection(raw: string): AnchorText | undefined {
+	const cleaned = raw
+		.replace(/[\r\n]+/g, " ")
+		.replace(/\]/g, "")
+		.replace(/\s+/g, " ")
+		.trim();
+	if (cleaned.length === 0) return undefined;
+
+	if (cleaned.length <= ANCHOR_MAX_CHARS) {
+		return { text: cleaned, truncated: false };
+	}
+	// Mid-truncate: keep both ends searchable. Ellipsis itself counts toward
+	// the cap so the stored value never exceeds ANCHOR_MAX_CHARS.
+	const keep = ANCHOR_MAX_CHARS - 1; // 1 char reserved for the ellipsis
+	const headLen = Math.ceil(keep / 2);
+	const tailLen = keep - headLen;
+	const head = cleaned.slice(0, headLen).trimEnd();
+	const tail = cleaned.slice(cleaned.length - tailLen).trimStart();
+	return { text: `${head}${ANCHOR_ELLIPSIS}${tail}`, truncated: true };
 }
 
 // 8-character lowercase base36 ID. Uses Math.random so it works in the

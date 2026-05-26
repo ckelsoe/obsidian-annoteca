@@ -26,6 +26,9 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 	indicatorStyle: "both",
 	defaultVisibility: "show",
 
+	anchorStyle: "wavy",
+	anchorThickness: "medium",
+
 	resolvedDisplay: "dim",
 
 	composerLocation: "modal",
@@ -400,6 +403,22 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			},
 		});
 
+		// Tier (anchor-underline urgency). Drives the underline's thickness
+		// for comments in this category: subtle → thin, normal → uses the
+		// global anchor thickness, strong → thick.
+		const tierWrap = controls.createDiv({ cls: "annoteca-category-control" });
+		tierWrap.createDiv({ cls: "annoteca-category-control-label", text: "Tier" });
+		const tierSelect = tierWrap.createEl("select", { cls: "dropdown" });
+		tierSelect.createEl("option", { value: "subtle", text: "Subtle — informational" });
+		tierSelect.createEl("option", { value: "normal", text: "Normal — actionable feedback" });
+		tierSelect.createEl("option", { value: "strong", text: "Strong — urgent" });
+		tierSelect.value = cat.tier ?? "normal";
+		tierSelect.addEventListener("change", () => {
+			const next = tierSelect.value as "subtle" | "normal" | "strong";
+			cat.tier = next === "normal" ? undefined : next;
+			void this.plugin.saveSettings();
+		});
+
 		// Actions: either Remove or the protected note.
 		const actions = detail.createDiv({ cls: "annoteca-category-actions" });
 		if (isProtected) {
@@ -432,11 +451,11 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 
 		new Setting(container)
 			.setName("Indicator style")
-			.setDesc("Where comment indicators appear in the editor.")
+			.setDesc("How comments are surfaced in the editor. The underline marks the text the comment was made against. The icon marks the comment's location when no text was selected at create time.")
 			.addDropdown(d => d
-				.addOption("gutter", "Gutter icon only")
-				.addOption("inline", "Inline underline only")
-				.addOption("both", "Gutter and inline")
+				.addOption("icon", "Inline icon only")
+				.addOption("underline", "Anchor underline only")
+				.addOption("both", "Icon and underline")
 				.addOption("none", "Hidden")
 				.setValue(this.plugin.settings.indicatorStyle)
 				.onChange(async value => {
@@ -456,6 +475,35 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 					this.plugin.settings.indicatorSize = value as AnnotecaSettings["indicatorSize"];
 					await this.plugin.saveSettings();
 					this.plugin.applyIndicatorSize();
+				}));
+
+		new Setting(container)
+			.setName("Anchor underline style")
+			.setDesc("Visual character of the underline drawn over commented text. Applies to every category.")
+			.addDropdown(d => d
+				.addOption("wavy", "Wavy")
+				.addOption("solid", "Solid")
+				.addOption("dotted", "Dotted")
+				.addOption("dashed", "Dashed")
+				.setValue(this.plugin.settings.anchorStyle)
+				.onChange(async value => {
+					this.plugin.settings.anchorStyle = value as AnnotecaSettings["anchorStyle"];
+					await this.plugin.saveSettings();
+					this.plugin.applyAnchorAppearance();
+				}));
+
+		new Setting(container)
+			.setName("Anchor underline thickness")
+			.setDesc("Baseline thickness for categories on the normal tier. Subtle always renders thin, strong always renders thick, regardless of this setting.")
+			.addDropdown(d => d
+				.addOption("thin", "Thin")
+				.addOption("medium", "Medium")
+				.addOption("thick", "Thick")
+				.setValue(this.plugin.settings.anchorThickness)
+				.onChange(async value => {
+					this.plugin.settings.anchorThickness = value as AnnotecaSettings["anchorThickness"];
+					await this.plugin.saveSettings();
+					this.plugin.applyAnchorAppearance();
 				}));
 
 		new Setting(container)

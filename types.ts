@@ -17,12 +17,18 @@ export interface MarkerRange {
 	end: number;   // byte offset one past the trailing `>` of `-->`
 }
 
+export interface AnchorText {
+	text: string;       // the captured commented text; up to 80 chars
+	truncated: boolean; // true when the original selection was longer than 80 chars
+}
+
 export interface Comment {
 	id: string | undefined;          // 8-char base36 when present
 	category: string;                 // matches /^[a-z](-?[a-z0-9])*$/
 	body: string;                     // freeform inline markdown
 	date: string | undefined;         // ISO YYYY-MM-DD
 	author: string | undefined;       // short author tag
+	anchor: AnchorText | undefined;   // commented text captured at creation; undefined for cursor-position comments
 	replies: Reply[];                 // chronological, oldest first
 	resolution: Resolution | undefined;
 	marker: MarkerRange;
@@ -34,11 +40,14 @@ export interface LocatedComment {
 	comment: Comment;
 }
 
+export type AnchorTier = "subtle" | "normal" | "strong";
+
 export interface CategoryDefinition {
 	id: string;             // dash-separated lowercase, matches parser rule
 	displayName: string;    // sentence case for UI
 	icon?: string;          // Obsidian icon name; falls back to category default
 	color?: string;         // CSS variable name or hex; falls back to theme variable
+	tier?: AnchorTier;      // anchor-underline urgency; undefined === "normal"
 }
 
 // User-saved preset. Stored in settings alongside the built-in presets in
@@ -56,8 +65,22 @@ export interface AnnotecaSettings {
 	enableScholarlyPreset: boolean;
 	enableIndexEntryPreset: boolean;
 
-	indicatorStyle: "gutter" | "inline" | "both" | "none";
+	// "icon"      → inline marker glyph only
+	// "underline" → category-tinted anchor underline only (for comments that
+	//               were created with a selection)
+	// "both"      → glyph and underline together
+	// "none"      → no in-editor decorations (markers remain in the file)
+	indicatorStyle: "icon" | "underline" | "both" | "none";
 	defaultVisibility: "show" | "hide" | "last";
+
+	// Visual character of the anchor underline. Applies to every category;
+	// per-category urgency comes from the tier on each CategoryDefinition.
+	anchorStyle: "solid" | "wavy" | "dotted" | "dashed";
+
+	// Baseline thickness used by the "normal" tier. "subtle" tier always
+	// renders thin, "strong" tier always renders thick, regardless of this
+	// setting.
+	anchorThickness: "thin" | "medium" | "thick";
 
 	resolvedDisplay: "dim" | "hide";
 

@@ -5,8 +5,8 @@
 import { Notice, Setting, type Editor, type EditorPosition } from "obsidian";
 
 import type AnnotecaPlugin from "./main";
-import type { Comment } from "./types";
-import { generateId, serialize, todayISO } from "./parser";
+import type { AnchorText, Comment } from "./types";
+import { buildAnchorFromSelection, generateId, serialize, todayISO } from "./parser";
 import { resolveSettingsCategories } from "./settings";
 import { getTemplate, resolvePlaceholder, type ModalTemplate } from "./templates";
 import { createStackedRow } from "./ui-helpers";
@@ -180,7 +180,7 @@ export class ComposerForm {
 		return trimmed;
 	}
 
-	private buildCommentForCreate(category: string, body: string): Comment {
+	private buildCommentForCreate(category: string, body: string, anchor: AnchorText | undefined): Comment {
 		const id = this.uniqueId();
 		const date = todayISO();
 		const author = this.plugin.settings.enableAuthorTag && this.plugin.settings.authorTag !== ""
@@ -192,6 +192,7 @@ export class ComposerForm {
 			body,
 			date,
 			author,
+			anchor,
 			replies: [],
 			resolution: undefined,
 			marker: { start: 0, end: 0 },
@@ -232,6 +233,11 @@ export class ComposerForm {
 				body: updated.body,
 				date: updated.date,
 				author: updated.author,
+				// Preserve the anchor from the original comment. Editing
+				// changes the body / category, not what the comment is anchored
+				// to — per data-format.md the anchor reflects the original
+				// commented text and is not updated by edits.
+				anchor: updated.anchor,
 				replies: updated.replies,
 				resolution: updated.resolution,
 			});
@@ -241,16 +247,21 @@ export class ComposerForm {
 			return;
 		}
 
-		const comment = this.buildCommentForCreate(category, finalBody);
+		// Capture the selection BEFORE we mutate the document. Once
+		// replaceRange runs the editor's selection state is gone.
+		const selection = editor.getSelection();
+		const anchor = selection.length > 0 ? buildAnchorFromSelection(selection) : undefined;
+
+		const comment = this.buildCommentForCreate(category, finalBody, anchor);
 		const text = serialize({
 			id: comment.id,
 			category: comment.category,
 			body: comment.body,
 			date: comment.date,
 			author: comment.author,
+			anchor: comment.anchor,
 		});
 
-		const selection = editor.getSelection();
 		let markerStart: number;
 		if (selection.length > 0) {
 			const to = editor.getCursor("to");

@@ -88,38 +88,53 @@ settings:
 	font-size: var(--annoteca-indicator-size, 1em);
 }
 
-/* Line-based gutter markers (when indicatorStyle is "gutter" or "both") ---
+/* Anchor underline (when indicatorStyle is "underline" or "both") -----------
  *
- * A small colored dot rendered via ::before pseudo-element on lines that
- * contain an annoteca marker. Positioned with negative left so it appears
- * in the editor's left margin / gutter area. Picks up the category color
- * from the .annoteca-cat-X class via currentColor.
+ * Renders a category-tinted underline over the text the comment was made
+ * against. The style (wavy / solid / dotted / dashed) is set globally via
+ * the --annoteca-anchor-style variable on the document body. Thickness is
+ * set globally via --annoteca-anchor-thickness-normal, and overridden per
+ * tier by the .annoteca-anchor-tier-{subtle,strong} classes.
  *
- * The pseudo-element is non-interactive; clicks happen on the inline marker.
- * This approach replaces the previous CM6 gutter() extension, which did not
- * render reliably in Obsidian Live Preview.
+ * The underline uses --annoteca-anchor-color (its own slot) so the prose
+ * text itself stays untinted; only the underline takes the category color.
  */
 
-.cm-line.annoteca-line-with-marker {
-	position: relative;
+.annoteca-anchor {
+	text-decoration-line: underline;
+	text-decoration-style: var(--annoteca-anchor-style, wavy);
+	text-decoration-thickness: var(--annoteca-anchor-thickness, var(--annoteca-anchor-thickness-normal, 2px));
+	text-decoration-color: var(--annoteca-anchor-color, currentColor);
+	text-underline-offset: 2px;
+	cursor: pointer;
 }
 
-.cm-line.annoteca-line-with-marker::before {
-	content: "";
-	position: absolute;
-	left: -14px;
-	top: 50%;
-	transform: translateY(-50%);
-	width: calc(var(--annoteca-indicator-size, 1em) * 0.55);
-	height: calc(var(--annoteca-indicator-size, 1em) * 0.55);
-	border-radius: 50%;
-	background-color: currentColor;
-	pointer-events: none;
+.annoteca-anchor-tier-subtle {
+	--annoteca-anchor-thickness: 1px;
 }
 
-.cm-line.annoteca-line-with-marker.annoteca-resolved::before {
-	opacity: 0.45;
+.annoteca-anchor-tier-strong {
+	--annoteca-anchor-thickness: 3px;
 }
+
+.annoteca-anchor.annoteca-resolved {
+	opacity: 0.55;
+	text-decoration-color: var(--text-muted);
+}
+
+/* Per-category color slot for the underline. Mirrors the .annoteca-cat-X
+ * rules below but writes into --annoteca-anchor-color so the underline is
+ * tinted while the prose text underneath stays uncolored. */
+.annoteca-anchor.annoteca-cat-tone { --annoteca-anchor-color: var(--annoteca-color-tone, var(--color-purple)); }
+.annoteca-anchor.annoteca-cat-clarify { --annoteca-anchor-color: var(--annoteca-color-clarify, var(--color-blue)); }
+.annoteca-anchor.annoteca-cat-cut { --annoteca-anchor-color: var(--annoteca-color-cut, var(--color-red)); }
+.annoteca-anchor.annoteca-cat-expand { --annoteca-anchor-color: var(--annoteca-color-expand, var(--color-green)); }
+.annoteca-anchor.annoteca-cat-tighten { --annoteca-anchor-color: var(--annoteca-color-tighten, var(--color-orange)); }
+.annoteca-anchor.annoteca-cat-source-needed { --annoteca-anchor-color: var(--annoteca-color-source-needed, var(--color-yellow)); }
+.annoteca-anchor.annoteca-cat-uncategorized { --annoteca-anchor-color: var(--annoteca-color-uncategorized, var(--text-muted)); }
+.annoteca-anchor.annoteca-cat-verse-needed { --annoteca-anchor-color: var(--annoteca-color-verse-needed, var(--color-cyan)); }
+.annoteca-anchor.annoteca-cat-meditation { --annoteca-anchor-color: var(--annoteca-color-meditation, var(--color-pink)); }
+.annoteca-anchor.annoteca-cat-index-entry { --annoteca-anchor-color: var(--text-accent); }
 
 .annoteca-icon:hover {
 	color: var(--text-normal);
