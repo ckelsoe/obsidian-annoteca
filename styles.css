@@ -158,8 +158,22 @@ settings:
 .annoteca-cat-meditation { color: var(--annoteca-color-meditation, var(--color-pink)); }
 .annoteca-cat-index-entry { color: var(--text-accent); }
 
+/* Resolved styling.
+ *
+ * Opacity is the one signal applied to every resolved decoration (icon,
+ * anchor underline). The strikethrough belongs only on character-bearing
+ * elements (the icon glyph) — applying it on the anchor underline turns
+ * the underline into a strikethrough because `text-decoration` shorthand
+ * overrides the longhand `text-decoration-line: underline`.
+ *
+ * --annoteca-resolved-opacity is set on body from main.ts based on the
+ * resolvedBrightness setting. "normal" = 0.5, "bright" = 0.85.
+ */
 .annoteca-resolved {
-	opacity: 0.5;
+	opacity: var(--annoteca-resolved-opacity, 0.5);
+}
+
+.annoteca-icon.annoteca-resolved {
 	text-decoration: line-through;
 	text-decoration-color: var(--text-muted);
 }

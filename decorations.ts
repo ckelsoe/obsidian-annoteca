@@ -73,7 +73,7 @@ const markerStateField = (_ctx: DecorationContext) => StateField.define<Comment[
 });
 
 class MarkerIconWidget extends WidgetType {
-	constructor(private readonly marker: Comment) {
+	constructor(private readonly marker: Comment, private readonly hidden: boolean) {
 		super();
 	}
 
@@ -85,7 +85,8 @@ class MarkerIconWidget extends WidgetType {
 			&& o.marker.end === m.marker.end
 			&& o.category === m.category
 			&& o.body === m.body
-			&& o.resolution === m.resolution;
+			&& o.resolution === m.resolution
+			&& other.hidden === this.hidden;
 	}
 
 	override toDOM(view: EditorView): HTMLElement {
@@ -94,6 +95,7 @@ class MarkerIconWidget extends WidgetType {
 		el.setAttribute("data-annoteca-marker-start", String(this.marker.marker.start));
 		el.setAttribute("data-annoteca-marker-end", String(this.marker.marker.end));
 		if (this.marker.resolution) el.classList.add("annoteca-resolved");
+		if (this.hidden) el.classList.add("annoteca-resolved-hidden");
 		if (this.marker.replies.length > 0) el.classList.add("annoteca-has-replies");
 		el.title = `${this.marker.category}: ${this.marker.body.slice(0, 80)}`;
 		// Single character for all marker states. Resolved status is conveyed
@@ -113,34 +115,6 @@ class MarkerIconWidget extends WidgetType {
 		if (event.type === "mousedown" || event.type === "click") return true;
 		return false;
 	}
-}
-
-function classListForMarker(c: Comment, ctxSettings: AnnotecaSettings): string {
-	const classes = ["annoteca-marker", `annoteca-cat-${c.category}`];
-	if (c.resolution) {
-		if (ctxSettings.resolvedDisplay === "hide") classes.push("annoteca-resolved-hidden");
-		else classes.push("annoteca-resolved");
-	}
-	return classes.join(" ");
-}
-
-function selectionTouches(state: { selection: { ranges: ReadonlyArray<{ from: number; to: number }> } }, m: Comment): boolean {
-	for (const r of state.selection.ranges) {
-		if (r.from === r.to) {
-			// Bare cursor (no selection). Only count it as "inside" the marker
-			// when the cursor sits strictly between the marker boundaries.
-			// A cursor exactly at marker.start or marker.end is visually
-			// adjacent, not inside, and should keep the icon widget shown.
-			// This covers programmatic cursor placement (Open button, next /
-			// previous commands) landing the cursor at the marker's start.
-			if (r.from > m.marker.start && r.from < m.marker.end) return true;
-		} else {
-			// Range selection that overlaps the marker — user is actively
-			// selecting through it (e.g., to copy or replace).
-			if (r.from < m.marker.end && r.to > m.marker.start) return true;
-		}
-	}
-	return false;
 }
 
 // Locate the doc range immediately preceding the marker that matches the
@@ -244,9 +218,12 @@ function decorationsCompute(ctx: DecorationContext, field: StateField<Comment[]>
 		const decorations: Range<Decoration>[] = [];
 
 		for (const m of sorted) {
-			const touched = selectionTouches(state, m);
+			const isHidden = m.resolution !== undefined && settings.resolvedDisplay === "hide";
 
-			if (showUnderline) {
+			// Anchor underline is suppressed entirely when the comment is
+			// resolved and the user picked "hide" — they want resolved noise
+			// gone, not faded.
+			if (showUnderline && !isHidden) {
 				const range = findAnchorRange(state.doc, m);
 				if (range && range.from < range.to) {
 					decorations.push(
@@ -262,28 +239,18 @@ function decorationsCompute(ctx: DecorationContext, field: StateField<Comment[]>
 
 			if (!showIcon) continue;
 
-			if (touched) {
-				// Cursor is inside the marker — show the raw text so the user
-				// can edit it directly. Style it so it stays readable.
-				decorations.push(
-					Decoration.mark({
-						class: classListForMarker(m, settings),
-						attributes: {
-							"data-annoteca-marker-start": String(m.marker.start),
-							"data-annoteca-marker-end": String(m.marker.end),
-						},
-					}).range(m.marker.start, m.marker.end),
-				);
-			} else {
-				// Cursor is outside — replace the raw text with a single icon
-				// widget.
-				decorations.push(
-					Decoration.replace({
-						widget: new MarkerIconWidget(m),
-						inclusive: false,
-					}).range(m.marker.start, m.marker.end),
-				);
-			}
+			// Always render the marker as the atomic icon widget. The raw
+			// HTML-comment text is never surfaced inline — users edit through
+			// the modal (right-click → Edit comment, or the popup's Edit
+			// button). When resolvedDisplay is "hide" and the comment is
+			// resolved, the widget still replaces the marker range (so the
+			// raw HTML doesn't leak) but renders display: none.
+			decorations.push(
+				Decoration.replace({
+					widget: new MarkerIconWidget(m, isHidden),
+					inclusive: false,
+				}).range(m.marker.start, m.marker.end),
+			);
 		}
 		return Decoration.set(decorations, true);
 	});

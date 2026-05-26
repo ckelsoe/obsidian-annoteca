@@ -28,6 +28,7 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 
 	anchorStyle: "wavy",
 	anchorThickness: "medium",
+	resolvedBrightness: "normal",
 
 	resolvedDisplay: "dim",
 
@@ -529,6 +530,19 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 				.onChange(async value => {
 					this.plugin.settings.resolvedDisplay = value as AnnotecaSettings["resolvedDisplay"];
 					await this.plugin.saveSettings();
+				}));
+
+		new Setting(container)
+			.setName("Resolved brightness")
+			.setDesc("How aggressively resolved comments are dimmed. Normal works well in light themes; bright keeps resolved content legible against dark backgrounds where the base text is already muted.")
+			.addDropdown(d => d
+				.addOption("normal", "Normal")
+				.addOption("bright", "Bright")
+				.setValue(this.plugin.settings.resolvedBrightness)
+				.onChange(async value => {
+					this.plugin.settings.resolvedBrightness = value as AnnotecaSettings["resolvedBrightness"];
+					await this.plugin.saveSettings();
+					this.plugin.applyAnchorAppearance();
 				}));
 
 		new Setting(container)

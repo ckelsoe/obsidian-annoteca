@@ -82,6 +82,13 @@ export interface AnnotecaSettings {
 	// setting.
 	anchorThickness: "thin" | "medium" | "thick";
 
+	// How visible resolved comments stay in the editor. "normal" dims to
+	// opacity 0.5, which can read as unreadable in dark themes where the
+	// base text is already darker. "bright" keeps resolved content legible
+	// (opacity 0.85) while still distinguishing it from open comments via
+	// the strikethrough on the icon and the muted underline color.
+	resolvedBrightness: "normal" | "bright";
+
 	resolvedDisplay: "dim" | "hide";
 
 	enableAuthorTag: boolean;

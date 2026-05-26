@@ -112,14 +112,19 @@ export default class AnnotecaPlugin extends Plugin {
 		);
 	}
 
-	// Apply the anchor-underline style + baseline thickness to body-level CSS
-	// variables. styles.css consumes them for the .annoteca-anchor rule and
-	// per-tier overrides. Called on load and on settings change.
+	// Apply the anchor-underline style + baseline thickness + resolved
+	// brightness to body-level CSS variables. styles.css consumes them for
+	// the .annoteca-anchor rule, the per-tier overrides, and the .annoteca-
+	// resolved opacity. Called on load and on settings change.
 	applyAnchorAppearance(): void {
 		const thicknesses: Record<AnnotecaSettings["anchorThickness"], string> = {
 			thin: "1px",
 			medium: "2px",
 			thick: "3px",
+		};
+		const resolvedOpacities: Record<AnnotecaSettings["resolvedBrightness"], string> = {
+			normal: "0.5",
+			bright: "0.85",
 		};
 		activeDocument.body.style.setProperty(
 			"--annoteca-anchor-style",
@@ -128,6 +133,10 @@ export default class AnnotecaPlugin extends Plugin {
 		activeDocument.body.style.setProperty(
 			"--annoteca-anchor-thickness-normal",
 			thicknesses[this.settings.anchorThickness],
+		);
+		activeDocument.body.style.setProperty(
+			"--annoteca-resolved-opacity",
+			resolvedOpacities[this.settings.resolvedBrightness],
 		);
 	}
 
