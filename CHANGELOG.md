@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.0] - 2026-05-25
+## [0.2.0] - 2026-05-26
+
+First public release. Bundles the V1 foundation and the full V2 feature set.
 
 ### Added
 - V2 features:
@@ -22,6 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Self-diagnostic command (F-237) writing a status summary to an in-vault note.
   - Scripture reference auto-formatting (F-251) command rewriting `john 3:16 esv` to `John 3:16 (ESV)` for the known 66-book canon and a list of common translations.
   - Index-entry category preset (F-260) plus a Pandoc Lua filter (`docs/pandoc-annoteca.lua`) that maps `index-entry` comments to LaTeX `\index{}` at export time.
+- UX improvements after first live-test feedback:
+  - The reviewer pane now lists every comment in the active file as collapsible cards; the active comment is expanded for reply and lifecycle actions, others are previews that promote on click.
+  - Adding a new comment auto-opens the reviewer pane with that comment selected.
+  - Optional "right side panel" composer location as an alternative to the modal dialog.
+  - Ribbon icon for opening the reviewer pane, and an idempotent first-load placement of the pane in the right sidebar so its tab icon appears next to the native sidebar tabs.
+
+### Fixed
+- Marker text no longer leaks through in Live Preview. The decoration now replaces the raw `<!-- annoteca/...-->` with a small category-tinted glyph when the cursor is outside the marker; the raw text is restored when the cursor enters the marker so direct editing still works.
+- Switched the file-navigation path off the deprecated `getLeaf(false)` API onto `getMostRecentLeaf()` with a tab-fallback, clearing the CI deprecated-API gate.
 
 ## [0.1.0] - 2026-05-25
 
