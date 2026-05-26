@@ -47,3 +47,6 @@ GeminiReview.md
 
 # Internal documentation
 internal-docs/
+
+# Brooks-Lint review history and reports
+.brooks-lint-review/

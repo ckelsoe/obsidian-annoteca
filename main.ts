@@ -37,9 +37,9 @@ import {
 	type ConflictFinding,
 	type ValidationFinding,
 } from "./diagnostics";
-import { serialize, todayISO } from "./parser";
+import { parseAll, serialize, todayISO } from "./parser";
 import { convertAllComments, type ImportFormat } from "./imports";
-import { ConfirmBackupModal } from "./confirm-modal";
+import { ConfirmBackupModal, ConfirmDeleteResolvedModal } from "./confirm-modal";
 import { detectDrift, type DriftFinding, type PositionSnapshot } from "./drift";
 import { formatScripture } from "./scripture";
 
@@ -298,6 +298,28 @@ export default class AnnotecaPlugin extends Plugin {
 			},
 		});
 		this.addCommand({
+			id: "delete-all-resolved-in-file",
+			name: "Delete all resolved comments in this file",
+			editorCallback: (_editor: Editor, view: MarkdownView) => {
+				const file = view.file;
+				if (!file) return;
+				void (async () => {
+					const resolved = await this.listResolvedInFile(file.path);
+					if (resolved.length === 0) {
+						new Notice("No resolved comments in this file.");
+						return;
+					}
+					new ConfirmDeleteResolvedModal(this.app, resolved.length, file.basename, () => {
+						void (async () => {
+							const removed = await this.deleteAllResolvedInFile(file.path);
+							const noun = removed === 1 ? "comment" : "comments";
+							new Notice(`Deleted ${removed} resolved ${noun}.`);
+						})();
+					}).open();
+				})();
+			},
+		});
+		this.addCommand({
 			id: "reopen-comment-at-cursor",
 			name: "Reopen resolved comment here",
 			editorCallback: (editor: Editor, view: MarkdownView) => {
@@ -547,6 +569,52 @@ export default class AnnotecaPlugin extends Plugin {
 		this.commentIndex.rebuild(path, updated);
 		this.events.emit("index-changed", { path });
 		new Notice("Deleted.");
+	}
+
+	// Returns the resolved comments in `path` without modifying the file.
+	// Used by the delete-all-resolved command to size its confirmation modal.
+	async listResolvedInFile(path: string): Promise<Comment[]> {
+		const file = this.app.vault.getAbstractFileByPath(path);
+		if (!(file instanceof TFile)) return [];
+		const content = await this.app.vault.read(file);
+		return parseAll(content).filter(c => c.resolution !== undefined);
+	}
+
+	// Strips every resolved marker from `path` in a single file write. Returns
+	// the number of markers removed. Caller is responsible for confirmation
+	// and for showing a user-facing Notice.
+	async deleteAllResolvedInFile(path: string): Promise<number> {
+		const file = this.app.vault.getAbstractFileByPath(path);
+		if (!(file instanceof TFile)) return 0;
+		const content = await this.app.vault.read(file);
+		const resolved = parseAll(content).filter(c => c.resolution !== undefined);
+		if (resolved.length === 0) return 0;
+
+		// Walk in reverse so earlier splices do not shift later offsets.
+		// Mirror deleteComment's leading-space cleanup for inline markers,
+		// and also strip the trailing newline when the marker occupies its
+		// own line — bulk cleanup intent is "tidy the file", not "remove
+		// this exact span", so a stranded blank line would be a surprise.
+		let updated = content;
+		for (let i = resolved.length - 1; i >= 0; i--) {
+			const c = resolved[i];
+			if (!c) continue;
+			let start = c.marker.start;
+			let end = c.marker.end;
+			const standsAlone = (start === 0 || updated.charAt(start - 1) === "\n")
+				&& (end === updated.length || updated.charAt(end) === "\n");
+			if (standsAlone && end < updated.length) {
+				end += 1;
+			} else if (start > 0 && updated.charAt(start - 1) === " ") {
+				start -= 1;
+			}
+			updated = updated.slice(0, start) + updated.slice(end);
+		}
+
+		await this.app.vault.modify(file, updated);
+		this.commentIndex.rebuild(path, updated);
+		this.events.emit("index-changed", { path });
+		return resolved.length;
 	}
 
 	async appendReply(comment: Comment, reply: Reply): Promise<void> {

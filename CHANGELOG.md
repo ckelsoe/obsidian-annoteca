@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- New command `Delete all resolved comments in this file`. Shows a confirmation modal sized to the count, removes every resolved marker from the active file in a single write, and rebuilds the index. No bulk operation across files yet.
+
 ## [0.2.0] - 2026-05-26
 
 First public release. Bundles the V1 foundation and the full V2 feature set.
