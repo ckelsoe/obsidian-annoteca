@@ -47,8 +47,8 @@ export const MODAL_TEMPLATES: Record<string, ModalTemplate> = {
 	},
 	"index-entry": {
 		fields: [
-			{ id: "term", label: "Index term", placeholder: "Augustine, doctrine of grace" },
-			{ id: "subterm", label: "Subterm (optional)", placeholder: "predestination" },
+			{ id: "term", label: "Index term", placeholder: "e.g., topic name" },
+			{ id: "subterm", label: "Subterm (optional)", placeholder: "e.g., aspect of the topic" },
 		],
 		compose(values, body) {
 			const term = values["term"];
@@ -62,6 +62,22 @@ export const MODAL_TEMPLATES: Record<string, ModalTemplate> = {
 		},
 	},
 };
+
+// Resolve the placeholder for a field given the current composer context.
+// Overrides the field's static placeholder with a contextual hint when
+// possible. Today: the index-entry "term" field falls back to the editor's
+// selected text when there is one — so a user who highlighted "Docling" sees
+// "Docling" as the placeholder, not a domain-specific example.
+export interface PlaceholderContext {
+	selectedText?: string;
+}
+
+export function resolvePlaceholder(field: ModalField, ctx: PlaceholderContext): string {
+	if (field.id === "term" && ctx.selectedText && ctx.selectedText.trim().length > 0) {
+		return ctx.selectedText.trim();
+	}
+	return field.placeholder ?? "";
+}
 
 export function composeScriptureReference(values: Record<string, string>): string {
 	const book = values["book"]?.trim() ?? "";

@@ -6,10 +6,11 @@ import {
 	Notice,
 	Plugin,
 	TFile,
+	getAllTags,
 	type WorkspaceLeaf,
 } from "obsidian";
 
-import type { AnnotecaSettings, Comment, Reply } from "./types";
+import type { AnnotecaSettings, Comment, Reply, ScopeShape, ScopeState, StatusFilter } from "./types";
 import { CommentIndex } from "./index";
 import { DEFAULT_SETTINGS, AnnotecaSettingTab } from "./settings";
 import { AddCommentModal } from "./modal";
@@ -18,18 +19,14 @@ import {
 	setHideAllComments,
 } from "./decorations";
 import {
-	PER_FILE_VIEW_TYPE,
-	PerFileSidebarView,
 	VAULT_UNRESOLVED_VIEW_TYPE,
 	VaultUnresolvedView,
-	REVIEWER_PANE_VIEW_TYPE,
-	ReviewerPaneView,
-	OUTLINE_DENSITY_VIEW_TYPE,
-	OutlineDensityView,
 	INDEX_VIEW_TYPE,
 	IndexEntryView,
 	COMPOSER_PANEL_VIEW_TYPE,
 	ComposerPanelView,
+	ANNOTECA_HUB_VIEW_TYPE,
+	AnnotecaPanelView,
 } from "./views";
 import type { ComposerRequest } from "./composer";
 import {
@@ -57,7 +54,6 @@ export default class AnnotecaPlugin extends Plugin {
 	commentIndex = new CommentIndex();
 	events = new AnnotecaEvents();
 	private vaultScanned = false;
-	private reviewerPanePinned = false;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -65,12 +61,20 @@ export default class AnnotecaPlugin extends Plugin {
 		this.registerEditorExtension(buildAnnotecaExtension({
 			getSettings: () => this.settings,
 			onMarkerClick: (m) => this.openReviewerOnComment(m),
+			openInReviewer: (m) => this.openReviewerOnComment(m),
+			toggleResolution: (m) => { void this.toggleResolutionFromPopup(m); },
+			copyPermalink: (m) => { void this.copyCommentId(m); },
+			submitReply: (m, body) => { void this.submitReplyFromPopup(m, body); },
+			getAuthorTag: () => this.resolvedAuthor(),
+			isStarred: (m) => this.isStarred(m),
+			toggleStarred: (m) => { void this.toggleStarred(m); },
+			loadDraft: (id) => this.loadDraft(id),
+			saveDraft: (id, body) => this.saveDraft(id, body),
+			clearDraft: (id) => this.clearDraft(id),
 		}));
 
-		this.registerView(PER_FILE_VIEW_TYPE, leaf => new PerFileSidebarView(leaf, this));
+		this.registerView(ANNOTECA_HUB_VIEW_TYPE, leaf => new AnnotecaPanelView(leaf, this));
 		this.registerView(VAULT_UNRESOLVED_VIEW_TYPE, leaf => new VaultUnresolvedView(leaf, this));
-		this.registerView(REVIEWER_PANE_VIEW_TYPE, leaf => new ReviewerPaneView(leaf, this));
-		this.registerView(OUTLINE_DENSITY_VIEW_TYPE, leaf => new OutlineDensityView(leaf, this));
 		this.registerView(INDEX_VIEW_TYPE, leaf => new IndexEntryView(leaf, this));
 		this.registerView(COMPOSER_PANEL_VIEW_TYPE, leaf => new ComposerPanelView(leaf, this));
 
@@ -81,13 +85,30 @@ export default class AnnotecaPlugin extends Plugin {
 		this.registerEditorMenu();
 
 		this.addRibbonIcon("message-square", "Annoteca: open comments pane", () => {
-			void this.activateView(REVIEWER_PANE_VIEW_TYPE, "right");
+			void this.activateView(ANNOTECA_HUB_VIEW_TYPE, "right");
 		});
+
+		this.applyIndicatorSize();
 
 		this.app.workspace.onLayoutReady(() => {
 			this.refreshActiveFileIndex();
 			this.ensureRightSidebarTab();
 		});
+	}
+
+	// Apply the indicator-size setting to a body-level CSS variable so the
+	// marker styling in styles.css can scale dynamically without recreating
+	// the editor extension. Called on load and on settings change.
+	applyIndicatorSize(): void {
+		const sizes: Record<AnnotecaSettings["indicatorSize"], string> = {
+			small: "0.85em",
+			medium: "1em",
+			large: "1.25em",
+		};
+		activeDocument.body.style.setProperty(
+			"--annoteca-indicator-size",
+			sizes[this.settings.indicatorSize],
+		);
 	}
 
 	private ensureRightSidebarTab(): void {
@@ -96,11 +117,11 @@ export default class AnnotecaPlugin extends Plugin {
 		// right-pane tools. If a user has explicitly closed it, this won't
 		// reopen on subsequent loads because the leaf record persists across
 		// sessions and we only add when none exists.
-		const existing = this.app.workspace.getLeavesOfType(REVIEWER_PANE_VIEW_TYPE);
+		const existing = this.app.workspace.getLeavesOfType(ANNOTECA_HUB_VIEW_TYPE);
 		if (existing.length > 0) return;
 		const leaf = this.app.workspace.getRightLeaf(false);
 		if (!leaf) return;
-		void leaf.setViewState({ type: REVIEWER_PANE_VIEW_TYPE, active: false });
+		void leaf.setViewState({ type: ANNOTECA_HUB_VIEW_TYPE, active: false });
 	}
 
 	onunload(): void {
@@ -142,6 +163,7 @@ export default class AnnotecaPlugin extends Plugin {
 		this.registerEvent(this.app.workspace.on("file-open", (file) => {
 			if (file && file.extension === "md") {
 				void this.rebuildIndexForFile(file);
+				this.onActiveFileChangedForScope(file);
 			}
 		}));
 	}
@@ -251,22 +273,22 @@ export default class AnnotecaPlugin extends Plugin {
 		this.addCommand({
 			id: "next-comment",
 			name: "Next comment",
-			editorCallback: (editor: Editor, view: MarkdownView) => this.jumpToAdjacentComment(editor, view, "next", false),
+			editorCallback: (editor: Editor, view: MarkdownView) => { void this.jumpToAdjacentComment(editor, view, "next", false); },
 		});
 		this.addCommand({
 			id: "previous-comment",
 			name: "Previous comment",
-			editorCallback: (editor: Editor, view: MarkdownView) => this.jumpToAdjacentComment(editor, view, "previous", false),
+			editorCallback: (editor: Editor, view: MarkdownView) => { void this.jumpToAdjacentComment(editor, view, "previous", false); },
 		});
 		this.addCommand({
 			id: "next-unresolved-comment",
 			name: "Next unresolved comment",
-			editorCallback: (editor: Editor, view: MarkdownView) => this.jumpToAdjacentComment(editor, view, "next", true),
+			editorCallback: (editor: Editor, view: MarkdownView) => { void this.jumpToAdjacentComment(editor, view, "next", true); },
 		});
 		this.addCommand({
 			id: "previous-unresolved-comment",
 			name: "Previous unresolved comment",
-			editorCallback: (editor: Editor, view: MarkdownView) => this.jumpToAdjacentComment(editor, view, "previous", true),
+			editorCallback: (editor: Editor, view: MarkdownView) => { void this.jumpToAdjacentComment(editor, view, "previous", true); },
 		});
 		this.addCommand({
 			id: "toggle-hide-all-comments",
@@ -284,9 +306,9 @@ export default class AnnotecaPlugin extends Plugin {
 			callback: () => { void this.cycleIndicatorStyle(); },
 		});
 		this.addCommand({
-			id: "open-per-file-sidebar",
-			name: "Open file comments pane",
-			callback: () => { void this.activateView(PER_FILE_VIEW_TYPE, "right"); },
+			id: "open-hub",
+			name: "Open comments panel",
+			callback: () => { void this.activateView(ANNOTECA_HUB_VIEW_TYPE, "right"); },
 		});
 		this.addCommand({
 			id: "open-vault-unresolved-view",
@@ -294,24 +316,9 @@ export default class AnnotecaPlugin extends Plugin {
 			callback: () => { void this.activateView(VAULT_UNRESOLVED_VIEW_TYPE, "tab"); },
 		});
 		this.addCommand({
-			id: "open-reviewer-pane",
-			name: "Open reviewer pane",
-			callback: () => { void this.activateView(REVIEWER_PANE_VIEW_TYPE, "right"); },
-		});
-		this.addCommand({
-			id: "open-outline-density-view",
-			name: "Open comment density outline",
-			callback: () => { void this.activateView(OUTLINE_DENSITY_VIEW_TYPE, "right"); },
-		});
-		this.addCommand({
 			id: "open-index-view",
 			name: "Open index entries view",
 			callback: () => { void this.activateView(INDEX_VIEW_TYPE, "tab"); },
-		});
-		this.addCommand({
-			id: "toggle-reviewer-pin",
-			name: "Pin or unpin the reviewer pane",
-			callback: () => this.toggleReviewerPin(),
 		});
 		this.addCommand({
 			id: "check-marker-conflicts",
@@ -463,7 +470,7 @@ export default class AnnotecaPlugin extends Plugin {
 		}
 		this.events.emit("index-changed", { path });
 		this.events.emit("active-comment-changed", { path, start: markerStart });
-		await this.activateView(REVIEWER_PANE_VIEW_TYPE, "right");
+		await this.activateView(ANNOTECA_HUB_VIEW_TYPE, "right");
 	}
 
 	// Comment lifecycle operations ---------------------------------------
@@ -511,6 +518,28 @@ export default class AnnotecaPlugin extends Plugin {
 		await this.replaceMarker(path, comment, updated);
 	}
 
+	async toggleResolutionFromPopup(comment: Comment): Promise<void> {
+		const path = this.app.workspace.getActiveFile()?.path;
+		if (!path) return;
+		if (comment.resolution) {
+			await this.reopenComment(path, comment);
+		} else {
+			await this.resolveComment(path, comment);
+		}
+	}
+
+	async submitReplyFromPopup(comment: Comment, body: string): Promise<void> {
+		const trimmed = body.trim();
+		if (trimmed.length === 0) return;
+		const reply: Reply = {
+			author: this.resolvedAuthor(),
+			date: todayISO(),
+			body: trimmed,
+		};
+		await this.appendReply(comment, reply);
+		new Notice("Reply added.");
+	}
+
 	async copyCommentId(comment: Comment): Promise<void> {
 		if (!comment.id) {
 			new Notice("This comment has no ID.");
@@ -518,6 +547,60 @@ export default class AnnotecaPlugin extends Plugin {
 		}
 		await navigator.clipboard.writeText(comment.id);
 		new Notice(`Copied ID ${comment.id}.`);
+	}
+
+	// Starred comments ---------------------------------------------------
+
+	isStarred(comment: Comment): boolean {
+		if (!comment.id) return false;
+		return this.settings.starredComments.includes(comment.id);
+	}
+
+	async toggleStarred(comment: Comment): Promise<void> {
+		if (!comment.id) {
+			new Notice("This comment has no ID and cannot be starred.");
+			return;
+		}
+		const current = this.settings.starredComments;
+		const idx = current.indexOf(comment.id);
+		if (idx >= 0) {
+			current.splice(idx, 1);
+		} else {
+			current.push(comment.id);
+		}
+		await this.saveSettings();
+		this.events.emit("starred-changed", { id: comment.id });
+	}
+
+	async setLastHubTab(tab: AnnotecaSettings["lastHubTab"]): Promise<void> {
+		if (this.settings.lastHubTab === tab) return;
+		this.settings.lastHubTab = tab;
+		await this.saveSettings();
+	}
+
+	// Reply draft persistence (vault-local, not synced) ------------------
+	// Keyed by comment id. Saved on textarea input (debounced by callers);
+	// loaded when the composer popup opens; cleared on Send.
+
+	loadDraft(commentId: string): string {
+		const raw: unknown = this.app.loadLocalStorage(this.draftKey(commentId));
+		return typeof raw === "string" ? raw : "";
+	}
+
+	saveDraft(commentId: string, body: string): void {
+		if (body.length === 0) {
+			this.clearDraft(commentId);
+			return;
+		}
+		this.app.saveLocalStorage(this.draftKey(commentId), body);
+	}
+
+	clearDraft(commentId: string): void {
+		this.app.saveLocalStorage(this.draftKey(commentId), null);
+	}
+
+	private draftKey(commentId: string): string {
+		return `annoteca:draft:${commentId}`;
 	}
 
 	editCommentFromReviewer(path: string, comment: Comment): void {
@@ -558,6 +641,151 @@ export default class AnnotecaPlugin extends Plugin {
 		return "user";
 	}
 
+	// Scope state --------------------------------------------------------
+	//
+	// The Thread tab can show comments scoped to a single file, a folder, a
+	// folder tree, the whole vault, or files matching a frontmatter property
+	// or tag. Scope state persists across restarts via settings; it is also
+	// auto-collapsed to "this file" when the user navigates outside the
+	// current scope and the scope is not pinned.
+
+	getScopeState(): ScopeState {
+		return this.settings.scopeState;
+	}
+
+	async setScopeShape(shape: ScopeShape, anchorPath: string): Promise<void> {
+		this.settings.scopeState = { shape, anchorPath, pinned: this.settings.scopeState.pinned };
+		await this.saveSettings();
+		this.events.emit("scope-changed");
+	}
+
+	async togglePinScope(): Promise<void> {
+		this.settings.scopeState.pinned = !this.settings.scopeState.pinned;
+		await this.saveSettings();
+		this.events.emit("scope-changed");
+	}
+
+	async setStatusFilter(f: StatusFilter): Promise<void> {
+		if (this.settings.statusFilter === f) return;
+		this.settings.statusFilter = f;
+		await this.saveSettings();
+		this.events.emit("scope-changed");
+	}
+
+	// Returns the set of vault-relative file paths that satisfy the current
+	// scope shape. For tag/property scope, queries the metadata cache. For
+	// folder scope, prefix-matches against vault paths. For vault scope,
+	// returns every markdown file.
+	computeScopeFiles(): Set<string> {
+		const state = this.settings.scopeState;
+		const out = new Set<string>();
+		const allFiles = this.app.vault.getMarkdownFiles();
+
+		switch (state.shape.kind) {
+			case "file": {
+				if (state.anchorPath) out.add(state.anchorPath);
+				else {
+					const active = this.app.workspace.getActiveFile();
+					if (active) out.add(active.path);
+				}
+				break;
+			}
+			case "folder": {
+				const folder = state.anchorPath;
+				const subfolders = state.shape.subfolders;
+				for (const f of allFiles) {
+					if (subfolders) {
+						if (folder === "" || f.path.startsWith(folder + "/") || f.parent?.path === folder) {
+							out.add(f.path);
+						}
+					} else {
+						if ((folder === "" && f.parent?.isRoot()) || f.parent?.path === folder) {
+							out.add(f.path);
+						}
+					}
+				}
+				break;
+			}
+			case "vault": {
+				for (const f of allFiles) out.add(f.path);
+				break;
+			}
+			case "property": {
+				const { key, value } = state.shape;
+				for (const f of allFiles) {
+					const fm = this.app.metadataCache.getFileCache(f)?.frontmatter;
+					if (!fm) continue;
+					const v: unknown = fm[key];
+					if (Array.isArray(v) ? v.includes(value) : v === value) out.add(f.path);
+				}
+				break;
+			}
+			case "tag": {
+				const target = state.shape.tag.startsWith("#") ? state.shape.tag : "#" + state.shape.tag;
+				for (const f of allFiles) {
+					const cache = this.app.metadataCache.getFileCache(f);
+					if (!cache) continue;
+					const tags = getAllTags(cache);
+					if (tags && tags.includes(target)) out.add(f.path);
+				}
+				break;
+			}
+		}
+		return out;
+	}
+
+	// Called when the workspace's active file changes. If the new file falls
+	// outside the current scope and the scope is not pinned, collapse the
+	// scope to "this file" so the panel keeps showing relevant content. When
+	// the new file is inside the current scope, leave the scope alone.
+	private onActiveFileChangedForScope(file: TFile): void {
+		const state = this.settings.scopeState;
+		if (state.pinned) return;
+		if (state.shape.kind === "vault") return;
+		if (state.shape.kind === "file") {
+			// Single-file scope always follows the active file.
+			if (state.anchorPath !== file.path) {
+				void this.setScopeShape({ kind: "file" }, file.path);
+			}
+			return;
+		}
+		const inScope = this.computeScopeFiles().has(file.path);
+		if (!inScope) {
+			void this.setScopeShape({ kind: "file" }, file.path);
+		}
+	}
+
+	// Scope options for the dropdown that depend on the active file's
+	// metadata. Returns the set of properties (key/value pairs) and tags
+	// present on the active file that could be used as scope sources.
+	getDynamicScopeOptionsForActiveFile(): {
+		properties: Array<{ key: string; value: string }>;
+		tags: string[];
+	} {
+		const active = this.app.workspace.getActiveFile();
+		const result = { properties: [] as Array<{ key: string; value: string }>, tags: [] as string[] };
+		if (!active) return result;
+		const cache = this.app.metadataCache.getFileCache(active);
+		if (!cache) return result;
+		if (cache.frontmatter) {
+			for (const [key, raw] of Object.entries(cache.frontmatter)) {
+				if (key === "position") continue;
+				if (typeof raw === "string" || typeof raw === "number" || typeof raw === "boolean") {
+					result.properties.push({ key, value: String(raw) });
+				} else if (Array.isArray(raw)) {
+					for (const v of raw) {
+						if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+							result.properties.push({ key, value: String(v) });
+						}
+					}
+				}
+			}
+		}
+		const tags = getAllTags(cache);
+		if (tags) result.tags.push(...tags);
+		return result;
+	}
+
 	// Navigation ---------------------------------------------------------
 
 	async navigateToComment(path: string, start: number, comment?: Comment): Promise<void> {
@@ -571,54 +799,95 @@ export default class AnnotecaPlugin extends Plugin {
 			new Notice("File not found.");
 			return;
 		}
-		const leaf = this.app.workspace.getMostRecentLeaf() ?? this.app.workspace.getLeaf("tab");
-		await leaf.openFile(file);
-		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (view) {
-			const pos = view.editor.offsetToPos(offset);
-			view.editor.setCursor(pos);
-			view.editor.scrollIntoView({ from: pos, to: pos }, true);
+
+		// Find an existing markdown leaf showing this file. We cannot rely on
+		// getActiveViewOfType(MarkdownView) here because the call site is often
+		// the hub panel (right sidebar), which is the active leaf when the
+		// user clicks a navigate button. The active view in that moment is
+		// the hub, not a MarkdownView, so the cursor + scroll calls would be
+		// gated out and produce a silent no-op.
+		let targetLeaf: WorkspaceLeaf | null = null;
+		for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+			const view = leaf.view as MarkdownView;
+			if (view.file?.path === path) {
+				targetLeaf = leaf;
+				break;
+			}
 		}
+		if (!targetLeaf) {
+			targetLeaf = this.app.workspace.getLeaf("tab");
+			await targetLeaf.openFile(file);
+		}
+
+		const view = targetLeaf.view as MarkdownView;
+		const pos = view.editor.offsetToPos(offset);
+		view.editor.setCursor(pos);
+		view.editor.scrollIntoView({ from: pos, to: pos }, true);
+		this.app.workspace.setActiveLeaf(targetLeaf, { focus: true });
 	}
 
-	private jumpToAdjacentComment(
+	private async jumpToAdjacentComment(
 		editor: Editor,
 		view: MarkdownView,
 		direction: "next" | "previous",
 		unresolvedOnly: boolean,
-	): void {
-		const file = view.file;
-		if (!file) return;
-		const idx = this.commentIndex.get(file.path);
-		if (!idx || idx.comments.length === 0) {
-			new Notice("No comments in this file.");
+	): Promise<void> {
+		const currentFile = view.file;
+		if (!currentFile) return;
+
+		// Gather every comment in the current scope across all files. The
+		// "next/previous" navigation walks this combined list so users can
+		// triage by chapter or by book without bouncing back to single-file.
+		interface Located { path: string; comment: Comment; }
+		const scopeFiles = this.computeScopeFiles();
+		const all: Located[] = [];
+		for (const path of scopeFiles) {
+			const idx = this.commentIndex.get(path);
+			if (!idx) continue;
+			for (const c of idx.comments) {
+				if (unresolvedOnly && c.resolution) continue;
+				all.push({ path, comment: c });
+			}
+		}
+		if (all.length === 0) {
+			new Notice("No matching comments in scope.");
 			return;
 		}
+
+		// Sort by (path, offset). Path sort is alphabetical, which is the
+		// same order the hub Thread tab uses, so navigation matches the panel.
+		all.sort((a, b) => {
+			if (a.path !== b.path) return a.path < b.path ? -1 : 1;
+			return a.comment.marker.start - b.comment.marker.start;
+		});
+
 		const cursorOffset = editor.posToOffset(editor.getCursor());
-		const eligible = idx.comments.filter(c => !unresolvedOnly || !c.resolution);
-		if (eligible.length === 0) {
-			new Notice("No matching comments.");
-			return;
-		}
-		const sorted = [...eligible].sort((a, b) => a.marker.start - b.marker.start);
-		let target: Comment | undefined;
+		const currentPath = currentFile.path;
+		let target: Located | undefined;
+
 		if (direction === "next") {
-			target = sorted.find(c => c.marker.start > cursorOffset) ?? sorted[0];
+			target = all.find(item => {
+				if (item.path < currentPath) return false;
+				if (item.path > currentPath) return true;
+				return item.comment.marker.start > cursorOffset;
+			});
+			target = target ?? all[0]; // wrap to start of scope
 		} else {
-			for (let i = sorted.length - 1; i >= 0; i--) {
-				const candidate = sorted[i];
-				if (candidate && candidate.marker.start < cursorOffset) {
-					target = candidate;
+			for (let i = all.length - 1; i >= 0; i--) {
+				const item = all[i];
+				if (!item) continue;
+				if (item.path > currentPath) continue;
+				if (item.path < currentPath || item.comment.marker.start < cursorOffset) {
+					target = item;
 					break;
 				}
 			}
-			target = target ?? sorted[sorted.length - 1];
+			target = target ?? all[all.length - 1]; // wrap to end of scope
 		}
+
 		if (!target) return;
-		const pos = editor.offsetToPos(target.marker.start);
-		editor.setCursor(pos);
-		editor.scrollIntoView({ from: pos, to: pos }, true);
-		this.openReviewerOnComment(target, file.path);
+		await this.navigateToOffset(target.path, target.comment.marker.start);
+		this.openReviewerOnComment(target.comment, target.path);
 	}
 
 	// Reviewer pane wiring ----------------------------------------------
@@ -626,19 +895,16 @@ export default class AnnotecaPlugin extends Plugin {
 	openReviewerOnComment(comment: Comment, path?: string): void {
 		const filePath = path ?? this.app.workspace.getActiveFile()?.path;
 		if (!filePath) return;
-		this.events.emit("active-comment-changed", { path: filePath, start: comment.marker.start });
-		void this.activateView(REVIEWER_PANE_VIEW_TYPE, "right");
-	}
-
-	private toggleReviewerPin(): void {
-		const leaves = this.app.workspace.getLeavesOfType(REVIEWER_PANE_VIEW_TYPE);
-		if (leaves.length === 0) return;
-		const leaf = leaves[0];
-		if (!leaf) return;
-		const view = leaf.view as unknown as ReviewerPaneView;
-		const pinned = view.togglePinned();
-		this.reviewerPanePinned = pinned;
-		new Notice(pinned ? "Reviewer pane pinned." : "Reviewer pane unpinned.");
+		const start = comment.marker.start;
+		// Activate the view first so its active-comment-changed listener exists
+		// before we emit. If the view is newly created, setViewState resolves
+		// after onOpen runs and the listener is registered. If the view is
+		// already open, the listener is registered from its earlier onOpen.
+		// Emitting before activation lost the event on first open and made
+		// the panel fall back to comments[0] (the first item).
+		void this.activateView(ANNOTECA_HUB_VIEW_TYPE, "right").then(() => {
+			this.events.emit("active-comment-changed", { path: filePath, start });
+		});
 	}
 
 	// Display toggles ----------------------------------------------------

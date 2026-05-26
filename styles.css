@@ -85,7 +85,40 @@ settings:
 	cursor: pointer;
 	margin: 0 2px;
 	user-select: none;
-	font-size: 0.85em;
+	font-size: var(--annoteca-indicator-size, 1em);
+}
+
+/* Line-based gutter markers (when indicatorStyle is "gutter" or "both") ---
+ *
+ * A small colored dot rendered via ::before pseudo-element on lines that
+ * contain an annoteca marker. Positioned with negative left so it appears
+ * in the editor's left margin / gutter area. Picks up the category color
+ * from the .annoteca-cat-X class via currentColor.
+ *
+ * The pseudo-element is non-interactive; clicks happen on the inline marker.
+ * This approach replaces the previous CM6 gutter() extension, which did not
+ * render reliably in Obsidian Live Preview.
+ */
+
+.cm-line.annoteca-line-with-marker {
+	position: relative;
+}
+
+.cm-line.annoteca-line-with-marker::before {
+	content: "";
+	position: absolute;
+	left: -14px;
+	top: 50%;
+	transform: translateY(-50%);
+	width: calc(var(--annoteca-indicator-size, 1em) * 0.55);
+	height: calc(var(--annoteca-indicator-size, 1em) * 0.55);
+	border-radius: 50%;
+	background-color: currentColor;
+	pointer-events: none;
+}
+
+.cm-line.annoteca-line-with-marker.annoteca-resolved::before {
+	opacity: 0.45;
 }
 
 .annoteca-icon:hover {
@@ -120,12 +153,28 @@ settings:
 	display: none;
 }
 
+/* Neutralize CM6's default .cm-tooltip chrome so our inner popovers control
+   their own background, border, shadow, and padding. Without this, themes
+   that style .cm-tooltip layer their chrome on top of ours and produce a
+   washed-out, double-bordered look. */
+.cm-tooltip.annoteca-hover-tooltip,
+.cm-tooltip.annoteca-reply-composer-tooltip {
+	background: transparent;
+	border: none;
+	box-shadow: none;
+	padding: 0;
+	max-width: none;
+	color: var(--text-normal);
+}
+
 .annoteca-hover-preview {
+	min-width: 300px;
 	max-width: 420px;
-	padding: 8px 10px;
-	background-color: var(--background-secondary);
+	padding: 10px 12px;
+	background-color: var(--background-primary);
 	border: 1px solid var(--background-modifier-border);
-	border-radius: 6px;
+	border-radius: var(--radius-m, 6px);
+	box-shadow: var(--shadow-s);
 	font-size: var(--font-ui-small);
 	color: var(--text-normal);
 }
@@ -168,9 +217,279 @@ settings:
 	font-size: var(--font-smaller);
 }
 
+.annoteca-hover-replies-list {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin-top: 8px;
+	padding-top: 8px;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.annoteca-hover-reply {
+	padding: 6px 8px;
+	background-color: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 4px;
+}
+
+.annoteca-hover-reply-head {
+	display: flex;
+	gap: 6px;
+	align-items: baseline;
+	margin-bottom: 2px;
+	font-size: var(--font-smaller);
+}
+
+.annoteca-hover-reply-author {
+	font-weight: var(--font-semibold);
+	color: var(--text-normal);
+}
+
+.annoteca-hover-reply-date {
+	color: var(--text-muted);
+}
+
+.annoteca-hover-reply-body {
+	white-space: pre-wrap;
+	line-height: 1.35;
+}
+
+.annoteca-hover-more-link {
+	background: none;
+	border: none;
+	padding: 0 0 4px 0;
+	color: var(--text-accent);
+	font-size: var(--font-smaller);
+	cursor: pointer;
+	text-align: left;
+}
+
+.annoteca-hover-more-link:hover {
+	text-decoration: underline;
+}
+
+.annoteca-hover-resolution {
+	margin-top: 8px;
+	padding: 6px 8px;
+	border-left: 2px solid var(--interactive-accent);
+	background-color: var(--background-primary);
+}
+
+.annoteca-hover-resolution-head {
+	display: flex;
+	gap: 6px;
+	align-items: baseline;
+	margin-bottom: 2px;
+	font-size: var(--font-smaller);
+}
+
+.annoteca-hover-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-top: 10px;
+	padding-top: 8px;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+/* No custom background/border/color on action buttons. Obsidian's theme
+   already styles bare <button> elements; overriding with hardcoded variables
+   produces poor contrast in themes that redefine --interactive-normal. The
+   .mod-cta class (Obsidian-standard) handles the primary-button variant. */
+.annoteca-hover-action {
+	font-size: var(--font-smaller);
+}
+
+.annoteca-reply-composer {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	width: 360px;
+	max-width: 90vw;
+	padding: 12px 14px;
+	background-color: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m, 6px);
+	box-shadow: var(--shadow-l);
+	color: var(--text-normal);
+}
+
+.annoteca-reply-composer-head {
+	display: flex;
+	justify-content: space-between;
+	align-items: baseline;
+	gap: 8px;
+}
+
+.annoteca-reply-composer-title {
+	font-weight: var(--font-semibold);
+	color: var(--text-normal);
+}
+
+.annoteca-reply-composer-author {
+	color: var(--text-muted);
+	font-size: var(--font-smaller);
+}
+
+.annoteca-reply-composer-textarea {
+	resize: vertical;
+	min-height: 72px;
+	padding: 6px 8px;
+	background-color: var(--background-modifier-form-field, var(--background-primary));
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s, 4px);
+	color: var(--text-normal);
+	font-family: inherit;
+	font-size: var(--font-ui-small);
+	line-height: 1.4;
+}
+
+.annoteca-reply-composer-textarea:focus {
+	border-color: var(--interactive-accent);
+	outline: none;
+}
+
+.annoteca-reply-composer-buttons {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+}
+
 .annoteca-view-root {
 	padding: 12px;
 	overflow-y: auto;
+}
+
+/* Hub panel layout ---------------------------------------------------------
+ *
+ * Single right-sidebar panel with an internal tab strip. Replaces three older
+ * separate ItemViews. Tab strip mirrors Obsidian's native .workspace-tab-header
+ * affordances so theme overrides for the native tabs apply here for free. */
+
+.annoteca-hub-root {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+}
+
+.annoteca-hub-tabs {
+	display: flex;
+	gap: 2px;
+	padding: 6px 8px 0 8px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	flex-shrink: 0;
+}
+
+.annoteca-hub-tab {
+	background: none;
+	border: none;
+	padding: 6px 12px;
+	margin-bottom: -1px;
+	border-bottom: 2px solid transparent;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	cursor: pointer;
+	border-radius: 0;
+}
+
+.annoteca-hub-tab:hover {
+	color: var(--text-normal);
+}
+
+.annoteca-hub-tab.is-active {
+	color: var(--text-normal);
+	border-bottom-color: var(--interactive-accent);
+	font-weight: var(--font-semibold);
+}
+
+.annoteca-hub-content {
+	flex: 1;
+	overflow-y: auto;
+	padding: 12px;
+}
+
+/* Star toggle ---------------------------------------------------------------
+ *
+ * Single character (★) that visually changes color based on starred state.
+ * Used in the hover popup header, the Thread tab row header, and the Starred
+ * tab row header. Disabled state for ID-less comments. */
+
+.annoteca-hover-star,
+.annoteca-row-star {
+	margin-left: auto;
+	background: none;
+	border: none;
+	padding: 0 4px;
+	color: var(--text-faint);
+	font-size: 1.05em;
+	line-height: 1;
+	cursor: pointer;
+}
+
+.annoteca-hover-star:hover,
+.annoteca-row-star:hover {
+	color: var(--text-muted);
+}
+
+.annoteca-hover-star.is-starred,
+.annoteca-row-star.is-starred {
+	color: var(--color-yellow, var(--interactive-accent));
+}
+
+.annoteca-hover-star.is-disabled,
+.annoteca-row-star.is-disabled {
+	opacity: 0.35;
+	cursor: not-allowed;
+}
+
+/* Starred tab cards --------------------------------------------------------- */
+
+.annoteca-starred-list {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.annoteca-starred-card {
+	padding: 10px 12px;
+	background-color: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m, 6px);
+	cursor: pointer;
+	transition: background-color 80ms;
+}
+
+.annoteca-starred-card:hover {
+	background-color: var(--background-modifier-hover);
+}
+
+.annoteca-starred-head {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+	margin-bottom: 6px;
+}
+
+.annoteca-starred-file {
+	color: var(--text-muted);
+	font-size: var(--font-smaller);
+	margin-bottom: 4px;
+	word-break: break-all;
+}
+
+.annoteca-starred-body {
+	color: var(--text-normal);
+	line-height: 1.4;
+	white-space: pre-wrap;
+}
+
+.annoteca-starred-meta {
+	display: flex;
+	gap: 8px;
+	margin-top: 6px;
+	color: var(--text-muted);
+	font-size: var(--font-smaller);
 }
 
 .annoteca-empty {
@@ -574,4 +893,529 @@ settings:
 .annoteca-reviewer-category-icon {
 	display: inline-flex;
 	align-items: center;
+}
+
+/* Scope toolbar (Thread tab) ----------------------------------------------- */
+
+.annoteca-scope-toolbar {
+	display: flex;
+	gap: 6px;
+	align-items: center;
+	margin-bottom: 10px;
+	padding-bottom: 8px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.annoteca-scope-select {
+	flex: 1;
+	min-width: 0;
+	max-width: 100%;
+}
+
+.annoteca-scope-status {
+	flex-shrink: 0;
+}
+
+.annoteca-scope-pin {
+	flex-shrink: 0;
+	width: 28px;
+	height: 28px;
+	padding: 0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	background: none;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s, 4px);
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.annoteca-scope-pin:hover {
+	background-color: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.annoteca-scope-pin.is-pinned {
+	background-color: var(--interactive-accent);
+	border-color: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+/* File groups in hierarchical Thread tab ----------------------------------- */
+/*
+ * Each file becomes a contained block with its own background, border, and
+ * header. This gives strong visual separation in themes like Minimal where
+ * default backgrounds blend together. Clicking the header collapses or
+ * expands the group's comment cards.
+ */
+
+.annoteca-file-group {
+	margin-bottom: 12px;
+	background-color: var(--background-primary-alt, var(--background-secondary));
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m, 6px);
+	overflow: hidden;
+}
+
+.annoteca-file-group:last-child {
+	margin-bottom: 0;
+}
+
+.annoteca-file-header {
+	display: flex;
+	gap: 6px;
+	align-items: center;
+	padding: 8px 10px;
+	cursor: pointer;
+	user-select: none;
+}
+
+.annoteca-file-header:hover {
+	background-color: var(--background-modifier-hover);
+}
+
+.annoteca-file-header-chevron,
+.annoteca-file-header-icon {
+	display: inline-flex;
+	align-items: center;
+	color: var(--text-muted);
+	flex-shrink: 0;
+}
+
+.annoteca-file-header-chevron svg,
+.annoteca-file-header-icon svg {
+	width: 14px;
+	height: 14px;
+}
+
+.annoteca-file-header-name {
+	font-weight: var(--font-semibold);
+	color: var(--text-normal);
+	flex-shrink: 0;
+}
+
+.annoteca-file-header-path {
+	color: var(--text-faint);
+	font-size: var(--font-smaller);
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.annoteca-file-header-count {
+	color: var(--text-muted);
+	font-size: var(--font-smaller);
+	background-color: var(--background-modifier-border);
+	padding: 1px 7px;
+	border-radius: 10px;
+	flex-shrink: 0;
+}
+
+.annoteca-file-group.is-collapsed .annoteca-file-header {
+	border-bottom: none;
+}
+
+.annoteca-file-group-body {
+	padding: 10px;
+	border-top: 1px solid var(--background-modifier-border);
+	background-color: var(--background-primary);
+}
+
+/* Outline tab polish ------------------------------------------------------- */
+
+.annoteca-density-row.is-current {
+	background-color: var(--background-modifier-active-hover);
+	border-left: 3px solid var(--interactive-accent);
+	padding-left: calc(var(--data-level, 1) * 12px - 3px);
+}
+
+.annoteca-density-open.clickable,
+.annoteca-density-resolved.clickable {
+	cursor: pointer;
+	background: none;
+	border: 1px solid transparent;
+	padding: 2px 6px;
+	border-radius: var(--radius-s, 4px);
+}
+
+.annoteca-density-open.clickable:hover,
+.annoteca-density-resolved.clickable:hover {
+	background-color: var(--background-modifier-hover);
+	border-color: var(--background-modifier-border);
+}
+
+/* Stacked row pattern -----------------------------------------------------
+ *
+ * Label and description on top, full-width control area below. Used where
+ * Obsidian's right-rail Setting widget would force long controls into a
+ * narrow column. See ui-helpers.ts createStackedRow.
+ */
+
+.annoteca-stacked-row {
+	padding: 12px 0;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.annoteca-stacked-row:last-child {
+	border-bottom: none;
+}
+
+.annoteca-stacked-labels {
+	margin-bottom: 8px;
+}
+
+.annoteca-stacked-name {
+	font-weight: var(--font-semibold);
+	color: var(--text-normal);
+}
+
+.annoteca-stacked-desc {
+	margin-top: 2px;
+	color: var(--text-muted);
+	font-size: var(--font-smaller);
+	line-height: 1.4;
+}
+
+.annoteca-stacked-content {
+	width: 100%;
+}
+
+/* Color picker ------------------------------------------------------------ */
+
+.annoteca-color-picker {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.annoteca-color-swatches {
+	display: flex;
+	gap: 6px;
+	flex-wrap: wrap;
+}
+
+.annoteca-color-swatch {
+	width: 26px;
+	height: 26px;
+	padding: 0;
+	border-radius: 50%;
+	border: 2px solid var(--background-modifier-border);
+	/* background-color is set inline from the matching Obsidian color
+	 * variable (--color-red, --color-blue, etc.) by ui-helpers.ts. */
+	cursor: pointer;
+}
+
+.annoteca-color-swatch:hover {
+	transform: scale(1.1);
+}
+
+.annoteca-color-swatch.is-active {
+	border-color: var(--text-normal);
+	box-shadow: 0 0 0 2px var(--background-primary), 0 0 0 4px var(--text-normal);
+}
+
+.annoteca-color-custom {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+}
+
+.annoteca-color-native {
+	width: 36px;
+	height: 28px;
+	padding: 0;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s, 4px);
+	cursor: pointer;
+	background: none;
+}
+
+.annoteca-color-reset {
+	font-size: var(--font-smaller);
+}
+
+/* Icon picker ------------------------------------------------------------- */
+
+.annoteca-icon-picker {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+}
+
+.annoteca-icon-picker-trigger {
+	display: inline-flex;
+	gap: 6px;
+	align-items: center;
+	padding: 4px 10px;
+	background-color: var(--background-modifier-form-field, var(--background-primary));
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s, 4px);
+	cursor: pointer;
+}
+
+.annoteca-icon-picker-trigger:hover {
+	background-color: var(--background-modifier-hover);
+}
+
+.annoteca-icon-picker-preview {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
+	height: 18px;
+}
+
+.annoteca-icon-picker-preview.is-empty {
+	color: var(--text-muted);
+	font-size: var(--font-smaller);
+}
+
+.annoteca-icon-picker-label {
+	font-size: var(--font-smaller);
+	color: var(--text-muted);
+}
+
+.annoteca-icon-picker-clear {
+	font-size: var(--font-smaller);
+}
+
+/* Icon picker modal ------------------------------------------------------- */
+
+.annoteca-icon-picker-modal {
+	min-width: 480px;
+	max-width: 720px;
+}
+
+.annoteca-icon-picker-header {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	margin-bottom: 12px;
+}
+
+.annoteca-icon-picker-search {
+	width: 100%;
+	padding: 6px 10px;
+	background-color: var(--background-modifier-form-field, var(--background-primary));
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s, 4px);
+	color: var(--text-normal);
+}
+
+.annoteca-icon-picker-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+	gap: 6px;
+	max-height: 480px;
+	overflow-y: auto;
+}
+
+.annoteca-icon-picker-cell {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 4px;
+	padding: 8px;
+	background: none;
+	border: 1px solid transparent;
+	border-radius: var(--radius-s, 4px);
+	cursor: pointer;
+}
+
+.annoteca-icon-picker-cell:hover {
+	background-color: var(--background-modifier-hover);
+	border-color: var(--background-modifier-border);
+}
+
+.annoteca-icon-picker-cell.is-active {
+	background-color: var(--background-modifier-active-hover);
+	border-color: var(--interactive-accent);
+}
+
+.annoteca-icon-picker-cell-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.annoteca-icon-picker-cell-icon svg {
+	width: 20px;
+	height: 20px;
+}
+
+.annoteca-icon-picker-cell-label {
+	font-size: var(--font-smaller);
+	color: var(--text-muted);
+	text-align: center;
+	word-break: break-all;
+	line-height: 1.2;
+}
+
+.annoteca-icon-picker-empty {
+	padding: 24px;
+	text-align: center;
+	color: var(--text-muted);
+	font-style: italic;
+}
+
+/* Category v2 layout ------------------------------------------------------ */
+
+.annoteca-category-row {
+	padding: 16px 0;
+}
+
+.annoteca-category-controls {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.annoteca-category-control {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.annoteca-category-control-label {
+	font-size: var(--font-smaller);
+	color: var(--text-muted);
+	font-weight: var(--font-semibold);
+}
+
+.annoteca-category-name {
+	padding: 6px 10px;
+	background-color: var(--background-modifier-form-field, var(--background-primary));
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s, 4px);
+	color: var(--text-normal);
+}
+
+.annoteca-category-actions {
+	margin-top: 12px;
+}
+
+.annoteca-category-remove {
+	color: var(--text-error, var(--color-red));
+	background: none;
+	border: 1px solid var(--background-modifier-border);
+	padding: 4px 12px;
+	border-radius: var(--radius-s, 4px);
+	cursor: pointer;
+	font-size: var(--font-smaller);
+}
+
+.annoteca-category-remove:hover {
+	background-color: var(--background-modifier-error-hover, var(--background-modifier-hover));
+}
+
+/* Preset browser ---------------------------------------------------------- */
+
+.annoteca-preset-selector {
+	margin-bottom: 8px;
+}
+
+.annoteca-preset-preview {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 10px;
+	background-color: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s, 4px);
+}
+
+.annoteca-preset-cat {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+	padding: 4px 0;
+}
+
+.annoteca-preset-cat.is-conflict {
+	opacity: 0.6;
+}
+
+.annoteca-preset-cat-label {
+	display: flex;
+	gap: 6px;
+	align-items: center;
+	flex: 1;
+}
+
+.annoteca-preset-cat-icon {
+	display: inline-flex;
+	align-items: center;
+}
+
+.annoteca-preset-conflict {
+	color: var(--text-muted);
+	font-size: var(--font-smaller);
+	font-style: italic;
+}
+
+.annoteca-preset-actions {
+	display: flex;
+	gap: 8px;
+	margin-top: 8px;
+	padding-top: 8px;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.annoteca-preset-save {
+	display: flex;
+	gap: 8px;
+}
+
+.annoteca-preset-save-name {
+	flex: 1;
+	padding: 6px 10px;
+	background-color: var(--background-modifier-form-field, var(--background-primary));
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s, 4px);
+	color: var(--text-normal);
+}
+
+/* Composer body field (stacked layout) ------------------------------------ */
+
+.annoteca-composer-body-row .annoteca-modal-body {
+	width: 100%;
+	min-height: 120px;
+	resize: vertical;
+	padding: 8px 10px;
+	background-color: var(--background-modifier-form-field, var(--background-primary));
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s, 4px);
+	color: var(--text-normal);
+	font-family: inherit;
+	font-size: var(--font-ui-medium);
+	line-height: 1.5;
+}
+
+.annoteca-composer-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	margin-top: 16px;
+}
+
+/* Template fields in composer (stacked layout) ---------------------------- */
+
+.annoteca-template-field .annoteca-template-input,
+.annoteca-template-field .annoteca-template-textarea {
+	width: 100%;
+	padding: 6px 10px;
+	background-color: var(--background-modifier-form-field, var(--background-primary));
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s, 4px);
+	color: var(--text-normal);
+	font-family: inherit;
+}
+
+.annoteca-template-field .annoteca-template-textarea {
+	min-height: 60px;
+	resize: vertical;
+	font-size: var(--font-ui-small);
 }

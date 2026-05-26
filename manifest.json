@@ -2,7 +2,7 @@
 	"id": "annoteca",
 	"name": "Annoteca",
 	"version": "0.2.0",
-	"minAppVersion": "1.5.0",
+	"minAppVersion": "1.8.7",
 	"description": "Categorized inline feedback comments for long-form markdown documents. Plain HTML storage, threaded AI conversations, readable by humans and any AI assistant. Works on desktop and mobile.",
 	"author": "Charles Kelsoe (ckelsoe)",
 	"authorUrl": "https://github.com/ckelsoe",

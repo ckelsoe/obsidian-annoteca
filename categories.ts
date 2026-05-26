@@ -50,6 +50,70 @@ export const INDEX_ENTRY_CATEGORY: CategoryDefinition = {
 	color: "var(--text-accent)",
 };
 
+// Built-in presets the user can browse and cherry-pick categories from. Each
+// preset is a curated set of categories for a common writing or review
+// workflow. Selecting a preset does not replace the user's working list;
+// they choose which categories to add. Custom user-saved presets live in
+// settings alongside these.
+export interface Preset {
+	id: string;
+	displayName: string;
+	categories: readonly CategoryDefinition[];
+}
+
+export const DEFAULT_PRESETS: readonly Preset[] = [
+	{
+		id: "general",
+		displayName: "General editing",
+		categories: DEFAULT_CATEGORIES.filter(c => c.id !== "uncategorized"),
+	},
+	{
+		id: "scholarly",
+		displayName: "Scholarly / theology",
+		categories: [
+			{ id: "verse-needed", displayName: "Verse needed", icon: "book", color: "var(--color-cyan)" },
+			{ id: "meditation", displayName: "Meditation", icon: "heart", color: "var(--color-pink)" },
+			{ id: "exegesis", displayName: "Exegesis", icon: "scroll", color: "var(--color-purple)" },
+			{ id: "translation", displayName: "Translation", icon: "languages", color: "var(--color-blue)" },
+		],
+	},
+	{
+		id: "fiction",
+		displayName: "Fiction writing",
+		categories: [
+			{ id: "character", displayName: "Character", icon: "user", color: "var(--color-purple)" },
+			{ id: "plot", displayName: "Plot", icon: "git-branch", color: "var(--color-blue)" },
+			{ id: "pacing", displayName: "Pacing", icon: "timer", color: "var(--color-orange)" },
+			{ id: "dialogue", displayName: "Dialogue", icon: "message-circle", color: "var(--color-green)" },
+			{ id: "setting", displayName: "Setting", icon: "map-pin", color: "var(--color-yellow)" },
+			{ id: "voice", displayName: "Voice", icon: "mic", color: "var(--color-pink)" },
+		],
+	},
+	{
+		id: "code-review",
+		displayName: "Code review",
+		categories: [
+			{ id: "security", displayName: "Security", icon: "shield-alert", color: "var(--color-red)" },
+			{ id: "performance", displayName: "Performance", icon: "zap", color: "var(--color-orange)" },
+			{ id: "style", displayName: "Style", icon: "paintbrush", color: "var(--color-purple)" },
+			{ id: "architecture", displayName: "Architecture", icon: "building-2", color: "var(--color-blue)" },
+			{ id: "test-coverage", displayName: "Test coverage", icon: "test-tube", color: "var(--color-green)" },
+			{ id: "nit", displayName: "Nit", icon: "more-horizontal", color: "var(--text-muted)" },
+		],
+	},
+	{
+		id: "project-planning",
+		displayName: "Project planning",
+		categories: [
+			{ id: "blocker", displayName: "Blocker", icon: "alert-octagon", color: "var(--color-red)" },
+			{ id: "decision-needed", displayName: "Decision needed", icon: "git-pull-request", color: "var(--color-orange)" },
+			{ id: "risk", displayName: "Risk", icon: "alert-triangle", color: "var(--color-yellow)" },
+			{ id: "opportunity", displayName: "Opportunity", icon: "lightbulb", color: "var(--color-green)" },
+			{ id: "follow-up", displayName: "Follow-up", icon: "arrow-right-circle", color: "var(--color-blue)" },
+		],
+	},
+];
+
 // Pure helper that resolves the user's enabled category list given settings
 // flags. The result is what the modal dropdown and the per-file sidebar group
 // by.

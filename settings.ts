@@ -4,16 +4,18 @@ import {
 	Setting,
 	Notice,
 	ButtonComponent,
+	setIcon,
 } from "obsidian";
 
 import type AnnotecaPlugin from "./main";
-import type { AnnotecaSettings, CategoryDefinition } from "./types";
+import type { AnnotecaSettings, CategoryDefinition, UserPreset } from "./types";
 import {
 	DEFAULT_CATEGORIES,
-	SCHOLARLY_PRESET_CATEGORIES,
+	DEFAULT_PRESETS,
 	isValidCategoryName,
 	resolveEnabledCategories,
 } from "./categories";
+import { createStackedRow, createColorPicker, createIconPicker } from "./ui-helpers";
 
 export const DEFAULT_SETTINGS: AnnotecaSettings = {
 	categories: DEFAULT_CATEGORIES.map(c => ({ ...c })),
@@ -35,6 +37,18 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 	debugLogTarget: "console",
 
 	settingsBackupPath: undefined,
+
+	starredComments: [],
+	lastHubTab: "thread",
+	scopeState: {
+		shape: { kind: "file" },
+		anchorPath: "",
+		pinned: false,
+	},
+	statusFilter: "open",
+	autoCollapseInactiveFiles: true,
+	customPresets: [],
+	indicatorSize: "medium",
 };
 
 // Resolve the active category list given current settings. Centralized so the
@@ -75,16 +89,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			.setName("Categories")
 			.setHeading();
 
-		new Setting(container)
-			.setName("Scholarly preset")
-			.setDesc("Add verse-needed and meditation to the category list. Useful for theology and scripture-heavy documents.")
-			.addToggle(t => t
-				.setValue(this.plugin.settings.enableScholarlyPreset)
-				.onChange(async value => {
-					this.plugin.settings.enableScholarlyPreset = value;
-					await this.plugin.saveSettings();
-					this.display();
-				}));
+		this.renderPresetSection(container);
 
 		new Setting(container)
 			.setName("Index-entry preset")
@@ -141,53 +146,206 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 					});
 			}));
 
-		if (this.plugin.settings.enableScholarlyPreset) {
-			new Setting(container)
-				.setName("Scholarly preset categories")
-				.setDesc(SCHOLARLY_PRESET_CATEGORIES.map(c => c.displayName).join(", "));
+	}
+
+	private renderPresetSection(container: HTMLElement): void {
+		const customPresets = this.plugin.settings.customPresets;
+		const allPresets: Array<{ id: string; displayName: string; categories: readonly CategoryDefinition[]; isCustom: boolean }> = [
+			...DEFAULT_PRESETS.map(p => ({ ...p, isCustom: false })),
+			...customPresets.map(p => ({ ...p, isCustom: true })),
+		];
+
+		const { content } = createStackedRow(container, {
+			name: "Browse presets",
+			description: "Cherry-pick categories from any preset into your working list. Picking a preset never replaces existing categories.",
+		});
+
+		// Preset selector dropdown.
+		const selectorRow = content.createDiv({ cls: "annoteca-preset-selector" });
+		const select = selectorRow.createEl("select", { cls: "dropdown" });
+		for (const p of allPresets) {
+			select.createEl("option", {
+				value: p.id,
+				text: p.isCustom ? `★ ${p.displayName}` : p.displayName,
+			});
 		}
+
+		// Preview of selected preset's categories with checkboxes.
+		const previewArea = content.createDiv({ cls: "annoteca-preset-preview" });
+
+		const renderPreview = (): void => {
+			previewArea.empty();
+			const selected = allPresets.find(p => p.id === select.value);
+			if (!selected) return;
+			const existingIds = new Set(this.plugin.settings.categories.map(c => c.id));
+			const checks: Array<{ cat: CategoryDefinition; input: HTMLInputElement; conflict: boolean }> = [];
+
+			for (const cat of selected.categories) {
+				const conflict = existingIds.has(cat.id);
+				const row = previewArea.createDiv({
+					cls: `annoteca-preset-cat${conflict ? " is-conflict" : ""}`,
+				});
+				const input = row.createEl("input", { attr: { type: "checkbox" } });
+				input.disabled = conflict;
+				const label = row.createSpan({ cls: "annoteca-preset-cat-label" });
+				if (cat.icon) {
+					const iconEl = label.createSpan({ cls: "annoteca-preset-cat-icon" });
+					setIcon(iconEl, cat.icon);
+				}
+				label.createSpan({ text: cat.displayName });
+				if (conflict) {
+					row.createSpan({ cls: "annoteca-preset-conflict", text: "already in list" });
+				}
+				checks.push({ cat, input, conflict });
+			}
+
+			const actions = previewArea.createDiv({ cls: "annoteca-preset-actions" });
+			const addBtn = actions.createEl("button", {
+				cls: "annoteca-preset-add mod-cta",
+				text: "Add selected categories",
+				attr: { type: "button" },
+			});
+			addBtn.addEventListener("click", () => {
+				const chosen = checks.filter(c => !c.conflict && c.input.checked).map(c => c.cat);
+				if (chosen.length === 0) {
+					new Notice("Pick at least one category.");
+					return;
+				}
+				this.plugin.settings.categories.push(...chosen.map(c => ({ ...c })));
+				void this.plugin.saveSettings();
+				new Notice(`Added ${chosen.length} categor${chosen.length === 1 ? "y" : "ies"}.`);
+				this.display();
+			});
+
+			if (selected.isCustom) {
+				const deleteBtn = actions.createEl("button", {
+					cls: "annoteca-preset-delete",
+					text: "Delete preset",
+					attr: { type: "button" },
+				});
+				deleteBtn.addEventListener("click", () => {
+					this.plugin.settings.customPresets =
+						this.plugin.settings.customPresets.filter(p => p.id !== selected.id);
+					void this.plugin.saveSettings();
+					this.display();
+				});
+			}
+		};
+
+		select.addEventListener("change", renderPreview);
+		renderPreview();
+
+		// Save current categories as a custom preset.
+		const { content: saveContent } = createStackedRow(container, {
+			name: "Save current as preset",
+			description: "Capture your current working categories under a name so you can reuse them later or share between vaults.",
+		});
+		const saveRow = saveContent.createDiv({ cls: "annoteca-preset-save" });
+		const nameInput = saveRow.createEl("input", {
+			cls: "annoteca-preset-save-name",
+			attr: { type: "text", placeholder: "Preset name" },
+		});
+		const saveBtn = saveRow.createEl("button", {
+			cls: "annoteca-preset-save-button mod-cta",
+			text: "Save",
+			attr: { type: "button" },
+		});
+		saveBtn.addEventListener("click", () => {
+			const name = nameInput.value.trim();
+			if (name.length === 0) {
+				new Notice("Give the preset a name.");
+				return;
+			}
+			const id = `user-${Date.now().toString(36)}`;
+			const preset: UserPreset = {
+				id,
+				displayName: name,
+				categories: this.plugin.settings.categories.map(c => ({ ...c })),
+			};
+			this.plugin.settings.customPresets.push(preset);
+			void this.plugin.saveSettings();
+			new Notice(`Saved preset “${name}”.`);
+			this.display();
+		});
 	}
 
 	private renderCategoryList(container: HTMLElement): void {
 		const list = container.createDiv({ cls: "annoteca-category-list" });
 		for (const cat of this.plugin.settings.categories) {
-			const row = new Setting(list)
-				.setName(cat.displayName)
-				.setDesc(`Identifier: ${cat.id}`);
+			// Heading uses the immutable identifier rather than the display
+			// name. Repeating the display name in the heading made categories
+			// feel like fixed labels (the input below looked like a search
+			// field, not an editable rename). Now the identifier anchors the
+			// row and the display-name input is the only source of truth.
+			const isProtected = cat.id === "uncategorized";
+			const { content } = createStackedRow(list, {
+				name: `Identifier: ${cat.id}`,
+				description: isProtected
+					? "Used as the scratchpad fallback; this category cannot be removed."
+					: "Rename, change the icon and color, or remove this category.",
+				cls: "annoteca-category-row",
+			});
 
-			row.addText(t => t
-				.setPlaceholder("Icon name")
-				.setValue(cat.icon ?? "")
-				.onChange(async value => {
-					cat.icon = value.trim() === "" ? undefined : value.trim();
-					await this.plugin.saveSettings();
-				}));
+			const controls = content.createDiv({ cls: "annoteca-category-controls" });
 
-			row.addText(t => t
-				.setPlaceholder("CSS color or variable")
-				.setValue(cat.color ?? "")
-				.onChange(async value => {
-					cat.color = value.trim() === "" ? undefined : value.trim();
-					await this.plugin.saveSettings();
-				}));
+			// Display name editing.
+			const nameWrap = controls.createDiv({ cls: "annoteca-category-control" });
+			nameWrap.createDiv({ cls: "annoteca-category-control-label", text: "Display name" });
+			const nameInput = nameWrap.createEl("input", {
+				cls: "annoteca-category-name",
+				attr: { type: "text", value: cat.displayName },
+			});
+			nameInput.addEventListener("input", () => {
+				const v = nameInput.value.trim();
+				if (v.length === 0) return;
+				cat.displayName = v;
+				void this.plugin.saveSettings();
+			});
 
-			row.addButton(b => b
-				.setIcon("trash-2")
-				.setTooltip("Remove category")
-				.onClick(async () => {
-					if (cat.id === "uncategorized") {
-						new Notice("The uncategorized category cannot be removed (used by the scratchpad).");
-						return;
-					}
-					if (this.plugin.settings.defaultCategory === cat.id) {
-						new Notice("Cannot remove the default category. Pick a different default first.");
-						return;
-					}
-					this.plugin.settings.categories =
-						this.plugin.settings.categories.filter(c => c.id !== cat.id);
+			// Icon picker.
+			const iconWrap = controls.createDiv({ cls: "annoteca-category-control" });
+			iconWrap.createDiv({ cls: "annoteca-category-control-label", text: "Icon" });
+			createIconPicker(iconWrap, {
+				app: this.app,
+				current: cat.icon,
+				onChange: async next => {
+					cat.icon = next;
 					await this.plugin.saveSettings();
-					this.display();
-				}));
+				},
+			});
+
+			// Color picker.
+			const colorWrap = controls.createDiv({ cls: "annoteca-category-control" });
+			colorWrap.createDiv({ cls: "annoteca-category-control-label", text: "Color" });
+			createColorPicker(colorWrap, {
+				current: cat.color,
+				onChange: async next => {
+					cat.color = next;
+					await this.plugin.saveSettings();
+				},
+			});
+
+			// Remove button.
+			const actions = content.createDiv({ cls: "annoteca-category-actions" });
+			const removeBtn = actions.createEl("button", {
+				cls: "annoteca-category-remove",
+				text: "Remove category",
+				attr: { type: "button" },
+			});
+			removeBtn.addEventListener("click", () => {
+				if (cat.id === "uncategorized") {
+					new Notice("The uncategorized category cannot be removed (used by the scratchpad).");
+					return;
+				}
+				if (this.plugin.settings.defaultCategory === cat.id) {
+					new Notice("Cannot remove the default category. Pick a different default first.");
+					return;
+				}
+				this.plugin.settings.categories =
+					this.plugin.settings.categories.filter(c => c.id !== cat.id);
+				void this.plugin.saveSettings();
+				this.display();
+			});
 		}
 	}
 
@@ -206,6 +364,20 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 				.onChange(async value => {
 					this.plugin.settings.indicatorStyle = value as AnnotecaSettings["indicatorStyle"];
 					await this.plugin.saveSettings();
+				}));
+
+		new Setting(container)
+			.setName("Indicator size")
+			.setDesc("Visual size of the marker icon in the editor.")
+			.addDropdown(d => d
+				.addOption("small", "Small")
+				.addOption("medium", "Medium")
+				.addOption("large", "Large")
+				.setValue(this.plugin.settings.indicatorSize)
+				.onChange(async value => {
+					this.plugin.settings.indicatorSize = value as AnnotecaSettings["indicatorSize"];
+					await this.plugin.saveSettings();
+					this.plugin.applyIndicatorSize();
 				}));
 
 		new Setting(container)
@@ -242,6 +414,16 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.composerLocation)
 				.onChange(async value => {
 					this.plugin.settings.composerLocation = value as AnnotecaSettings["composerLocation"];
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(container)
+			.setName("Auto-collapse other files in scope")
+			.setDesc("When the thread panel shows comments from multiple files, collapse files other than the one you are editing. Click a file header to expand it manually.")
+			.addToggle(t => t
+				.setValue(this.plugin.settings.autoCollapseInactiveFiles)
+				.onChange(async value => {
+					this.plugin.settings.autoCollapseInactiveFiles = value;
 					await this.plugin.saveSettings();
 				}));
 	}

@@ -8,7 +8,8 @@ import type AnnotecaPlugin from "./main";
 import type { Comment } from "./types";
 import { generateId, serialize, todayISO } from "./parser";
 import { resolveSettingsCategories } from "./settings";
-import { getTemplate, type ModalTemplate } from "./templates";
+import { getTemplate, resolvePlaceholder, type ModalTemplate } from "./templates";
+import { createStackedRow } from "./ui-helpers";
 
 export interface ComposerRequest {
 	editor: Editor;
@@ -96,44 +97,74 @@ export class ComposerForm {
 		const template = !this.request.editing ? getTemplate(this.state.selectedCategory) : undefined;
 		if (template) this.renderTemplateFields(container, template);
 
-		new Setting(container)
-			.setName("Body")
-			.setDesc("Plain text or inline Markdown. Wikilinks are supported.")
-			.addTextArea(t => {
-				t.setPlaceholder("Type the comment here…")
-					.setValue(this.state.body)
-					.onChange(v => { this.state.body = v; });
-				t.inputEl.rows = 6;
-				t.inputEl.addClass("annoteca-modal-body");
-			});
+		// Body field uses stacked layout (label above, full-width textarea below)
+		// so it isn't crammed into the right-rail of a Setting widget. The
+		// Obsidian Setting convention works for short controls but not for
+		// multi-line text — same pattern used throughout the plugin now.
+		const { content: bodyContent } = createStackedRow(container, {
+			name: "Body",
+			description: "Plain text or inline Markdown. Wikilinks are supported.",
+			cls: "annoteca-composer-body-row",
+		});
+		const bodyArea = bodyContent.createEl("textarea", {
+			cls: "annoteca-modal-body",
+			attr: {
+				placeholder: "Type the comment here…",
+				rows: "6",
+			},
+		});
+		bodyArea.value = this.state.body;
+		bodyArea.addEventListener("input", () => {
+			this.state.body = bodyArea.value;
+		});
 
-		new Setting(container)
-			.addButton(b => b
-				.setButtonText(this.request.editing ? "Save" : "Insert")
-				.setCta()
-				.onClick(() => { void this.submit(); }))
-			.addButton(b => b
-				.setButtonText("Cancel")
-				.onClick(() => this.hooks.close()));
+		const actions = container.createDiv({ cls: "annoteca-composer-actions" });
+		const submitBtn = actions.createEl("button", {
+			cls: "mod-cta",
+			text: this.request.editing ? "Save" : "Insert",
+			attr: { type: "button" },
+		});
+		submitBtn.addEventListener("click", () => { void this.submit(); });
+		const cancelBtn = actions.createEl("button", {
+			text: "Cancel",
+			attr: { type: "button" },
+		});
+		cancelBtn.addEventListener("click", () => this.hooks.close());
 	}
 
 	private renderTemplateFields(container: HTMLElement, template: ModalTemplate): void {
 		const wrap = container.createDiv({ cls: "annoteca-template-fields" });
 		wrap.createEl("h4", { text: "Details" });
+
+		// Editor selection feeds contextual placeholders (e.g., the
+		// index-entry "term" field defaults to whatever the user highlighted
+		// rather than a domain-specific example).
+		const selectedText = this.request.editor.getSelection();
+
 		for (const field of template.fields) {
-			const setting = new Setting(wrap).setName(field.label);
+			const { content } = createStackedRow(wrap, {
+				name: field.label,
+				cls: "annoteca-template-field",
+			});
+			const placeholder = resolvePlaceholder(field, { selectedText });
 			if (field.type === "textarea") {
-				setting.addTextArea(t => {
-					t.setPlaceholder(field.placeholder ?? "")
-						.setValue(this.state.templateValues[field.id] ?? "")
-						.onChange(v => { this.state.templateValues[field.id] = v; });
-					t.inputEl.rows = 3;
+				const ta = content.createEl("textarea", {
+					cls: "annoteca-template-textarea",
+					attr: { placeholder, rows: "3" },
+				});
+				ta.value = this.state.templateValues[field.id] ?? "";
+				ta.addEventListener("input", () => {
+					this.state.templateValues[field.id] = ta.value;
 				});
 			} else {
-				setting.addText(t => t
-					.setPlaceholder(field.placeholder ?? "")
-					.setValue(this.state.templateValues[field.id] ?? "")
-					.onChange(v => { this.state.templateValues[field.id] = v; }));
+				const input = content.createEl("input", {
+					cls: "annoteca-template-input",
+					attr: { type: "text", placeholder },
+				});
+				input.value = this.state.templateValues[field.id] ?? "";
+				input.addEventListener("input", () => {
+					this.state.templateValues[field.id] = input.value;
+				});
 			}
 		}
 	}
