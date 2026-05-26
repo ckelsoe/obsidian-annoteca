@@ -571,7 +571,7 @@ export default class AnnotecaPlugin extends Plugin {
 			new Notice("File not found.");
 			return;
 		}
-		const leaf = this.app.workspace.getLeaf(false);
+		const leaf = this.app.workspace.getMostRecentLeaf() ?? this.app.workspace.getLeaf("tab");
 		await leaf.openFile(file);
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (view) {
