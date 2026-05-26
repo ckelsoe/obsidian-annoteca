@@ -52,9 +52,26 @@ export interface ColorPickerOpts {
 	onChange: (next: string | undefined) => void | Promise<void>;
 }
 
+// Convert "rgb(R, G, B)" or "rgba(R, G, B, A)" (whatever the browser
+// normalizes a CSS variable to) to a 6-digit hex string the native
+// <input type="color"> accepts.
+function rgbStringToHex(rgb: string): string {
+	const m = rgb.match(/\d+(?:\.\d+)?/g);
+	if (!m || m.length < 3) return "#000000";
+	const [r, g, b] = m;
+	const toHex = (raw: string | undefined): string => {
+		const n = Math.max(0, Math.min(255, Math.round(parseFloat(raw ?? "0"))));
+		return n.toString(16).padStart(2, "0");
+	};
+	return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
 // Render a color picker control: theme swatches above, a custom-color chip
 // (styled native picker) + Reset below. Section captions disambiguate
-// "these are theme-adaptive colors" from "pick a literal hex".
+// "these are theme-adaptive colors" from "pick a literal hex". The custom
+// chip's underlying <input type="color"> is kept seeded with the currently
+// active theme color (resolved to hex via getComputedStyle) so opening the
+// OS picker opens it on the theme color, ready to nudge into a variation.
 export function createColorPicker(parent: HTMLElement, opts: ColorPickerOpts): HTMLDivElement {
 	const wrap = parent.createDiv({ cls: "annoteca-color-picker" });
 
@@ -87,6 +104,17 @@ export function createColorPicker(parent: HTMLElement, opts: ColorPickerOpts): H
 		for (const s of Array.from(swatchRow.children)) s.removeClass?.("is-active");
 	};
 
+	// Update the native input's value (silently — does not fire 'input')
+	// so the OS color picker opens on this color when the chip is clicked.
+	// Used to seed from the active theme swatch for "nudge into a variation".
+	const seedFromSwatch = (swatch: HTMLElement): void => {
+		const computed = getComputedStyle(swatch).backgroundColor;
+		const hex = rgbStringToHex(computed);
+		native.value = hex;
+	};
+
+	let activeSwatch: HTMLElement | null = null;
+
 	for (const v of THEME_COLOR_VARS) {
 		const swatch = swatchRow.createEl("button", {
 			cls: "annoteca-color-swatch",
@@ -98,18 +126,30 @@ export function createColorPicker(parent: HTMLElement, opts: ColorPickerOpts): H
 		// background-color directly is more reliable.
 		swatch.style.backgroundColor = `var(${v})`;
 		const target = `var(${v})`;
-		if (opts.current === target) swatch.addClass("is-active");
+		if (opts.current === target) {
+			swatch.addClass("is-active");
+			activeSwatch = swatch;
+		}
 		swatch.addEventListener("click", () => {
 			void opts.onChange(target);
 			clearSwatches();
 			swatch.addClass("is-active");
 			clearChip();
+			seedFromSwatch(swatch);
 		});
 	}
 
 	// Pre-populate the chip when current is a custom hex value.
 	const currentHex = opts.current && opts.current.startsWith("#") ? opts.current : "";
-	if (currentHex) showHex(currentHex);
+	if (currentHex) {
+		showHex(currentHex);
+	} else if (activeSwatch) {
+		// Seed the native picker from the currently active theme swatch.
+		// Deferred so the swatch is attached to the DOM before we ask the
+		// browser for its computed background-color.
+		const swatch = activeSwatch;
+		window.requestAnimationFrame(() => seedFromSwatch(swatch));
+	}
 
 	native.addEventListener("input", () => {
 		void opts.onChange(native.value);
