@@ -419,9 +419,37 @@ export class AnnotecaPanelView extends ItemView {
 			return;
 		}
 
+		const groups = this.buildScopedGroups(scopeFiles);
+		if (groups.length === 0) {
+			this.renderEmpty(container, "No comments match this scope and filter.");
+			return;
+		}
+
+		this.selectActiveComment(groups);
+
+		const showGroups = groups.length > 1;
+		this.applyAutoCollapsePolicy(groups, showGroups);
+
+		const list = container.createDiv({ cls: "annoteca-reviewer-list" });
+		for (const group of groups) {
+			if (showGroups) {
+				this.renderFileGroup(list, group);
+			} else {
+				// Single-file scope: cards directly in the list, no header.
+				for (const c of group.comments) {
+					const isActive = c.marker.start === this.activeStart;
+					const card = list.createDiv({
+						cls: `annoteca-reviewer-card${isActive ? " is-active" : ""}`,
+					});
+					this.renderCommentCard(card, c, group.path, isActive);
+				}
+			}
+		}
+	}
+
+	private buildScopedGroups(scopeFiles: Set<string>): { path: string; comments: Comment[] }[] {
 		const statusFilter = this.plugin.settings.statusFilter;
-		interface FileGroup { path: string; comments: Comment[]; }
-		const groups: FileGroup[] = [];
+		const groups: { path: string; comments: Comment[] }[] = [];
 		for (const p of [...scopeFiles].sort()) {
 			const idx = this.plugin.commentIndex.get(p);
 			if (!idx) continue;
@@ -432,15 +460,13 @@ export class AnnotecaPanelView extends ItemView {
 			});
 			if (filtered.length > 0) groups.push({ path: p, comments: filtered });
 		}
+		return groups;
+	}
 
-		if (groups.length === 0) {
-			this.renderEmpty(container, "No comments match this scope and filter.");
-			return;
-		}
-
-		// Pick or validate the active comment. Identity is (path, start) — across
-		// files a bare marker.start could collide. Default to the first comment in
-		// the active file's group (if in scope), then fall back to the first group.
+	// Pick or validate the active comment. Identity is (path, start) — across
+	// files a bare marker.start could collide. Default to the first comment in
+	// the active file's group (if in scope), then fall back to the first group.
+	private selectActiveComment(groups: { path: string; comments: Comment[] }[]): void {
 		const activeFilePath = this.app.workspace.getActiveFile()?.path;
 		const activeGroup = activeFilePath ? groups.find(g => g.path === activeFilePath) : undefined;
 		const stillValid = groups.some(
@@ -454,13 +480,14 @@ export class AnnotecaPanelView extends ItemView {
 				this.activeStart = def.marker.start;
 			}
 		}
+	}
 
-		const showGroups = groups.length > 1;
-
-		// Apply auto-collapse policy when the active file has just changed.
-		// We only reset the collapse set on active-file transitions so the
-		// user's manual expand/collapse choices stick while they work in one
-		// file.
+	// We only reset the collapse set on active-file transitions so the user's
+	// manual expand/collapse choices stick while they work in one file.
+	private applyAutoCollapsePolicy(
+		groups: { path: string; comments: Comment[] }[],
+		showGroups: boolean,
+	): void {
 		const activeFileForCollapse = this.activePath ?? this.app.workspace.getActiveFile()?.path;
 		if (showGroups && this.plugin.settings.autoCollapseInactiveFiles
 			&& activeFileForCollapse
@@ -471,36 +498,26 @@ export class AnnotecaPanelView extends ItemView {
 			}
 			this.lastActiveFileForCollapse = activeFileForCollapse;
 		}
+	}
 
-		const list = container.createDiv({ cls: "annoteca-reviewer-list" });
-		for (const group of groups) {
-			if (showGroups) {
-				const collapsed = this.collapsedFilePaths.has(group.path);
-				const groupEl = list.createDiv({
-					cls: `annoteca-file-group${collapsed ? " is-collapsed" : ""}`,
-				});
-				this.renderFileHeader(groupEl, group, collapsed);
-				if (!collapsed) {
-					const body = groupEl.createDiv({ cls: "annoteca-file-group-body" });
-					for (const c of group.comments) {
-						const isActive = group.path === this.activePath
-							&& c.marker.start === this.activeStart;
-						const card = body.createDiv({
-							cls: `annoteca-reviewer-card${isActive ? " is-active" : ""}`,
-						});
-						this.renderCommentCard(card, c, group.path, isActive);
-					}
-				}
-			} else {
-				// Single-file scope: cards directly in the list, no header.
-				for (const c of group.comments) {
-					const isActive = c.marker.start === this.activeStart;
-					const card = list.createDiv({
-						cls: `annoteca-reviewer-card${isActive ? " is-active" : ""}`,
-					});
-					this.renderCommentCard(card, c, group.path, isActive);
-				}
-			}
+	private renderFileGroup(
+		list: HTMLElement,
+		group: { path: string; comments: Comment[] },
+	): void {
+		const collapsed = this.collapsedFilePaths.has(group.path);
+		const groupEl = list.createDiv({
+			cls: `annoteca-file-group${collapsed ? " is-collapsed" : ""}`,
+		});
+		this.renderFileHeader(groupEl, group, collapsed);
+		if (collapsed) return;
+		const body = groupEl.createDiv({ cls: "annoteca-file-group-body" });
+		for (const c of group.comments) {
+			const isActive = group.path === this.activePath
+				&& c.marker.start === this.activeStart;
+			const card = body.createDiv({
+				cls: `annoteca-reviewer-card${isActive ? " is-active" : ""}`,
+			});
+			this.renderCommentCard(card, c, group.path, isActive);
 		}
 	}
 
@@ -640,6 +657,28 @@ export class AnnotecaPanelView extends ItemView {
 	}
 
 	private renderCommentCard(card: HTMLElement, c: Comment, path: string, expanded: boolean): void {
+		const compact = this.renderCompactRow(card, c);
+
+		if (!expanded) {
+			compact.addEventListener("click", () => {
+				this.activePath = path;
+				this.activeStart = c.marker.start;
+				// Ensure the file is expanded so the newly-active card is visible.
+				this.collapsedFilePaths.delete(path);
+				this.refresh();
+				// Also navigate the editor to the marker. Same-file: just
+				// scrolls. Cross-file: opens the file and scrolls. Cursor
+				// at marker.start no longer triggers raw-text mode after the
+				// selectionTouches fix.
+				void this.plugin.navigateToOffset(path, c.marker.start);
+			});
+			return;
+		}
+
+		this.renderExpandedSection(card, c, path);
+	}
+
+	private renderCompactRow(card: HTMLElement, c: Comment): HTMLElement {
 		const enabled = resolveSettingsCategories(this.plugin.settings);
 		const def = getCategoryOrFallback(c.category, enabled);
 
@@ -681,22 +720,10 @@ export class AnnotecaPanelView extends ItemView {
 			});
 		}
 
-		if (!expanded) {
-			compact.addEventListener("click", () => {
-				this.activePath = path;
-				this.activeStart = c.marker.start;
-				// Ensure the file is expanded so the newly-active card is visible.
-				this.collapsedFilePaths.delete(path);
-				this.refresh();
-				// Also navigate the editor to the marker. Same-file: just
-				// scrolls. Cross-file: opens the file and scrolls. Cursor
-				// at marker.start no longer triggers raw-text mode after the
-				// selectionTouches fix.
-				void this.plugin.navigateToOffset(path, c.marker.start);
-			});
-			return;
-		}
+		return compact;
+	}
 
+	private renderExpandedSection(card: HTMLElement, c: Comment, path: string): void {
 		const expandedSection = card.createDiv({ cls: "annoteca-reviewer-expanded" });
 		expandedSection.createDiv({ cls: "annoteca-reviewer-body", text: c.body });
 
