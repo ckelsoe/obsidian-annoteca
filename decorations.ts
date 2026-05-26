@@ -309,7 +309,22 @@ function hoverTooltipExtension(ctx: DecorationContext, field: StateField<Comment
 		const settings = ctx.getSettings();
 		if (settings.indicatorStyle === "none") return null;
 		const markers = view.state.field(field);
-		const m = markers.find(c => pos >= c.marker.start && pos <= c.marker.end);
+
+		// Hover hits the marker range (where the inline icon lives).
+		let m = markers.find(c => pos >= c.marker.start && pos <= c.marker.end);
+
+		// Also accept hover anywhere over the anchor underline. The underline
+		// sits before the marker range, so the marker-range find above misses
+		// it. Only check when the underline is actually being rendered.
+		if (!m && (settings.indicatorStyle === "underline" || settings.indicatorStyle === "both")) {
+			for (const c of markers) {
+				const range = findAnchorRange(view.state.doc, c);
+				if (range && pos >= range.from && pos <= range.to) {
+					m = c;
+					break;
+				}
+			}
+		}
 		if (!m) return null;
 
 		return {
