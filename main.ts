@@ -40,7 +40,7 @@ import {
 } from "./diagnostics";
 import { todayISO } from "./parser";
 import { convertAllComments, type ImportFormat } from "./imports";
-import { ConfirmBackupModal, ConfirmDeleteResolvedModal } from "./confirm-modal";
+import { ConfirmBackupModal, ConfirmDeleteCommentModal, ConfirmDeleteResolvedModal } from "./confirm-modal";
 import { detectDrift, type DriftFinding, type PositionSnapshot } from "./drift";
 import { formatScripture } from "./scripture";
 import { computeScopeFileSet, type ScopeFile } from "./scope";
@@ -551,7 +551,16 @@ export default class AnnotecaPlugin extends Plugin {
 	}
 
 	async deleteComment(path: string, comment: Comment): Promise<void> {
-		await this.comments.deleteComment(path, comment);
+		// All single-comment delete entry points (Thread tab action button,
+		// editor right-click menu, command palette) flow through this method,
+		// so the confirmation gate lives here in one place rather than at
+		// every call site. The bulk delete-all-resolved path has its own
+		// modal and is not affected.
+		return new Promise<void>(resolve => {
+			new ConfirmDeleteCommentModal(this.app, this.settings, comment, () => {
+				void this.comments.deleteComment(path, comment).then(resolve);
+			}).open();
+		});
 	}
 
 	async listResolvedInFile(path: string): Promise<Comment[]> {

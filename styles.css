@@ -1581,3 +1581,22 @@ settings:
 	resize: vertical;
 	font-size: var(--font-ui-small);
 }
+
+/* Single-comment delete confirmation modal preview. Shows the comment
+   category badge and a body excerpt so the user can confirm which
+   comment they are about to delete. */
+.annoteca-confirm-preview {
+	margin: 12px 0;
+	padding: 10px 12px;
+	background-color: var(--background-secondary);
+	border-radius: var(--radius-m, 6px);
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+.annoteca-confirm-preview .annoteca-confirm-body {
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+	white-space: pre-wrap;
+}
+

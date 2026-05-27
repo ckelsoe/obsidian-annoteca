@@ -1,5 +1,66 @@
 import { App, Modal, Setting } from "obsidian";
 
+import type { Comment } from "./types";
+import { getCategoryOrFallback } from "./categories";
+import { resolveSettingsCategories } from "./settings";
+import type { AnnotecaSettings } from "./types";
+
+// Confirmation prompt for single-comment delete. Wired into the plugin's
+// pass-through so every entry point (Thread tab action, editor right-click
+// menu, command palette) gets the same gate. The bulk delete-all-resolved
+// flow has its own modal below and is not double-confirmed.
+export class ConfirmDeleteCommentModal extends Modal {
+	private readonly settings: AnnotecaSettings;
+	private readonly comment: Comment;
+	private readonly onConfirm: () => void;
+
+	constructor(app: App, settings: AnnotecaSettings, comment: Comment, onConfirm: () => void) {
+		super(app);
+		this.settings = settings;
+		this.comment = comment;
+		this.onConfirm = onConfirm;
+	}
+
+	onOpen(): void {
+		const { contentEl } = this;
+		contentEl.empty();
+		contentEl.createEl("h3", { text: "Delete comment" });
+
+		const enabled = resolveSettingsCategories(this.settings);
+		const def = getCategoryOrFallback(this.comment.category, enabled);
+
+		const preview = contentEl.createDiv({ cls: "annoteca-confirm-preview" });
+		preview.createSpan({
+			cls: `annoteca-reviewer-category annoteca-cat-${def.id}`,
+			text: def.displayName,
+		});
+		const body = this.comment.body.length > 200
+			? this.comment.body.slice(0, 200) + "…"
+			: this.comment.body;
+		preview.createDiv({ cls: "annoteca-confirm-body", text: body });
+
+		contentEl.createEl("p", {
+			text: "This removes the marker from the file. If the file is open in an editor you can undo with Ctrl/Cmd+Z.",
+		});
+
+		new Setting(contentEl)
+			.addButton(b => b
+				.setButtonText("Delete")
+				.setWarning()
+				.onClick(() => {
+					this.close();
+					this.onConfirm();
+				}))
+			.addButton(b => b
+				.setButtonText("Cancel")
+				.onClick(() => this.close()));
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+	}
+}
+
 // Lightweight confirmation modal for the single-file "delete all resolved"
 // command. No backup-acknowledgement toggle: single-file deletes are
 // recoverable via editor undo when the file is open.
