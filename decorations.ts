@@ -15,6 +15,7 @@ import {
 	WidgetType,
 	hoverTooltip,
 	showTooltip,
+	tooltips,
 	type Tooltip,
 } from "@codemirror/view";
 
@@ -278,6 +279,14 @@ function hoverTooltipExtension(ctx: DecorationContext, field: StateField<Comment
 
 		// Hover hits the marker range (where the inline icon lives).
 		let m = markers.find(c => pos >= c.marker.start && pos <= c.marker.end);
+		// Track the actual hovered range so the tooltip's source matches where
+		// the mouse really is. If we report the marker range while the user is
+		// actually over the anchor underline, CodeMirror dismisses the tooltip
+		// the moment the mouse moves because it thinks the mouse already left
+		// the source range — breaking the keepalive that lets users traverse
+		// onto the popup.
+		let hoverRange: { from: number; to: number } | undefined =
+			m ? { from: m.marker.start, to: m.marker.end } : undefined;
 
 		// Also accept hover anywhere over the anchor underline. The underline
 		// sits before the marker range, so the marker-range find above misses
@@ -287,15 +296,16 @@ function hoverTooltipExtension(ctx: DecorationContext, field: StateField<Comment
 				const range = findAnchorRange(view.state.doc, c);
 				if (range && pos >= range.from && pos <= range.to) {
 					m = c;
+					hoverRange = range;
 					break;
 				}
 			}
 		}
-		if (!m) return null;
+		if (!m || !hoverRange) return null;
 
 		return {
-			pos: m.marker.start,
-			end: m.marker.end,
+			pos: hoverRange.from,
+			end: hoverRange.to,
 			above: true,
 			create: () => {
 				const dom = view.dom.ownerDocument.createElement("div");
@@ -632,13 +642,12 @@ export function buildAnnotecaExtension(ctx: DecorationContext): Extension {
 	return [
 		field,
 		replyField,
-		// NOTE: previously we set tooltips({ parent: activeDocument.body }) so
-		// the hover popup could escape narrow sidebar leaves, but that broke
-		// the hover keepalive — the mouse cannot reliably reach the popup
-		// before CodeMirror dismisses it once the tooltip lives outside the
-		// editor's DOM. Restore the default parent so hover works; the
-		// narrow-leaf squeeze should be addressed in CSS (e.g. positioning
-		// the tooltip with overflow allowed) rather than DOM-reparenting.
+		// Render tooltips into document.body instead of the editor's DOM so
+		// they can escape the sidebar leaf bounds. Without this override,
+		// markers near the right edge of a narrow sidebar leaf produce a
+		// vertically tall, horizontally squeezed popup because CodeMirror
+		// shrinks the tooltip to fit available leaf width.
+		tooltips({ parent: activeDocument.body }),
 		decorationsCompute(ctx, field),
 		hoverTooltipExtension(ctx, field),
 		clickHandlerExtension(ctx, field),
