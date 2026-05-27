@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-05-26
+
+### Fixed
+- **Hover popup closed the moment the mouse moved when hovering an anchor underline.** The anchor-underline hover predicate (added in 0.3.0) set the tooltip's source range to the marker icon's range even when the user was hovering the anchor underline. CodeMirror's keepalive then dismissed the tooltip on any mouse movement because the cursor was already "outside" the declared source range. Fix: the tooltip now reports whichever range the mouse is actually over (marker or anchor underline).
+- **Resolve / reopen / delete / append-reply could be silently clobbered by the editor's autosave when the file was open.** `vault.modify` was racing the editor's in-memory document; if the editor had any state to flush, it would overwrite the new content and "restore" the marker the user had just acted on. Lifecycle writes now go through `editor.replaceRange` when the file is open in any markdown leaf (keeping the CodeMirror EditorState authoritative) and fall back to `vault.modify` only when the file is not open. This matches the pattern the edit composer was already using.
+
+### Added
+- **Confirmation prompt before single-comment delete.** Every entry point (Thread tab "Delete" button, editor right-click menu, command palette "Delete comment here") now shows a small modal with the comment's category badge and body excerpt before removing the marker. The bulk "Delete all resolved comments in this file" command has its own confirmation and is unchanged.
+
+### Changed (internal — no behavior difference)
+- `AnnotecaPanelView` extracted into a ~100-line dispatcher plus three focused renderer modules: `hub-thread-tab.ts`, `hub-outline-tab.ts`, `hub-starred-tab.ts`. The Thread tab's per-session state (collapse paths, active comment) lives with the Thread renderer rather than on the parent view.
+- Long render methods inside the Thread renderer split into focused helpers: `buildScopedGroups`, `selectActiveComment`, `applyAutoCollapsePolicy`, `renderFileGroup`, `renderCompactRow`, `renderExpandedSection`.
+- Comment lifecycle verbs (`resolveComment`, `reopenComment`, `deleteComment`, `appendReply`, `replaceMarker`, `listResolvedInFile`, `deleteAllResolvedInFile`, `resolvedAuthor`) moved into a new `CommentService` module. `AnnotecaPlugin` keeps thin pass-through methods so external callers do not change.
+
 ## [0.3.0] - 2026-05-26
 
 This release bundles several distinct feature themes that landed on `main` before a release boundary was cut. Going forward, plugin releases will partition per feature theme; see the workspace `CLAUDE.md` "Release cadence" note.
