@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-05
+
+### Changed
+- Requires Obsidian 1.13.0 or later. Obsidian keeps serving 0.3.1 to vaults on older versions, so nothing breaks for them.
+- Settings migrated to Obsidian's declarative settings API. The Indicators, Metadata, and Diagnostics options are now indexed in Obsidian's global settings search and grouped into labeled sections, and the author identifier and debug log destination rows now show or hide live as you toggle their parent option. The preset browser, category accordion, and add-category form keep their full-width custom controls. No setting changed its stored value or behavior.
+- Replaced the deprecated `setWarning()` calls on the delete confirmation buttons with `setDestructive()` for the Obsidian 1.13.0 API.
+
 ## [0.3.1] - 2026-05-26
 
 ### Fixed

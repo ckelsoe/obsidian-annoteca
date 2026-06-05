@@ -1473,6 +1473,14 @@ settings:
 	font-style: italic;
 }
 
+/* Full-width host for the imperative custom blocks (preset browser, category
+   accordion, add-category form) embedded as render rows in the declarative
+   settings tab. Overrides the default .setting-item flex row so the contained
+   DOM stacks full width instead of being squeezed into the right control rail. */
+.setting-item.annoteca-custom-block {
+	display: block;
+}
+
 /* Preset browser ---------------------------------------------------------- */
 
 .annoteca-preset-selector {

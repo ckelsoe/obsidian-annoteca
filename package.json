@@ -1,6 +1,6 @@
 {
 	"name": "annoteca",
-	"version": "0.3.1",
+	"version": "0.4.0",
 	"description": "Categorized inline feedback comments for long-form markdown documents. Plain HTML storage, threaded AI conversations, readable by humans and any AI assistant. Works on desktop and mobile.",
 	"main": "main.js",
 	"type": "module",
@@ -26,7 +26,7 @@
 		"globals": "^17.1.0",
 		"jest": "^30.2.0",
 		"jiti": "^2.6.1",
-		"obsidian": "latest",
+		"obsidian": "^1.13.0",
 		"ts-jest": "^29.4.6",
 		"tslib": "^2.8.1",
 		"typescript": "^5.8.3",

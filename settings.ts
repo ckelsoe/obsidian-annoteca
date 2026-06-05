@@ -2,6 +2,7 @@ import {
 	App,
 	PluginSettingTab,
 	Setting,
+	type SettingDefinitionItem,
 	Notice,
 	ButtonComponent,
 	setIcon,
@@ -82,49 +83,226 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		this.plugin = plugin;
 	}
 
-	display(): void {
-		const { containerEl } = this;
-		containerEl.empty();
+	getSettingDefinitions(): SettingDefinitionItem[] {
+		// Default-category options track the live category list; getSettingDefinitions
+		// re-runs on every update() so this stays current after add/remove.
+		const categoryOptions: Record<string, string> = {};
+		for (const c of resolveSettingsCategories(this.plugin.settings)) {
+			categoryOptions[c.id] = c.displayName;
+		}
 
-		this.renderCategoriesSection(containerEl);
-		this.renderIndicatorsSection(containerEl);
-		this.renderMetadataSection(containerEl);
-		this.renderDiagnosticsSection(containerEl);
+		return [
+			{
+				type: "group",
+				heading: "Categories",
+				items: [
+					this.customBlock((host) => this.renderPresetSection(host)),
+					{
+						name: "Index-entry preset",
+						desc: "Add an index-entry category for tagging concepts that should appear in a printed index. Pairs with the pandoc filter shipped under docs in the plugin repository.",
+						control: { type: "toggle", key: "enableIndexEntryPreset" },
+					},
+					{
+						name: "Default category",
+						desc: "Selected in the add-comment modal by default.",
+						control: { type: "dropdown", key: "defaultCategory", options: categoryOptions },
+					},
+					this.customBlock((host) => this.renderCategoryList(host)),
+					this.customBlock((host) => this.renderAddCategory(host)),
+				],
+			},
+			{
+				type: "group",
+				heading: "Indicators",
+				items: [
+					{
+						name: "Indicator style",
+						desc: "How comments are surfaced in the editor. The underline marks the text the comment was made against. The icon marks the comment's location when no text was selected at create time.",
+						control: {
+							type: "dropdown",
+							key: "indicatorStyle",
+							options: {
+								icon: "Inline icon only",
+								underline: "Anchor underline only",
+								both: "Icon and underline",
+								none: "Hidden",
+							},
+						},
+					},
+					{
+						name: "Indicator size",
+						desc: "Visual size of the marker icon in the editor.",
+						control: {
+							type: "dropdown",
+							key: "indicatorSize",
+							options: { small: "Small", medium: "Medium", large: "Large" },
+						},
+					},
+					{
+						name: "Anchor underline style",
+						desc: "Visual character of the underline drawn over commented text. Applies to every category.",
+						control: {
+							type: "dropdown",
+							key: "anchorStyle",
+							options: { wavy: "Wavy", solid: "Solid", dotted: "Dotted", dashed: "Dashed" },
+						},
+					},
+					{
+						name: "Anchor underline thickness",
+						desc: "Baseline thickness for categories on the normal tier. Subtle always renders thin, strong always renders thick, regardless of this setting.",
+						control: {
+							type: "dropdown",
+							key: "anchorThickness",
+							options: { thin: "Thin", medium: "Medium", thick: "Thick" },
+						},
+					},
+					{
+						name: "Default visibility on file open",
+						desc: "Whether comments are visible when a file opens.",
+						control: {
+							type: "dropdown",
+							key: "defaultVisibility",
+							options: { show: "Show", hide: "Hide", last: "Last state" },
+						},
+					},
+					{
+						name: "Resolved comment display",
+						desc: "How resolved comments appear in the editor.",
+						control: {
+							type: "dropdown",
+							key: "resolvedDisplay",
+							options: { dim: "Dim", hide: "Hide" },
+						},
+					},
+					{
+						name: "Resolved brightness",
+						desc: "How aggressively resolved comments are dimmed. Normal works well in light themes; bright keeps resolved content legible against dark backgrounds where the base text is already muted.",
+						control: {
+							type: "dropdown",
+							key: "resolvedBrightness",
+							options: { normal: "Normal", bright: "Bright" },
+						},
+					},
+					{
+						name: "Composer location",
+						desc: "Where the add-comment form appears. The side panel keeps the document visible while you draft.",
+						control: {
+							type: "dropdown",
+							key: "composerLocation",
+							options: { modal: "Modal dialog", panel: "Right side panel" },
+						},
+					},
+					{
+						name: "Auto-collapse other files in scope",
+						desc: "When the thread panel shows comments from multiple files, collapse files other than the one you are editing. Click a file header to expand it manually.",
+						control: { type: "toggle", key: "autoCollapseInactiveFiles" },
+					},
+				],
+			},
+			{
+				type: "group",
+				heading: "Metadata",
+				items: [
+					{
+						name: "Author tag",
+						desc: "When enabled, new comments include an [author=...] line. Useful when collaborating with an AI agent or multiple reviewers.",
+						control: { type: "toggle", key: "enableAuthorTag" },
+					},
+					{
+						name: "Author identifier",
+						desc: "Short tag. Lowercase letters, digits, and dashes; maximum 32 characters.",
+						visible: () => this.plugin.settings.enableAuthorTag,
+						control: {
+							type: "text",
+							key: "authorTag",
+							placeholder: "Charles",
+							validate: (value: unknown) => {
+								const v = typeof value === "string" ? value.trim() : "";
+								return v === "" || /^[a-z0-9-]{1,32}$/i.test(v)
+									? undefined
+									: "Use lowercase letters, digits, and dashes (max 32).";
+							},
+						},
+					},
+				],
+			},
+			{
+				type: "group",
+				heading: "Diagnostics",
+				items: [
+					{
+						name: "Debug mode",
+						desc: "Log additional information for troubleshooting. Off by default to avoid log spam.",
+						control: { type: "toggle", key: "debugMode" },
+					},
+					{
+						name: "Debug log destination",
+						desc: "Where diagnostic output is written.",
+						visible: () => this.plugin.settings.debugMode,
+						control: {
+							type: "dropdown",
+							key: "debugLogTarget",
+							options: { console: "Browser console", vault: "Log file in the vault" },
+						},
+					},
+				],
+			},
+		];
 	}
 
-	private renderCategoriesSection(container: HTMLElement): void {
-		new Setting(container)
-			.setName("Categories")
-			.setHeading();
+	// Routes declarative controls to the plugin's own settings store and runs the
+	// side effects the imperative onChange handlers used to run inline. authorTag
+	// is lowercased on the way in (the validate callback only gates, it cannot
+	// transform). Toggles that show or hide dependent rows, or that change the
+	// default-category options, trigger a full re-render via update().
+	getControlValue(key: string): unknown {
+		return (this.plugin.settings as unknown as Record<string, unknown>)[key];
+	}
 
-		this.renderPresetSection(container);
+	async setControlValue(key: string, value: unknown): Promise<void> {
+		if (key === "authorTag") {
+			this.plugin.settings.authorTag =
+				typeof value === "string" ? value.trim().toLowerCase() : "";
+		} else {
+			(this.plugin.settings as unknown as Record<string, unknown>)[key] = value;
+		}
+		await this.plugin.saveSettings();
 
-		new Setting(container)
-			.setName("Index-entry preset")
-			.setDesc("Add an index-entry category for tagging concepts that should appear in a printed index. Pairs with the pandoc filter shipped under docs in the plugin repository.")
-			.addToggle(t => t
-				.setValue(this.plugin.settings.enableIndexEntryPreset)
-				.onChange(async value => {
-					this.plugin.settings.enableIndexEntryPreset = value;
-					await this.plugin.saveSettings();
-					this.display();
-				}));
+		switch (key) {
+			case "indicatorSize":
+				this.plugin.applyIndicatorSize();
+				break;
+			case "anchorStyle":
+			case "anchorThickness":
+			case "resolvedBrightness":
+				this.plugin.applyAnchorAppearance();
+				break;
+			case "enableIndexEntryPreset":
+			case "enableAuthorTag":
+			case "debugMode":
+				this.update();
+				break;
+		}
+	}
 
-		new Setting(container)
-			.setName("Default category")
-			.setDesc("Selected in the add-comment modal by default.")
-			.addDropdown(d => {
-				const enabled = resolveSettingsCategories(this.plugin.settings);
-				for (const c of enabled) d.addOption(c.id, c.displayName);
-				d.setValue(this.plugin.settings.defaultCategory);
-				d.onChange(async value => {
-					this.plugin.settings.defaultCategory = value;
-					await this.plugin.saveSettings();
-				});
-			});
+	// Wraps a block of custom DOM (preset browser, category accordion, add-category
+	// form) in a full-width settings row. These keep the workspace stacked-row /
+	// picker UX that the default control layout cannot reproduce, so they render
+	// imperatively and stay out of settings search.
+	private customBlock(build: (host: HTMLElement) => void) {
+		return {
+			name: "",
+			searchable: false,
+			render: (setting: Setting) => {
+				const host = setting.settingEl;
+				host.empty();
+				host.addClass("annoteca-custom-block");
+				build(host);
+			},
+		};
+	}
 
-		this.renderCategoryList(container);
-
+	private renderAddCategory(container: HTMLElement): void {
 		new Setting(container)
 			.setName("Add category")
 			.setDesc("Lowercase letters, digits, and single dashes. Cannot start or end with a dash. A few format keywords are unavailable as category names.")
@@ -150,10 +328,9 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 							displayName: pendingName.charAt(0).toUpperCase() + pendingName.slice(1).replace(/-/g, " "),
 						});
 						await this.plugin.saveSettings();
-						this.display();
+						this.update();
 					});
 			}));
-
 	}
 
 	private renderPresetSection(container: HTMLElement): void {
@@ -222,7 +399,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 				this.plugin.settings.categories.push(...chosen.map(c => ({ ...c })));
 				void this.plugin.saveSettings();
 				new Notice(`Added ${chosen.length} categor${chosen.length === 1 ? "y" : "ies"}.`);
-				this.display();
+				this.update();
 			});
 
 			if (selected.isCustom) {
@@ -235,7 +412,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 					this.plugin.settings.customPresets =
 						this.plugin.settings.customPresets.filter(p => p.id !== selected.id);
 					void this.plugin.saveSettings();
-					this.display();
+					this.update();
 				});
 			}
 		};
@@ -273,7 +450,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			this.plugin.settings.customPresets.push(preset);
 			void this.plugin.saveSettings();
 			new Notice(`Saved preset “${name}”.`);
-			this.display();
+			this.update();
 		});
 	}
 
@@ -442,191 +619,9 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 					this.plugin.settings.categories.filter(c => c.id !== cat.id);
 				this.expandedCategoryIds.delete(cat.id);
 				void this.plugin.saveSettings();
-				this.display();
+				this.update();
 			});
 		}
 	}
 
-	private renderIndicatorsSection(container: HTMLElement): void {
-		new Setting(container).setName("Indicators").setHeading();
-
-		new Setting(container)
-			.setName("Indicator style")
-			.setDesc("How comments are surfaced in the editor. The underline marks the text the comment was made against. The icon marks the comment's location when no text was selected at create time.")
-			.addDropdown(d => d
-				.addOption("icon", "Inline icon only")
-				.addOption("underline", "Anchor underline only")
-				.addOption("both", "Icon and underline")
-				.addOption("none", "Hidden")
-				.setValue(this.plugin.settings.indicatorStyle)
-				.onChange(async value => {
-					this.plugin.settings.indicatorStyle = value as AnnotecaSettings["indicatorStyle"];
-					await this.plugin.saveSettings();
-				}));
-
-		new Setting(container)
-			.setName("Indicator size")
-			.setDesc("Visual size of the marker icon in the editor.")
-			.addDropdown(d => d
-				.addOption("small", "Small")
-				.addOption("medium", "Medium")
-				.addOption("large", "Large")
-				.setValue(this.plugin.settings.indicatorSize)
-				.onChange(async value => {
-					this.plugin.settings.indicatorSize = value as AnnotecaSettings["indicatorSize"];
-					await this.plugin.saveSettings();
-					this.plugin.applyIndicatorSize();
-				}));
-
-		new Setting(container)
-			.setName("Anchor underline style")
-			.setDesc("Visual character of the underline drawn over commented text. Applies to every category.")
-			.addDropdown(d => d
-				.addOption("wavy", "Wavy")
-				.addOption("solid", "Solid")
-				.addOption("dotted", "Dotted")
-				.addOption("dashed", "Dashed")
-				.setValue(this.plugin.settings.anchorStyle)
-				.onChange(async value => {
-					this.plugin.settings.anchorStyle = value as AnnotecaSettings["anchorStyle"];
-					await this.plugin.saveSettings();
-					this.plugin.applyAnchorAppearance();
-				}));
-
-		new Setting(container)
-			.setName("Anchor underline thickness")
-			.setDesc("Baseline thickness for categories on the normal tier. Subtle always renders thin, strong always renders thick, regardless of this setting.")
-			.addDropdown(d => d
-				.addOption("thin", "Thin")
-				.addOption("medium", "Medium")
-				.addOption("thick", "Thick")
-				.setValue(this.plugin.settings.anchorThickness)
-				.onChange(async value => {
-					this.plugin.settings.anchorThickness = value as AnnotecaSettings["anchorThickness"];
-					await this.plugin.saveSettings();
-					this.plugin.applyAnchorAppearance();
-				}));
-
-		new Setting(container)
-			.setName("Default visibility on file open")
-			.setDesc("Whether comments are visible when a file opens.")
-			.addDropdown(d => d
-				.addOption("show", "Show")
-				.addOption("hide", "Hide")
-				.addOption("last", "Last state")
-				.setValue(this.plugin.settings.defaultVisibility)
-				.onChange(async value => {
-					this.plugin.settings.defaultVisibility = value as AnnotecaSettings["defaultVisibility"];
-					await this.plugin.saveSettings();
-				}));
-
-		new Setting(container)
-			.setName("Resolved comment display")
-			.setDesc("How resolved comments appear in the editor.")
-			.addDropdown(d => d
-				.addOption("dim", "Dim")
-				.addOption("hide", "Hide")
-				.setValue(this.plugin.settings.resolvedDisplay)
-				.onChange(async value => {
-					this.plugin.settings.resolvedDisplay = value as AnnotecaSettings["resolvedDisplay"];
-					await this.plugin.saveSettings();
-				}));
-
-		new Setting(container)
-			.setName("Resolved brightness")
-			.setDesc("How aggressively resolved comments are dimmed. Normal works well in light themes; bright keeps resolved content legible against dark backgrounds where the base text is already muted.")
-			.addDropdown(d => d
-				.addOption("normal", "Normal")
-				.addOption("bright", "Bright")
-				.setValue(this.plugin.settings.resolvedBrightness)
-				.onChange(async value => {
-					this.plugin.settings.resolvedBrightness = value as AnnotecaSettings["resolvedBrightness"];
-					await this.plugin.saveSettings();
-					this.plugin.applyAnchorAppearance();
-				}));
-
-		new Setting(container)
-			.setName("Composer location")
-			.setDesc("Where the add-comment form appears. The side panel keeps the document visible while you draft.")
-			.addDropdown(d => d
-				.addOption("modal", "Modal dialog")
-				.addOption("panel", "Right side panel")
-				.setValue(this.plugin.settings.composerLocation)
-				.onChange(async value => {
-					this.plugin.settings.composerLocation = value as AnnotecaSettings["composerLocation"];
-					await this.plugin.saveSettings();
-				}));
-
-		new Setting(container)
-			.setName("Auto-collapse other files in scope")
-			.setDesc("When the thread panel shows comments from multiple files, collapse files other than the one you are editing. Click a file header to expand it manually.")
-			.addToggle(t => t
-				.setValue(this.plugin.settings.autoCollapseInactiveFiles)
-				.onChange(async value => {
-					this.plugin.settings.autoCollapseInactiveFiles = value;
-					await this.plugin.saveSettings();
-				}));
-	}
-
-	private renderMetadataSection(container: HTMLElement): void {
-		new Setting(container).setName("Metadata").setHeading();
-
-		new Setting(container)
-			.setName("Author tag")
-			.setDesc("When enabled, new comments include an [author=...] line. Useful when collaborating with an AI agent or multiple reviewers.")
-			.addToggle(t => t
-				.setValue(this.plugin.settings.enableAuthorTag)
-				.onChange(async value => {
-					this.plugin.settings.enableAuthorTag = value;
-					await this.plugin.saveSettings();
-					this.display();
-				}));
-
-		if (this.plugin.settings.enableAuthorTag) {
-			new Setting(container)
-				.setName("Author identifier")
-				.setDesc("Short tag. Lowercase letters, digits, and dashes; maximum 32 characters.")
-				.addText(t => t
-					.setPlaceholder("Charles")
-					.setValue(this.plugin.settings.authorTag)
-					.onChange(async value => {
-						const v = value.trim().toLowerCase();
-						if (v !== "" && !/^[a-z0-9-]{1,32}$/.test(v)) {
-							new Notice("Invalid author tag. Use lowercase letters, digits, and dashes (max 32).");
-							return;
-						}
-						this.plugin.settings.authorTag = v;
-						await this.plugin.saveSettings();
-					}));
-		}
-	}
-
-	private renderDiagnosticsSection(container: HTMLElement): void {
-		new Setting(container).setName("Diagnostics").setHeading();
-
-		new Setting(container)
-			.setName("Debug mode")
-			.setDesc("Log additional information for troubleshooting. Off by default to avoid log spam.")
-			.addToggle(t => t
-				.setValue(this.plugin.settings.debugMode)
-				.onChange(async value => {
-					this.plugin.settings.debugMode = value;
-					await this.plugin.saveSettings();
-					this.display();
-				}));
-
-		if (this.plugin.settings.debugMode) {
-			new Setting(container)
-				.setName("Debug log destination")
-				.setDesc("Where diagnostic output is written.")
-				.addDropdown(d => d
-					.addOption("console", "Browser console")
-					.addOption("vault", "Log file in the vault")
-					.setValue(this.plugin.settings.debugLogTarget)
-					.onChange(async value => {
-						this.plugin.settings.debugLogTarget = value as AnnotecaSettings["debugLogTarget"];
-						await this.plugin.saveSettings();
-					}));
-		}
-	}
 }

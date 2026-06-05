@@ -46,7 +46,7 @@ export class ConfirmDeleteCommentModal extends Modal {
 		new Setting(contentEl)
 			.addButton(b => b
 				.setButtonText("Delete")
-				.setWarning()
+				.setDestructive()
 				.onClick(() => {
 					this.close();
 					this.onConfirm();
@@ -91,7 +91,7 @@ export class ConfirmDeleteResolvedModal extends Modal {
 		new Setting(contentEl)
 			.addButton(b => b
 				.setButtonText("Delete")
-				.setWarning()
+				.setDestructive()
 				.onClick(() => {
 					this.close();
 					this.onConfirm();
@@ -138,7 +138,7 @@ export class ConfirmBackupModal extends Modal {
 		new Setting(contentEl)
 			.addButton(b => b
 				.setButtonText("Run conversion")
-				.setWarning()
+				.setDestructive()
 				.onClick(() => {
 					if (!this.acknowledged) return;
 					this.close();
