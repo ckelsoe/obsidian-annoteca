@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-05
+
+### Changed
+- Author identifier is far less restrictive. Tags like `Charles`, `J.Doe`, or `AI-Bot` are stored and written into comment metadata as typed, instead of being forced to lowercase letters/digits/dashes. The only characters not allowed are the ones that would break the storage format: spaces (the field delimiter in reply and resolved lines), `]`, `<`, and `>`. The parser accepts these authors in `[author=...]`, `[reply ...]`, and `[resolved ...]` lines; existing tags are unaffected. The settings field placeholder is now a generic `reviewer`.
+
 ## [0.4.0] - 2026-06-05
 
 ### Changed

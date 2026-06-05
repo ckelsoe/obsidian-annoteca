@@ -210,17 +210,17 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 					},
 					{
 						name: "Author identifier",
-						desc: "Short tag. Lowercase letters, digits, and dashes; maximum 32 characters.",
+						desc: "Short tag with no spaces; maximum 32 characters.",
 						visible: () => this.plugin.settings.enableAuthorTag,
 						control: {
 							type: "text",
 							key: "authorTag",
-							placeholder: "Charles",
+							placeholder: "reviewer",
 							validate: (value: unknown) => {
 								const v = typeof value === "string" ? value.trim() : "";
-								return v === "" || /^[a-z0-9-]{1,32}$/i.test(v)
+								return v === "" || /^[^\s\]<>]{1,32}$/.test(v)
 									? undefined
-									: "Use lowercase letters, digits, and dashes (max 32).";
+									: "Use a single tag with no spaces (max 32 characters).";
 							},
 						},
 					},
@@ -252,17 +252,18 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 
 	// Routes declarative controls to the plugin's own settings store and runs the
 	// side effects the imperative onChange handlers used to run inline. authorTag
-	// is lowercased on the way in (the validate callback only gates, it cannot
-	// transform). Toggles that show or hide dependent rows, or that change the
-	// default-category options, trigger a full re-render via update().
+	// is trimmed but keeps its casing (the parser accepts mixed-case authors).
+	// Toggles that show or hide dependent rows, or that change the default-category
+	// options, trigger a full re-render via update().
 	getControlValue(key: string): unknown {
 		return (this.plugin.settings as unknown as Record<string, unknown>)[key];
 	}
 
 	async setControlValue(key: string, value: unknown): Promise<void> {
 		if (key === "authorTag") {
+			// Preserve the tag's casing; the parser accepts mixed-case authors.
 			this.plugin.settings.authorTag =
-				typeof value === "string" ? value.trim().toLowerCase() : "";
+				typeof value === "string" ? value.trim() : "";
 		} else {
 			(this.plugin.settings as unknown as Record<string, unknown>)[key] = value;
 		}

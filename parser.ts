@@ -9,18 +9,22 @@ import type { AnchorText, Comment, Reply, Resolution } from "./types";
 const MARKER_RE = /<!--\s*annoteca\/([a-z][a-z0-9-]*)\s*:([\s\S]*?)-->/g;
 
 // Permissive trailing-line patterns. The strict category-name rules live in
-// categories.ts. Authors and dates use lowercase ASCII letters/digits/dashes,
-// constrained to 32 chars to match the spec's metadata limits.
+// categories.ts. An author is any single token up to 32 chars: the class
+// forbids only the characters that would break the format itself, namely
+// whitespace (the field delimiter in [reply ...] / [resolved ...] lines), `]`
+// (closes the bracket), and `<`/`>` (could form `-->` and break the HTML comment
+// wrapper). Everything else (mixed case, dots, underscores, unicode) is allowed.
+// Backward compatible: the old lowercase tags still match.
 const ID_LINE_RE = /^\s*\[id=([a-z0-9]{1,32})\]\s*$/;
 const DATE_LINE_RE = /^\s*\[date=(\d{4}-\d{2}-\d{2})\]\s*$/;
-const AUTHOR_LINE_RE = /^\s*\[author=([a-z0-9-]{1,32})\]\s*$/;
+const AUTHOR_LINE_RE = /^\s*\[author=([^\s\]<>]{1,32})\]\s*$/;
 // Anchor value is permissive: anything but `]` or a line break. Length is
 // capped to 80 visible chars + an optional single ellipsis character to
 // indicate truncation (per data-format.md). Longer values are still parsed —
 // forward-compat — but the cap is enforced at serialize time.
 const ANCHOR_LINE_RE = /^\s*\[anchor=([^\]\r\n]{1,200})\]\s*$/;
-const REPLY_LINE_RE = /^\s*\[reply\s+([a-z0-9-]{1,32})\s+(\d{4}-\d{2}-\d{2})\]:\s?([\s\S]*)$/;
-const RESOLVED_LINE_RE = /^\s*\[resolved\s+([a-z0-9-]{1,32})\s+(\d{4}-\d{2}-\d{2})\]:\s?([\s\S]*)$/;
+const REPLY_LINE_RE = /^\s*\[reply\s+([^\s\]<>]{1,32})\s+(\d{4}-\d{2}-\d{2})\]:\s?([\s\S]*)$/;
+const RESOLVED_LINE_RE = /^\s*\[resolved\s+([^\s\]<>]{1,32})\s+(\d{4}-\d{2}-\d{2})\]:\s?([\s\S]*)$/;
 
 // Maximum visible characters in an anchor value before mid-truncation kicks
 // in. 80 strikes the balance between "disambiguate the commented words" and

@@ -114,6 +114,20 @@ but here is a non-structured line, which means everything above is body
 		if (!c) return;
 		expect(c.resolution).toEqual({ author: "charles", date: "2026-05-25", note: "" });
 	});
+
+	it("preserves mixed-case and dotted authors in author, reply, and resolved lines", () => {
+		const text = `<!-- annoteca/tone: body
+[author=J.Doe]
+[reply AI-Bot 2026-05-23]: a reply
+[resolved Charles 2026-05-25]: done
+-->`;
+		const c = parseAll(text)[0];
+		expect(c).toBeDefined();
+		if (!c) return;
+		expect(c.author).toBe("J.Doe");
+		expect(c.replies[0]?.author).toBe("AI-Bot");
+		expect(c.resolution).toEqual({ author: "Charles", date: "2026-05-25", note: "done" });
+	});
 });
 
 describe("parser: anchor", () => {
