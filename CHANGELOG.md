@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-10
+
+### Changed
+- Internal restructuring, no behavior change:
+  - The five vault-scanning diagnostics commands moved from the plugin class into a new `diagnostics-service.ts`; the three marker scans (conflicts, orphans, validation) now share one parameterized scan loop instead of three copies. `main.ts` drops from 1,044 to 943 lines.
+  - The four sidebar views share an `AnnotecaBaseView` base class for plugin injection and close-time cleanup instead of copy-pasted constructors.
+  - The two comment converters in `imports.ts` share one replacement engine.
+
+### Fixed
+- Long-running commands (diagnostics, drift check, bulk convert, settings backup/restore) now surface failures as a notice instead of dying silently into the developer console mid-scan.
+- Settings restore logs the underlying parse error to the console alongside the "not valid JSON" notice, so a malformed backup can actually be debugged.
+- The icon picker no longer leaves its deferred focus timer running when the modal is closed before the timer fires.
+
 ## [0.5.1] - 2026-06-10
 
 ### Changed
