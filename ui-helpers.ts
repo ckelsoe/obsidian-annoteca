@@ -230,6 +230,7 @@ class IconPickerModal extends Modal {
 	private readonly currentId: string | undefined;
 	private readonly onPick: (next: string) => void | Promise<void>;
 	private filterTerm = "";
+	private focusTimer: number | null = null;
 
 	constructor(app: App, currentId: string | undefined, onPick: (next: string) => void | Promise<void>) {
 		super(app);
@@ -286,10 +287,21 @@ class IconPickerModal extends Modal {
 		});
 
 		renderGrid();
-		window.setTimeout(() => searchInput.focus(), 0);
+		// Defer focus one tick so the modal is fully attached first. The
+		// handle is kept so onClose can cancel it when the modal is
+		// dismissed before the timer fires (also keeps test runners from
+		// waiting on a stray timer handle).
+		this.focusTimer = window.setTimeout(() => {
+			this.focusTimer = null;
+			searchInput.focus();
+		}, 0);
 	}
 
 	onClose(): void {
+		if (this.focusTimer !== null) {
+			window.clearTimeout(this.focusTimer);
+			this.focusTimer = null;
+		}
 		this.contentEl.empty();
 	}
 }

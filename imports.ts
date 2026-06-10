@@ -12,9 +12,18 @@ export interface ImportResult {
 	converted: number;
 }
 
-export function convertNativeComments(content: string, category: string): ImportResult {
+// Shared replacement engine for both comment syntaxes. The regex picks the
+// source format; `skip` lets a format leave specific matches untouched (the
+// HTML pass must not re-convert markers already in the annoteca format).
+function convertComments(
+	content: string,
+	category: string,
+	pattern: RegExp,
+	skip?: (body: string) => boolean,
+): ImportResult {
 	let converted = 0;
-	const updated = content.replace(NATIVE_COMMENT_RE, (_, body: string) => {
+	const updated = content.replace(pattern, (full, body: string) => {
+		if (skip?.(body)) return full;
 		converted += 1;
 		const cleaned = body.trim().replace(/\n+/g, " ");
 		return `<!-- annoteca/${category}: ${cleaned} -->`;
@@ -22,16 +31,15 @@ export function convertNativeComments(content: string, category: string): Import
 	return { updated, converted };
 }
 
+export function convertNativeComments(content: string, category: string): ImportResult {
+	return convertComments(content, category, NATIVE_COMMENT_RE);
+}
+
 export function convertGenericHtmlComments(content: string, category: string): ImportResult {
-	let converted = 0;
-	const updated = content.replace(HTML_COMMENT_RE, (full, body: string) => {
-		// Skip markers that already follow the annoteca format.
-		if (/^\s*annoteca\//.test(body)) return full;
-		converted += 1;
-		const cleaned = body.trim().replace(/\n+/g, " ");
-		return `<!-- annoteca/${category}: ${cleaned} -->`;
-	});
-	return { updated, converted };
+	// Skip markers that already follow the annoteca format.
+	return convertComments(content, category, HTML_COMMENT_RE, (body) =>
+		/^\s*annoteca\//.test(body),
+	);
 }
 
 export type ImportFormat = "native" | "html" | "all";

@@ -24,6 +24,23 @@ export const ANNOTECA_HUB_VIEW_TYPE = "annoteca-hub-view";
 export type HubTab = "thread" | "outline" | "starred";
 
 
+// Shared scaffolding for every Annoteca ItemView: plugin injection in the
+// constructor and contentEl cleanup on close. Subclasses still own their
+// view-type identity methods and onOpen wiring.
+abstract class AnnotecaBaseView extends ItemView {
+	protected readonly plugin: AnnotecaPlugin;
+
+	constructor(leaf: WorkspaceLeaf, plugin: AnnotecaPlugin) {
+		super(leaf);
+		this.plugin = plugin;
+	}
+
+	async onClose(): Promise<void> {
+		this.contentEl.empty();
+	}
+}
+
+
 // Vault-wide unresolved view (F-051, F-052, F-053, F-056) -----------------------
 
 interface VaultFilters {
@@ -32,18 +49,12 @@ interface VaultFilters {
 	state: "open" | "resolved" | "all";
 }
 
-export class VaultUnresolvedView extends ItemView {
-	private readonly plugin: AnnotecaPlugin;
+export class VaultUnresolvedView extends AnnotecaBaseView {
 	private filters: VaultFilters = {
 		pathQuery: "",
 		categories: new Set(),
 		state: "open",
 	};
-
-	constructor(leaf: WorkspaceLeaf, plugin: AnnotecaPlugin) {
-		super(leaf);
-		this.plugin = plugin;
-	}
 
 	getViewType(): string { return VAULT_UNRESOLVED_VIEW_TYPE; }
 	getDisplayText(): string { return "Annoteca: Unresolved"; }
@@ -55,10 +66,6 @@ export class VaultUnresolvedView extends ItemView {
 		this.registerEvent(
 			this.plugin.events.on("index-changed", () => this.refresh()),
 		);
-	}
-
-	async onClose(): Promise<void> {
-		this.contentEl.empty();
 	}
 
 	private refresh(): void {
@@ -162,14 +169,7 @@ export class VaultUnresolvedView extends ItemView {
 
 // Index entry view (F-260) -----------------------------------------------------
 
-export class IndexEntryView extends ItemView {
-	private readonly plugin: AnnotecaPlugin;
-
-	constructor(leaf: WorkspaceLeaf, plugin: AnnotecaPlugin) {
-		super(leaf);
-		this.plugin = plugin;
-	}
-
+export class IndexEntryView extends AnnotecaBaseView {
 	getViewType(): string { return INDEX_VIEW_TYPE; }
 	getDisplayText(): string { return "Annoteca: Index entries"; }
 	getIcon(): string { return "list"; }
@@ -178,10 +178,6 @@ export class IndexEntryView extends ItemView {
 		await this.plugin.scanVaultIfNeeded();
 		this.refresh();
 		this.registerEvent(this.plugin.events.on("index-changed", () => this.refresh()));
-	}
-
-	async onClose(): Promise<void> {
-		this.contentEl.empty();
 	}
 
 	private refresh(): void {
@@ -235,14 +231,8 @@ export class IndexEntryView extends ItemView {
 
 import { ComposerForm, type ComposerRequest } from "./composer";
 
-export class ComposerPanelView extends ItemView {
-	private readonly plugin: AnnotecaPlugin;
+export class ComposerPanelView extends AnnotecaBaseView {
 	private pendingRequest: ComposerRequest | undefined;
-
-	constructor(leaf: WorkspaceLeaf, plugin: AnnotecaPlugin) {
-		super(leaf);
-		this.plugin = plugin;
-	}
 
 	getViewType(): string { return COMPOSER_PANEL_VIEW_TYPE; }
 	getDisplayText(): string { return "Compose comment"; }
@@ -255,10 +245,6 @@ export class ComposerPanelView extends ItemView {
 
 	async onOpen(): Promise<void> {
 		this.refresh();
-	}
-
-	async onClose(): Promise<void> {
-		this.contentEl.empty();
 	}
 
 	private refresh(): void {
@@ -306,16 +292,14 @@ export function serializeReplyAppended(c: Comment, reply: { author: string; date
 // that keeps the sidebar tab bar uncluttered. A fourth tab (starred) collects
 // the user's bookmarked comments across the vault.
 
-export class AnnotecaPanelView extends ItemView {
-	private readonly plugin: AnnotecaPlugin;
+export class AnnotecaPanelView extends AnnotecaBaseView {
 	private activeTab: HubTab = "thread";
 	private readonly threadRenderer: ThreadTabRenderer;
 	private readonly outlineRenderer: OutlineTabRenderer;
 	private readonly starredRenderer: StarredTabRenderer;
 
 	constructor(leaf: WorkspaceLeaf, plugin: AnnotecaPlugin) {
-		super(leaf);
-		this.plugin = plugin;
+		super(leaf, plugin);
 		this.threadRenderer = new ThreadTabRenderer(plugin, this.app, () => this.refresh());
 		this.outlineRenderer = new OutlineTabRenderer(plugin, this.app);
 		this.starredRenderer = new StarredTabRenderer(plugin);
@@ -363,10 +347,6 @@ export class AnnotecaPanelView extends ItemView {
 			this.threadRenderer.activeStart = undefined;
 			this.refresh();
 		}));
-	}
-
-	async onClose(): Promise<void> {
-		this.contentEl.empty();
 	}
 
 	private async setActiveTab(tab: HubTab): Promise<void> {

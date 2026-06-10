@@ -30,32 +30,26 @@ import {
 	AnnotecaPanelView,
 } from "./views";
 import type { ComposerRequest } from "./composer";
-import {
-	detectMarkerConflicts,
-	detectOrphans,
-	validateMarkers,
-	type OrphanFinding,
-	type ConflictFinding,
-	type ValidationFinding,
-} from "./diagnostics";
 import { todayISO } from "./parser";
 import { convertAllComments, type ImportFormat } from "./imports";
 import { ConfirmBackupModal, ConfirmDeleteCommentModal, ConfirmDeleteResolvedModal } from "./confirm-modal";
-import { detectDrift, type DriftFinding, type PositionSnapshot } from "./drift";
 import { formatScripture } from "./scripture";
 import { computeScopeFileSet, type ScopeFile } from "./scope";
 import { CommentService } from "./comment-service";
+import { DiagnosticsService } from "./diagnostics-service";
 
 export default class AnnotecaPlugin extends Plugin {
 	settings!: AnnotecaSettings;
 	commentIndex = new CommentIndex();
 	events = new Events();
 	comments!: CommentService;
+	diagnostics!: DiagnosticsService;
 	private vaultScanned = false;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
 		this.comments = new CommentService(this);
+		this.diagnostics = new DiagnosticsService(this);
 
 		this.registerEditorExtension(buildAnnotecaExtension({
 			getSettings: () => this.settings,
@@ -385,17 +379,17 @@ export default class AnnotecaPlugin extends Plugin {
 		this.addCommand({
 			id: "check-marker-conflicts",
 			name: "Check for marker conflicts",
-			callback: () => { void this.runConflictCheck(); },
+			callback: () => { this.runGuarded("Conflict check", () => this.diagnostics.runConflictCheck()); },
 		});
 		this.addCommand({
 			id: "detect-orphan-comments",
 			name: "Detect orphan comments",
-			callback: () => { void this.runOrphanCheck(); },
+			callback: () => { this.runGuarded("Orphan check", () => this.diagnostics.runOrphanCheck()); },
 		});
 		this.addCommand({
 			id: "validate-marker-format",
 			name: "Validate marker format",
-			callback: () => { void this.runMarkerValidation(); },
+			callback: () => { this.runGuarded("Marker validation", () => this.diagnostics.runMarkerValidation()); },
 		});
 		this.addCommand({
 			id: "format-scripture-references",
@@ -416,22 +410,22 @@ export default class AnnotecaPlugin extends Plugin {
 		this.addCommand({
 			id: "backup-settings",
 			name: "Back up settings",
-			callback: () => { void this.backupSettings(); },
+			callback: () => { this.runGuarded("Settings backup", () => this.backupSettings()); },
 		});
 		this.addCommand({
 			id: "restore-settings",
 			name: "Restore settings from backup",
-			callback: () => { void this.restoreSettings(); },
+			callback: () => { this.runGuarded("Settings restore", () => this.restoreSettings()); },
 		});
 		this.addCommand({
 			id: "self-diagnostic",
 			name: "Run self-diagnostic",
-			callback: () => { void this.runSelfDiagnostic(); },
+			callback: () => { this.runGuarded("Self-diagnostic", () => this.diagnostics.runSelfDiagnostic()); },
 		});
 		this.addCommand({
 			id: "detect-position-drift",
 			name: "Detect position drift",
-			callback: () => { void this.runDriftCheck(); },
+			callback: () => { this.runGuarded("Drift check", () => this.diagnostics.runDriftCheck()); },
 		});
 		this.addCommand({
 			id: "import-native-comments",
@@ -924,38 +918,18 @@ export default class AnnotecaPlugin extends Plugin {
 		new Notice(`Indicator style: ${next}.`);
 	}
 
-	// Diagnostics commands ----------------------------------------------
+	// Diagnostics commands live in DiagnosticsService. ---------------------
 
-	private async runConflictCheck(): Promise<void> {
-		await this.scanVaultIfNeeded();
-		const findings: ConflictFinding[] = [];
-		const files = this.app.vault.getMarkdownFiles();
-		for (const f of files) {
-			const content = await this.app.vault.cachedRead(f);
-			findings.push(...detectMarkerConflicts(content, f.path));
-		}
-		if (findings.length === 0) {
-			new Notice("No marker conflicts detected.");
-			return;
-		}
-		await this.writeDiagnosticsReport("Marker conflicts", findings);
-		new Notice(`Found ${findings.length} potential conflict(s). See the diagnostics note in the vault.`);
-	}
-
-	private async runOrphanCheck(): Promise<void> {
-		await this.scanVaultIfNeeded();
-		const findings: OrphanFinding[] = [];
-		const files = this.app.vault.getMarkdownFiles();
-		for (const f of files) {
-			const content = await this.app.vault.cachedRead(f);
-			findings.push(...detectOrphans(content, f.path));
-		}
-		if (findings.length === 0) {
-			new Notice("No orphan comments detected.");
-			return;
-		}
-		await this.writeDiagnosticsReport("Orphan comments", findings);
-		new Notice(`Found ${findings.length} orphan(s). See the diagnostics note in the vault.`);
+	// Run an async command body, surfacing failure as a Notice. Obsidian
+	// command callbacks are synchronous; without this, a rejection from an
+	// awaited body becomes an unhandled rejection the user never sees and
+	// a long-running scan can die silently partway through.
+	private runGuarded(label: string, action: () => Promise<void>): void {
+		action().catch((err: unknown) => {
+			console.error(`Annoteca: ${label} failed`, err);
+			const detail = err instanceof Error ? err.message : String(err);
+			new Notice(`Annoteca: ${label} failed. ${detail}`);
+		});
 	}
 
 	private async backupSettings(): Promise<void> {
@@ -985,72 +959,12 @@ export default class AnnotecaPlugin extends Plugin {
 			this.settings = { ...DEFAULT_SETTINGS, ...this.settings, ...parsed };
 			await this.saveSettings();
 			new Notice("Settings restored.");
-		} catch {
+		} catch (err) {
+			// Surface the parse failure to the console for bug reports; the
+			// Notice alone hides which line of the backup was malformed.
+			console.error("Annoteca: settings restore failed", err);
 			new Notice("Backup file is not valid JSON.");
 		}
-	}
-
-	private async runSelfDiagnostic(): Promise<void> {
-		await this.scanVaultIfNeeded();
-		const stats = this.commentIndex.stats();
-		const enabled = this.settings.categories.length;
-		const summary = {
-			fileCount: stats.fileCount,
-			commentCount: stats.commentCount,
-			unresolvedCount: stats.unresolvedCount,
-			enabledCategories: enabled,
-			scholarlyPreset: this.settings.enableScholarlyPreset,
-			indicatorStyle: this.settings.indicatorStyle,
-			authorTagEnabled: this.settings.enableAuthorTag,
-			debugMode: this.settings.debugMode,
-		};
-		await this.writeDiagnosticsReport("Self-diagnostic", [summary]);
-		new Notice(`Plugin healthy. ${stats.commentCount} comment(s) indexed across ${stats.fileCount} file(s).`);
-	}
-
-	private async runDriftCheck(): Promise<void> {
-		await this.scanVaultIfNeeded();
-		const prior: Record<string, PositionSnapshot> = this.settings.driftSnapshots ?? {};
-		const allFindings: DriftFinding[] = [];
-		let refreshed: Record<string, PositionSnapshot> = { ...prior };
-		const files = this.app.vault.getMarkdownFiles();
-		const liveIds = new Set<string>();
-		for (const f of files) {
-			const content = await this.app.vault.cachedRead(f);
-			const idx = this.commentIndex.get(f.path);
-			const comments = idx?.comments ?? [];
-			for (const c of comments) if (c.id) liveIds.add(c.id);
-			const r = detectDrift(content, f.path, comments, refreshed);
-			refreshed = r.refreshedSnapshots;
-			allFindings.push(...r.findings);
-		}
-		for (const id of Object.keys(refreshed)) {
-			if (!liveIds.has(id)) delete refreshed[id];
-		}
-		this.settings.driftSnapshots = refreshed;
-		await this.saveSettings();
-
-		if (allFindings.length === 0) {
-			new Notice("No position drift detected. Snapshots refreshed.");
-			return;
-		}
-		await this.writeDiagnosticsReport("Position drift", allFindings);
-		new Notice(`Found ${allFindings.length} drift finding(s). See the diagnostics note in the vault.`);
-	}
-
-	private async runMarkerValidation(): Promise<void> {
-		const findings: ValidationFinding[] = [];
-		const files = this.app.vault.getMarkdownFiles();
-		for (const f of files) {
-			const content = await this.app.vault.cachedRead(f);
-			findings.push(...validateMarkers(content, f.path));
-		}
-		if (findings.length === 0) {
-			new Notice("All markers are valid.");
-			return;
-		}
-		await this.writeDiagnosticsReport("Malformed markers", findings);
-		new Notice(`Found ${findings.length} malformed marker(s). See the diagnostics note in the vault.`);
 	}
 
 	private confirmAndConvert(format: ImportFormat): void {
@@ -1060,7 +974,7 @@ export default class AnnotecaPlugin extends Plugin {
 				? "Convert every plain HTML comment in the vault (anything not already in Annoteca format) into an Annoteca marker with the 'uncategorized' category."
 				: "Convert every native and plain HTML comment in the vault into Annoteca markers with the 'uncategorized' category.";
 		new ConfirmBackupModal(this.app, "Convert comments", description, () => {
-			void this.runBulkConvert(format);
+			this.runGuarded("Comment conversion", () => this.runBulkConvert(format));
 		}).open();
 	}
 
@@ -1079,28 +993,6 @@ export default class AnnotecaPlugin extends Plugin {
 		}
 		this.events.trigger("index-changed");
 		new Notice(`Converted ${totalConverted} comment(s) across ${filesTouched} file(s).`);
-	}
-
-	private async writeDiagnosticsReport(label: string, findings: unknown[]): Promise<void> {
-		// Write findings to a vault note so the user can read them without
-		// opening devtools. V2 adds debug-log routing per F-237.
-		const filename = `Annoteca diagnostics — ${label}.md`;
-		const lines: string[] = [];
-		lines.push(`# ${label}`);
-		lines.push("");
-		lines.push(`Generated: ${todayISO()}`);
-		lines.push("");
-		lines.push("```json");
-		lines.push(JSON.stringify(findings, null, 2));
-		lines.push("```");
-		const body = lines.join("\n");
-
-		const existing = this.app.vault.getAbstractFileByPath(filename);
-		if (existing instanceof TFile) {
-			await this.app.vault.modify(existing, body);
-		} else {
-			await this.app.vault.create(filename, body);
-		}
 	}
 
 	// Helpers used by commands -----------------------------------------
