@@ -1,8 +1,10 @@
 # Annoteca
 
-[![CI](https://img.shields.io/github/actions/workflow/status/ckelsoe/obsidian-annoteca/ci.yml?branch=main&label=CI&logo=github)](https://github.com/ckelsoe/obsidian-annoteca/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/actions/workflow/status/ckelsoe/obsidian-annoteca/release.yml?label=Release&logo=github)](https://github.com/ckelsoe/obsidian-annoteca/actions/workflows/release.yml) [![GitHub Downloads](https://img.shields.io/github/downloads/ckelsoe/obsidian-annoteca/total?logo=github&label=Downloads)](https://github.com/ckelsoe/obsidian-annoteca/releases) [![GitHub Stars](https://img.shields.io/github/stars/ckelsoe/obsidian-annoteca?style=flat&logo=github&label=Stars)](https://github.com/ckelsoe/obsidian-annoteca) [![Obsidian](https://img.shields.io/badge/Obsidian-v1.13.0%2B-7C3AED?logo=obsidian&logoColor=white)](https://obsidian.md) [![License](https://img.shields.io/github/license/ckelsoe/obsidian-annoteca)](https://github.com/ckelsoe/obsidian-annoteca/blob/main/LICENSE) [![Latest Release](https://img.shields.io/github/v/release/ckelsoe/obsidian-annoteca?label=Latest)](https://github.com/ckelsoe/obsidian-annoteca/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/ckelsoe/obsidian-annoteca/ci.yml?branch=main&label=CI&logo=github)](https://github.com/ckelsoe/obsidian-annoteca/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/actions/workflow/status/ckelsoe/obsidian-annoteca/release.yml?label=Release&logo=github)](https://github.com/ckelsoe/obsidian-annoteca/actions/workflows/release.yml) [![GitHub Downloads](https://img.shields.io/github/downloads/ckelsoe/obsidian-annoteca/total?logo=github&label=Downloads)](https://github.com/ckelsoe/obsidian-annoteca/releases) [![Obsidian](https://img.shields.io/badge/Obsidian-v1.13.0%2B-7C3AED?logo=obsidian&logoColor=white)](https://obsidian.md) [![License](https://img.shields.io/badge/license-MIT-blue)](https://github.com/ckelsoe/obsidian-annoteca/blob/main/LICENSE) [![Latest Release](https://img.shields.io/github/v/release/ckelsoe/obsidian-annoteca?label=Latest)](https://github.com/ckelsoe/obsidian-annoteca/releases/latest)
 
 Categorized inline feedback comments for long-form markdown documents. Comments live in the file as plain HTML markers, so they are readable by humans, by grep, and by any AI assistant. Works on desktop and mobile.
+
+Requires Obsidian 1.13.0 or later.
 
 Annoteca is built for revision work on long documents: book manuscripts, theses, technical docs, sermon and lecture prep. You leave typed feedback at the exact passage it concerns ("tighten this", "needs a source", "doesn't sound like me"), reply in threads, and resolve items as the draft improves. The comments travel with the file, survive without the plugin, and can be stripped cleanly at export time.
 
@@ -73,6 +75,8 @@ To teach an assistant the format, run **Export AI skill**. It writes a skill fil
 - **Diagnostics**: debug logging.
 
 ## Installation
+
+Annoteca requires Obsidian 1.13.0 or later. Obsidian offers the matching plugin version automatically; on older Obsidian versions the plugin will not appear as updatable beyond the last compatible release.
 
 ### From Obsidian community plugins (recommended)
 
