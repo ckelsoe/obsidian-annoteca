@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-06-11
+
+First stable release, prepared for Obsidian community plugin submission. No code changes since 0.9.0.
+
+### Changed
+- README rewritten to document the full feature set: categories and presets, anchored underlines, threaded conversations, the comment hub, reading-view indicators, resolve workflows, imports, and the AI skill export. Minimum-Obsidian badge corrected to 1.13.0.
+- PRIVACY.md data-flow section filled in (it previously carried a template placeholder).
+
 ## [0.9.0] - 2026-06-11
 
 ### Added
