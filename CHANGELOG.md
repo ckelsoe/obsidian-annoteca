@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-06-11
+
+### Changed
+- PRIVACY.md now names the vault file enumeration (scopes, diagnostics, bulk convert) and the clipboard write ("Copy ID", write-only) explicitly, per the developer-dashboard preview scan recommendations. No code changes.
+
 ## [1.0.3] - 2026-06-11
 
 ### Changed
