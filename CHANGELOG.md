@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-11
+
+### Added
+- "Export AI skill" command and settings button. Writes a SKILL.md into the vault that teaches an AI assistant the marker grammar, the reply/resolve conventions, and this vault's configured categories. A new "Skill export destination" setting picks the folder: `.claude/skills/annoteca/` (Claude Code, the default), `.agent/skills/annoteca/` (other assistants), or both. The shipped example marker is covered by a test that parses it with the real parser, so the taught grammar cannot drift from the implementation.
+
 ## [0.6.0] - 2026-06-10
 
 ### Changed
