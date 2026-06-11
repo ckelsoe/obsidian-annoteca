@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-06-11
+
+### Added
+- "Resolve and remove" action: resolves a comment by deleting its marker from the file instead of keeping a [resolved ...] line. Available everywhere Resolve appears: Thread tab card, hover popup, editor right-click menu, and a new "Resolve and remove comment here" command. Always asks for confirmation (same modal as delete, with resolve wording).
+- "Delete on resolve" setting (off by default). When enabled, plain Resolve removes the marker without asking; the toggle is the opt-in. Keep-in-place history remains the default behavior.
+
 ## [0.8.0] - 2026-06-11
 
 ### Added
