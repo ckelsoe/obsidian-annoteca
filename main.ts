@@ -978,6 +978,7 @@ export default class AnnotecaPlugin extends Plugin {
 			const body = buildSkillMarkdown(
 				resolveSettingsCategories(this.settings),
 				this.settings.enableAuthorTag ? this.settings.authorTag : undefined,
+				this.manifest.version,
 			);
 			const adapter = this.app.vault.adapter;
 			const paths = skillTargetPaths(this.settings.skillExportTarget);
@@ -1084,16 +1085,20 @@ export default class AnnotecaPlugin extends Plugin {
 
 	private async activateView(type: string, placement: "right" | "tab"): Promise<void> {
 		const leaves = this.app.workspace.getLeavesOfType(type);
-		if (leaves.length > 0 && leaves[0]) {
-			this.app.workspace.setActiveLeaf(leaves[0]);
-			return;
+		let leaf: WorkspaceLeaf | null = leaves[0] ?? null;
+		if (!leaf) {
+			leaf = placement === "right"
+				? this.app.workspace.getRightLeaf(false)
+				: this.app.workspace.getLeaf("tab");
+			if (!leaf) return;
+			await leaf.setViewState({ type, active: true });
 		}
-		let leaf: WorkspaceLeaf | null;
-		if (placement === "right") {
-			leaf = this.app.workspace.getRightLeaf(false);
-		} else {
-			leaf = this.app.workspace.getLeaf("tab");
-		}
-		if (leaf) await leaf.setViewState({ type, active: true });
+		// revealLeaf, not setActiveLeaf: the hub leaf is pre-created at startup
+		// with active:false, so it always exists, and setActiveLeaf on a leaf in
+		// a collapsed sidebar does not expand the sidebar (the panel "never
+		// opened"). revealLeaf uncollapses the sidebar and, awaited, resolves a
+		// DeferredView so listeners registered in the view's onOpen exist before
+		// callers emit events at it.
+		await this.app.workspace.revealLeaf(leaf);
 	}
 }

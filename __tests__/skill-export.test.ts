@@ -25,7 +25,7 @@ describe("skillTargetPaths", () => {
 });
 
 describe("buildSkillMarkdown", () => {
-	const skill = buildSkillMarkdown(CATEGORIES, undefined);
+	const skill = buildSkillMarkdown(CATEGORIES, undefined, "1.0.1");
 
 	it("starts with frontmatter naming the skill", () => {
 		expect(skill.startsWith("---\nname: annoteca-comments\n")).toBe(true);
@@ -57,11 +57,16 @@ describe("buildSkillMarkdown", () => {
 	});
 
 	it("names the reviewer's author tag when one is configured", () => {
-		const withTag = buildSkillMarkdown(CATEGORIES, "Charles");
+		const withTag = buildSkillMarkdown(CATEGORIES, "Charles", "1.0.1");
 		expect(withTag).toContain("signs comments as `Charles`");
 	});
 
 	it("suggests a generic tag when no author tag is configured", () => {
 		expect(skill).toContain("such as `claude` or `ai`");
+	});
+
+	it("stamps the generating plugin version and repo link", () => {
+		expect(skill).toContain("version 1.0.1");
+		expect(skill).toContain("https://github.com/ckelsoe/obsidian-annoteca");
 	});
 });
