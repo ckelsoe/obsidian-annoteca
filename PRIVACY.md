@@ -12,6 +12,11 @@ The plugin collects nothing, stores nothing outside your own vault, and sends no
 
 The plugin reads the markdown files in your vault to find its comment markers, and writes to a markdown file only when you take an explicit action on it: adding, editing, replying to, resolving, or deleting a comment, or running one of the bulk conversion or cleanup commands (each of which asks for confirmation first). The "Export AI skill" command writes a skill file into a folder inside your vault at your request. The optional debug log and the settings backup, when you enable or run them, are also written inside your vault. The plugin touches no files outside the vault.
 
+Two behaviors worth naming explicitly:
+
+- **Vault file enumeration.** Multi-file features (vault-wide comment scopes, the diagnostics scans, bulk comment conversion) list the vault's markdown files to know what to scan. The listing stays in memory on your device; nothing is collected or transmitted.
+- **Clipboard write.** The "Copy ID" action writes a comment's identifier to your system clipboard. The plugin writes to the clipboard only on that explicit action and never reads the clipboard.
+
 ## Data collection
 
 - **No personal data is collected.** The plugin does not collect names, email addresses, file contents, usage statistics, or any other information.
