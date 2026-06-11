@@ -287,9 +287,23 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 							options: { console: "Browser console", vault: "Log file in the vault" },
 						},
 					},
+					this.customBlock((host) => this.renderFooter(host)),
 				],
 			},
 		];
+	}
+
+	// Version + links footer, the same trailing row the workspace's reference
+	// plugin renders (shell-path-copy settings-tab renderFooter).
+	private renderFooter(host: HTMLElement): void {
+		host.addClass("annoteca-settings-footer");
+		host.createSpan({ text: `Version ${this.plugin.manifest.version} | ` });
+		const link = (text: string, url: string) => {
+			host.createEl("a", { text, href: url, attr: { target: "_blank", rel: "noopener" } });
+		};
+		link("GitHub", "https://github.com/ckelsoe/obsidian-annoteca");
+		host.createSpan({ text: " | " });
+		link("Report Issues", "https://github.com/ckelsoe/obsidian-annoteca/issues");
 	}
 
 	// Routes declarative controls to the plugin's own settings store and runs the

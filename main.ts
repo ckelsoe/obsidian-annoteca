@@ -978,7 +978,6 @@ export default class AnnotecaPlugin extends Plugin {
 			const body = buildSkillMarkdown(
 				resolveSettingsCategories(this.settings),
 				this.settings.enableAuthorTag ? this.settings.authorTag : undefined,
-				this.manifest.version,
 			);
 			const adapter = this.app.vault.adapter;
 			const paths = skillTargetPaths(this.settings.skillExportTarget);

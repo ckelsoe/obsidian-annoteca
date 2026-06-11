@@ -1637,3 +1637,14 @@ settings:
 .annoteca-rv-badge {
 	margin-top: 4px;
 }
+
+/* Version + links footer at the bottom of the settings tab. */
+.annoteca-settings-footer {
+	justify-content: center;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	border-top: none;
+}
+.annoteca-settings-footer a {
+	margin: 0 4px;
+}
