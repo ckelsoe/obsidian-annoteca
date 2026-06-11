@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-06-11
+
+### Fixed
+- Marker clicks and hub-opening actions now actually open the right sidebar when it is collapsed. The hub leaf is pre-created at startup, and the old activation path only set it active, which does not expand a collapsed sidebar; the panel appeared to never open unless it had been opened manually. Activation now goes through `workspace.revealLeaf`, awaited, which also resolves the deferred view before comment-selection events are emitted at it.
+
+### Changed
+- The exported AI skill file now ends with a footer naming the generating plugin version and linking the repository, with a reminder to re-export after category changes or upgrades.
+
 ## [1.0.0] - 2026-06-11
 
 First stable release, prepared for Obsidian community plugin submission. No code changes since 0.9.0.
