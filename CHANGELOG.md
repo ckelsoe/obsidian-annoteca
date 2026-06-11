@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-06-11
+
+### Changed
+- The worked example in the README and the exported AI skill now uses a business document (a forecast sentence) instead of fiction prose. The example still round-trips through the real parser in tests.
+
 ## [1.0.2] - 2026-06-11
 
 ### Added
