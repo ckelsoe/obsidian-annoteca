@@ -62,15 +62,15 @@ Some prose being reviewed. <!-- annoteca/clarify: which products? -->
 Multi-line comment with metadata, a thread, and a resolution:
 
 \`\`\`markdown
-She knew what love felt like.
-<!-- annoteca/tone: doesn't sound like me
+The Q3 forecast assumes a hiring freeze through December.
+<!-- annoteca/tone: too blunt for the board deck
 [id=a3b9c2x7]
 [date=2026-05-23]
 [author=reviewer]
-[anchor=She knew what love felt like.]
-[reply ai 2026-05-23]: Consider "She knew, in her bones, what love felt like."
-[reply reviewer 2026-05-24]: I like "in her bones." Trying it.
-[resolved reviewer 2026-05-25]: rewrote the line
+[anchor=assumes a hiring freeze through December]
+[reply ai 2026-05-23]: Consider "reflects current headcount planning through December."
+[reply reviewer 2026-05-24]: Better. Softening it.
+[resolved reviewer 2026-05-25]: reworded the assumption
 -->
 \`\`\`
 

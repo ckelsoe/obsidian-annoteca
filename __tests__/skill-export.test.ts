@@ -51,7 +51,7 @@ describe("buildSkillMarkdown", () => {
 		expect(example.id).toBe("a3b9c2x7");
 		expect(example.date).toBe("2026-05-23");
 		expect(example.author).toBe("reviewer");
-		expect(example.anchor?.text).toBe("She knew what love felt like.");
+		expect(example.anchor?.text).toBe("assumes a hiring freeze through December");
 		expect(example.replies).toHaveLength(2);
 		expect(example.resolution?.author).toBe("reviewer");
 	});
