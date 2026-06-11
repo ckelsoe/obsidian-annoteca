@@ -136,6 +136,14 @@ export interface AnnotecaSettings {
 	// Where "Export AI skill" writes its SKILL.md inside the vault:
 	// .claude/skills/ (Claude Code), .agent/skills/ (other assistants), or both.
 	skillExportTarget: "claude" | "agent" | "both";
+
+	// Reading-view comment indicator. Markers are HTML comments, which the
+	// renderer drops; this surfaces their presence in reading view.
+	// "banner"      → one note-level pill with file totals
+	// "per-section" → a badge on each rendered section containing markers
+	// "both"        → banner and badges
+	// "off"         → nothing rendered
+	readingViewIndicator: "off" | "banner" | "per-section" | "both";
 }
 
 // Discriminated union for scope shapes. The shape determines what set of

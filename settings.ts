@@ -55,6 +55,7 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 	customPresets: [],
 	indicatorSize: "medium",
 	skillExportTarget: "claude",
+	readingViewIndicator: "banner",
 };
 
 // Resolve the active category list given current settings. Centralized so the
@@ -191,6 +192,20 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 							type: "dropdown",
 							key: "composerLocation",
 							options: { modal: "Modal dialog", panel: "Right side panel" },
+						},
+					},
+					{
+						name: "Reading view indicator",
+						desc: "Comments are invisible in reading view (markers are HTML comments). Show a note-level banner with totals, a badge on each section that has comments, or both. Click an indicator to open the comment panel. Counts are threads; replies are not counted.",
+						control: {
+							type: "dropdown",
+							key: "readingViewIndicator",
+							options: {
+								off: "Off",
+								banner: "Note banner",
+								"per-section": "Per-section badges",
+								both: "Banner and badges",
+							},
 						},
 					},
 					{

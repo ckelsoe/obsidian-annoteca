@@ -15,6 +15,7 @@ import type { AnnotecaSettings, Comment, Reply, ScopeShape, ScopeState, StatusFi
 import { CommentIndex } from "./index";
 import { DEFAULT_SETTINGS, AnnotecaSettingTab, resolveSettingsCategories } from "./settings";
 import { buildSkillMarkdown, skillTargetPaths } from "./skill-export";
+import { registerReadingViewIndicator } from "./reading-view";
 import { AddCommentModal } from "./modal";
 import {
 	buildAnnotecaExtension,
@@ -78,6 +79,7 @@ export default class AnnotecaPlugin extends Plugin {
 		this.registerCommands();
 		this.registerFileEvents();
 		this.registerEditorMenu();
+		registerReadingViewIndicator(this);
 
 		this.addRibbonIcon("message-square", "Annoteca: open comments pane", () => {
 			void this.activateView(ANNOTECA_HUB_VIEW_TYPE, "right");
