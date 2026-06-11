@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-11
+
+### Added
+- Reading-view comment indicator. Markers are HTML comments, which the reading-view renderer drops, so until now comments were completely invisible in reading view. A new "Reading view indicator" setting shows a note-level banner with the file's open/resolved totals (default), a badge on each section that contains comments, both, or nothing. Counts are threads; replies are not counted. Clicking an indicator opens the comment panel on that comment.
+
 ## [0.7.0] - 2026-06-11
 
 ### Added
