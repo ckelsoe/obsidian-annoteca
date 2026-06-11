@@ -1,0 +1,102 @@
+// Builds the SKILL.md that teaches an AI assistant the Annoteca marker format.
+// No Obsidian dependency; main.ts performs the vault writes. The grammar
+// described here mirrors parser.ts, which is the source of truth. The longer
+// narrative contract lives in the (private) data-format spec; this file is the
+// distilled, assistant-facing version that ships into a user's vault.
+
+import type { CategoryDefinition } from "./types";
+
+export type SkillExportTarget = "claude" | "agent" | "both";
+
+// Vault-relative destinations. Dot-folders are hidden from the vault file
+// index, so callers must write through the DataAdapter, not the Vault API.
+const SKILL_FILE_BY_TARGET: Record<"claude" | "agent", string> = {
+	claude: ".claude/skills/annoteca/SKILL.md",
+	agent: ".agent/skills/annoteca/SKILL.md",
+};
+
+export function skillTargetPaths(target: SkillExportTarget): string[] {
+	if (target === "both") {
+		return [SKILL_FILE_BY_TARGET.claude, SKILL_FILE_BY_TARGET.agent];
+	}
+	return [SKILL_FILE_BY_TARGET[target]];
+}
+
+function categoryTable(categories: CategoryDefinition[]): string {
+	const rows = categories.map((c) => `| \`${c.id}\` | ${c.displayName} |`);
+	return ["| Category | Meaning |", "| --- | --- |", ...rows].join("\n");
+}
+
+export function buildSkillMarkdown(
+	categories: CategoryDefinition[],
+	authorTag: string | undefined,
+): string {
+	const reviewer = authorTag && authorTag.trim() !== "" ? authorTag.trim() : undefined;
+	const reviewerLine = reviewer
+		? `The human reviewer in this vault signs comments as \`${reviewer}\`. Pick a different tag for yourself (for example \`claude\` or \`ai\`).`
+		: `Sign your lines with a short tag such as \`claude\` or \`ai\`.`;
+
+	return `---
+name: annoteca-comments
+description: Read, reply to, create, and resolve Annoteca feedback comments stored as HTML markers in markdown files. Use when asked to review a note, address comments, reply to feedback, or annotate a document in a vault that contains Annoteca markers.
+---
+
+# Annoteca comment markers
+
+Annoteca stores feedback comments inline in markdown files as HTML comments. The file is the API: read and edit the file directly; no plugin API, MCP server, or other tooling is needed. The plugin re-parses on file change and surfaces your edits to the reviewer.
+
+Find every marker with this stable regex:
+
+\`\`\`
+<!--\\s*annoteca/[a-z][a-z0-9-]*\\s*:[\\s\\S]*?-->
+\`\`\`
+
+## Marker grammar
+
+Single-line comment:
+
+\`\`\`markdown
+Some prose being reviewed. <!-- annoteca/clarify: which products? -->
+\`\`\`
+
+Multi-line comment with metadata, a thread, and a resolution:
+
+\`\`\`markdown
+She knew what love felt like.
+<!-- annoteca/tone: doesn't sound like me
+[id=a3b9c2x7]
+[date=2026-05-23]
+[author=reviewer]
+[anchor=She knew what love felt like.]
+[reply ai 2026-05-23]: Consider "She knew, in her bones, what love felt like."
+[reply reviewer 2026-05-24]: I like "in her bones." Trying it.
+[resolved reviewer 2026-05-25]: rewrote the line
+-->
+\`\`\`
+
+Structured lines sit at the END of the comment, after all body text, one per line, in this order: \`[id=]\`, \`[date=]\`, \`[author=]\`, \`[anchor=]\`, then \`[reply ...]\` lines oldest first, then at most one \`[resolved ...]\` line.
+
+Field rules (match these exactly; the plugin's parser enforces them):
+
+- Category: lowercase letters, digits, single dashes; starts with a letter; never \`reply\`, \`resolved\`, \`id\`, \`date\`, or \`author\`.
+- Author: one token, max 32 chars, no spaces and none of \`]\` \`<\` \`>\`. ${reviewerLine}
+- Date: \`YYYY-MM-DD\`.
+- id: 8 lowercase base36 chars (\`a3b9c2x7\`), unique in the vault. Generate one for comments you create.
+- Anchor: single line, max 80 chars, no \`]\` or newlines. Quote of the text the comment refers to. Optional.
+- Reply: \`[reply <author> <date>]: <inline markdown>\`.
+- Resolved: \`[resolved <author> <date>]: <optional note>\`.
+
+## What to do
+
+- **Reply to a comment**: append a \`[reply <you> <today>]: ...\` line as the last line before \`-->\` (after existing replies, before any \`[resolved ...]\` line). Never rewrite the original body or others' replies.
+- **Address a comment**: edit the passage the comment points at (use the \`[anchor=]\` quote to locate it), then reply in the thread saying what you changed and why. Leave the rest of the document byte-for-byte untouched.
+- **Create a comment**: insert a marker immediately after the passage it concerns, with your category choice, an id, today's date, and your author tag.
+- **Resolve a comment**: only when asked. Append one \`[resolved <you> <today>]: <note>\` line. Do not delete the marker unless the user explicitly asks for removal.
+
+## Categories in this vault
+
+Treat the category as a typed hint about the kind of feedback.
+
+${categoryTable(categories)}
+`;
+}

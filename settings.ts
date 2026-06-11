@@ -54,6 +54,7 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 	autoCollapseInactiveFiles: true,
 	customPresets: [],
 	indicatorSize: "medium",
+	skillExportTarget: "claude",
 };
 
 // Resolve the active category list given current settings. Centralized so the
@@ -228,6 +229,26 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			},
 			{
 				type: "group",
+				heading: "AI integration",
+				items: [
+					{
+						name: "Skill export destination",
+						desc: "Vault folder the exported skill file is written to. Claude Code reads .claude/skills; some other assistants read a .agent folder.",
+						control: {
+							type: "dropdown",
+							key: "skillExportTarget",
+							options: {
+								claude: ".claude/skills (Claude Code)",
+								agent: ".agent/skills (other assistants)",
+								both: "Both folders",
+							},
+						},
+					},
+					this.customBlock((host) => this.renderSkillExport(host)),
+				],
+			},
+			{
+				type: "group",
 				heading: "Diagnostics",
 				items: [
 					{
@@ -301,6 +322,16 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 				build(host);
 			},
 		};
+	}
+
+	private renderSkillExport(container: HTMLElement): void {
+		new Setting(container)
+			.setName("Export AI skill")
+			.setDesc("Write a skill file into the vault that teaches an AI assistant this vault's comment format and categories. Re-export after changing categories.")
+			.addButton(b => b
+				.setButtonText("Export")
+				.setCta()
+				.onClick(() => { this.plugin.exportAiSkill(); }));
 	}
 
 	private renderAddCategory(container: HTMLElement): void {

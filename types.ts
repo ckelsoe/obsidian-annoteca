@@ -132,6 +132,10 @@ export interface AnnotecaSettings {
 
 	// Indicator size in the editor (inline icon + gutter dot).
 	indicatorSize: "small" | "medium" | "large";
+
+	// Where "Export AI skill" writes its SKILL.md inside the vault:
+	// .claude/skills/ (Claude Code), .agent/skills/ (other assistants), or both.
+	skillExportTarget: "claude" | "agent" | "both";
 }
 
 // Discriminated union for scope shapes. The shape determines what set of

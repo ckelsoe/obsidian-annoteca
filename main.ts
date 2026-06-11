@@ -7,12 +7,14 @@ import {
 	Plugin,
 	TFile,
 	getAllTags,
+	normalizePath,
 	type WorkspaceLeaf,
 } from "obsidian";
 
 import type { AnnotecaSettings, Comment, Reply, ScopeShape, ScopeState, StatusFilter } from "./types";
 import { CommentIndex } from "./index";
-import { DEFAULT_SETTINGS, AnnotecaSettingTab } from "./settings";
+import { DEFAULT_SETTINGS, AnnotecaSettingTab, resolveSettingsCategories } from "./settings";
+import { buildSkillMarkdown, skillTargetPaths } from "./skill-export";
 import { AddCommentModal } from "./modal";
 import {
 	buildAnnotecaExtension,
@@ -406,6 +408,11 @@ export default class AnnotecaPlugin extends Plugin {
 				editor.setValue(r.updated);
 				new Notice(`Formatted ${r.changes} reference(s).`);
 			},
+		});
+		this.addCommand({
+			id: "export-ai-skill",
+			name: "Export AI skill",
+			callback: () => { this.exportAiSkill(); },
 		});
 		this.addCommand({
 			id: "backup-settings",
@@ -929,6 +936,32 @@ export default class AnnotecaPlugin extends Plugin {
 			console.error(`Annoteca: ${label} failed`, err);
 			const detail = err instanceof Error ? err.message : String(err);
 			new Notice(`Annoteca: ${label} failed. ${detail}`);
+		});
+	}
+
+	// Writes the assistant-facing SKILL.md into the vault. Public: the settings
+	// tab's Export button and the command both route here. Dot-folders are
+	// invisible to the Vault file index, so this writes through the DataAdapter.
+	exportAiSkill(): void {
+		this.runGuarded("Skill export", async () => {
+			const body = buildSkillMarkdown(
+				resolveSettingsCategories(this.settings),
+				this.settings.enableAuthorTag ? this.settings.authorTag : undefined,
+			);
+			const adapter = this.app.vault.adapter;
+			const paths = skillTargetPaths(this.settings.skillExportTarget);
+			for (const filePath of paths) {
+				const segments = filePath.split("/").slice(0, -1);
+				let dir = "";
+				for (const segment of segments) {
+					dir = dir === "" ? segment : `${dir}/${segment}`;
+					if (!(await adapter.exists(normalizePath(dir)))) {
+						await adapter.mkdir(normalizePath(dir));
+					}
+				}
+				await adapter.write(normalizePath(filePath), body);
+			}
+			new Notice(`Skill written to ${paths.join(" and ")}.`);
 		});
 	}
 
