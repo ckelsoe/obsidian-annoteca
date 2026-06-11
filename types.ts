@@ -91,6 +91,11 @@ export interface AnnotecaSettings {
 
 	resolvedDisplay: "dim" | "hide";
 
+	// When true, resolving a comment removes its marker from the file instead
+	// of appending a [resolved ...] line. Default false: keep-in-place history
+	// is the format's default; this is the opt-in for clean files.
+	deleteOnResolve: boolean;
+
 	enableAuthorTag: boolean;
 	authorTag: string;
 

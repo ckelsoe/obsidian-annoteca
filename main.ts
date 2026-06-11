@@ -59,6 +59,7 @@ export default class AnnotecaPlugin extends Plugin {
 			onMarkerClick: (m) => this.openReviewerOnComment(m),
 			openInReviewer: (m) => this.openReviewerOnComment(m),
 			toggleResolution: (m) => { void this.toggleResolutionFromPopup(m); },
+			resolveAndRemove: (m) => { void this.resolveAndRemoveFromPopup(m); },
 			copyPermalink: (m) => { void this.copyCommentId(m); },
 			submitReply: (m, body) => { void this.submitReplyFromPopup(m, body); },
 			getAuthorTag: () => this.comments.resolvedAuthor(),
@@ -245,6 +246,10 @@ export default class AnnotecaPlugin extends Plugin {
 					.setTitle("Annoteca: resolve comment")
 					.setIcon("check")
 					.onClick(() => { void this.resolveComment(file.path, inside); }));
+				menu.addItem(item => item
+					.setTitle("Annoteca: resolve and remove comment")
+					.setIcon("check-check")
+					.onClick(() => { void this.resolveAndRemoveComment(file.path, inside); }));
 			}
 			menu.addItem(item => item
 				.setTitle("Annoteca: reply to comment")
@@ -292,6 +297,13 @@ export default class AnnotecaPlugin extends Plugin {
 			name: "Resolve comment here",
 			editorCallback: (editor: Editor, view: MarkdownView) => {
 				this.withCommentAtCursor(editor, view, (path, c) => { void this.resolveComment(path, c); });
+			},
+		});
+		this.addCommand({
+			id: "resolve-and-remove-comment-at-cursor",
+			name: "Resolve and remove comment here",
+			editorCallback: (editor: Editor, view: MarkdownView) => {
+				this.withCommentAtCursor(editor, view, (path, c) => { void this.resolveAndRemoveComment(path, c); });
 			},
 		});
 		this.addCommand({
@@ -566,6 +578,17 @@ export default class AnnotecaPlugin extends Plugin {
 		});
 	}
 
+	async resolveAndRemoveComment(path: string, comment: Comment): Promise<void> {
+		// Explicit destructive action: always confirms, mirroring deleteComment.
+		// (When the delete-on-resolve setting is on, plain resolveComment removes
+		// without asking; that path does not come through here.)
+		return new Promise<void>(resolve => {
+			new ConfirmDeleteCommentModal(this.app, this.settings, comment, () => {
+				void this.comments.resolveAndRemoveComment(path, comment).then(resolve);
+			}, { title: "Resolve and remove comment", cta: "Resolve and remove" }).open();
+		});
+	}
+
 	async listResolvedInFile(path: string): Promise<Comment[]> {
 		return this.comments.listResolvedInFile(path);
 	}
@@ -586,6 +609,12 @@ export default class AnnotecaPlugin extends Plugin {
 		} else {
 			await this.resolveComment(path, comment);
 		}
+	}
+
+	async resolveAndRemoveFromPopup(comment: Comment): Promise<void> {
+		const path = this.app.workspace.getActiveFile()?.path;
+		if (!path) return;
+		await this.resolveAndRemoveComment(path, comment);
 	}
 
 	async submitReplyFromPopup(comment: Comment, body: string): Promise<void> {

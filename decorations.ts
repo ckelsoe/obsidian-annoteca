@@ -28,6 +28,7 @@ export interface DecorationContext {
 	onMarkerClick(marker: Comment): void;
 	openInReviewer(marker: Comment): void;
 	toggleResolution(marker: Comment): void;
+	resolveAndRemove(marker: Comment): void;
 	copyPermalink(marker: Comment): void;
 	submitReply(marker: Comment, body: string): void;
 	getAuthorTag(): string;
@@ -417,6 +418,18 @@ function hoverTooltipExtension(ctx: DecorationContext, field: StateField<Comment
 					e.stopPropagation();
 					ctx.toggleResolution(m);
 				});
+
+				if (!m.resolution) {
+					const resolveRemoveBtn = actions.createEl("button", {
+						cls: "annoteca-hover-action",
+						text: "Resolve and remove",
+					});
+					resolveRemoveBtn.addEventListener("click", e => {
+						e.preventDefault();
+						e.stopPropagation();
+						ctx.resolveAndRemove(m);
+					});
+				}
 
 				if (m.id) {
 					const copyBtn = actions.createEl("button", {

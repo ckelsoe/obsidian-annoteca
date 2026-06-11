@@ -29,6 +29,13 @@ export class CommentService {
 
 	async resolveComment(path: string, comment: Comment): Promise<void> {
 		if (comment.resolution) return;
+		if (this.plugin.settings.deleteOnResolve) {
+			// The toggle is the opt-in for destructive resolve; no per-action
+			// confirmation here. The explicit "Resolve and remove" action keeps
+			// its own confirmation for users who have NOT opted in globally.
+			await this.resolveAndRemoveComment(path, comment);
+			return;
+		}
 		const author = this.resolvedAuthor();
 		const resolved: Comment = {
 			...comment,
@@ -36,6 +43,22 @@ export class CommentService {
 		};
 		await this.replaceMarker(path, comment, resolved);
 		new Notice("Resolved.");
+	}
+
+	// Resolve with file cleanup: removes the marker entirely instead of
+	// writing a [resolved ...] line. The thread leaves the file; history, when
+	// wanted, lives in git. Reached from the explicit "Resolve and remove"
+	// action and from resolveComment when deleteOnResolve is enabled.
+	async resolveAndRemoveComment(path: string, comment: Comment): Promise<void> {
+		const file = this.plugin.app.vault.getAbstractFileByPath(path);
+		if (!(file instanceof TFile)) return;
+		const splice = this.buildDeleteSplice(
+			await this.readCurrentContent(file, path),
+			comment.marker.start,
+			comment.marker.end,
+		);
+		await this.applySplices(path, file, [splice]);
+		new Notice("Resolved and removed.");
 	}
 
 	async reopenComment(path: string, comment: Comment): Promise<void> {

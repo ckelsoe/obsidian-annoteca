@@ -415,6 +415,9 @@ export class ThreadTabRenderer {
 			this.createActionButton(actions, "Resolve", "check", () => {
 				void this.plugin.resolveComment(path, c);
 			});
+			this.createActionButton(actions, "Resolve and remove", "check-check", () => {
+				void this.plugin.resolveAndRemoveComment(path, c);
+			});
 		}
 		this.createActionButton(actions, "Edit", "pencil", () => {
 			void this.plugin.editCommentFromReviewer(path, c);

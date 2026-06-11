@@ -9,22 +9,37 @@ import type { AnnotecaSettings } from "./types";
 // pass-through so every entry point (Thread tab action, editor right-click
 // menu, command palette) gets the same gate. The bulk delete-all-resolved
 // flow has its own modal below and is not double-confirmed.
+// Wording override for reuse by the "Resolve and remove" flow, which is the
+// same destructive marker removal under a different verb.
+export interface ConfirmCommentLabels {
+	title: string;
+	cta: string;
+}
+
 export class ConfirmDeleteCommentModal extends Modal {
 	private readonly settings: AnnotecaSettings;
 	private readonly comment: Comment;
 	private readonly onConfirm: () => void;
+	private readonly labels: ConfirmCommentLabels;
 
-	constructor(app: App, settings: AnnotecaSettings, comment: Comment, onConfirm: () => void) {
+	constructor(
+		app: App,
+		settings: AnnotecaSettings,
+		comment: Comment,
+		onConfirm: () => void,
+		labels: ConfirmCommentLabels = { title: "Delete comment", cta: "Delete" },
+	) {
 		super(app);
 		this.settings = settings;
 		this.comment = comment;
 		this.onConfirm = onConfirm;
+		this.labels = labels;
 	}
 
 	onOpen(): void {
 		const { contentEl } = this;
 		contentEl.empty();
-		contentEl.createEl("h3", { text: "Delete comment" });
+		contentEl.createEl("h3", { text: this.labels.title });
 
 		const enabled = resolveSettingsCategories(this.settings);
 		const def = getCategoryOrFallback(this.comment.category, enabled);
@@ -45,7 +60,7 @@ export class ConfirmDeleteCommentModal extends Modal {
 
 		new Setting(contentEl)
 			.addButton(b => b
-				.setButtonText("Delete")
+				.setButtonText(this.labels.cta)
 				.setDestructive()
 				.onClick(() => {
 					this.close();

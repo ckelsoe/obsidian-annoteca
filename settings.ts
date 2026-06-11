@@ -32,6 +32,7 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 	resolvedBrightness: "normal",
 
 	resolvedDisplay: "dim",
+	deleteOnResolve: false,
 
 	composerLocation: "modal",
 
@@ -175,6 +176,11 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 							key: "resolvedDisplay",
 							options: { dim: "Dim", hide: "Hide" },
 						},
+					},
+					{
+						name: "Delete on resolve",
+						desc: "Resolving a comment permanently removes it from the file instead of keeping it as a dimmed [resolved] marker. The thread and its replies are gone; rely on git or backups for history. The separate \"Resolve and remove\" action always asks first; with this on, plain Resolve removes without asking.",
+						control: { type: "toggle", key: "deleteOnResolve" },
 					},
 					{
 						name: "Resolved brightness",
