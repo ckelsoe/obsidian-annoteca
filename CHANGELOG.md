@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-06-11
+
+### Added
+- Settings tab footer with the plugin version, GitHub link, and Report Issues link, matching the convention used by the maintainer's other plugins.
+
+### Changed
+- Removed the version/repo footer from the exported AI skill file (added in 1.0.1); the settings footer is the right home for that information.
+
 ## [1.0.1] - 2026-06-11
 
 ### Fixed
