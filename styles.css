@@ -192,6 +192,15 @@ settings:
 	text-decoration-color: var(--text-muted);
 }
 
+/* Addressed sub-state (F-270): an edit is applied and pending review. A ring
+ * around the marker icon signals "the AI acted here, look at it" without
+ * changing the glyph. */
+.annoteca-icon.annoteca-addressed {
+	outline: 1px solid var(--color-orange);
+	outline-offset: 1px;
+	border-radius: 3px;
+}
+
 .annoteca-resolved-hidden {
 	display: none;
 }
@@ -240,6 +249,12 @@ settings:
 .annoteca-hover-state {
 	color: var(--text-muted);
 	font-style: italic;
+}
+
+.annoteca-hover-state-addressed {
+	color: var(--color-orange);
+	font-style: normal;
+	font-weight: var(--font-semibold);
 }
 
 .annoteca-hover-date,
@@ -317,6 +332,34 @@ settings:
 	padding: 6px 8px;
 	border-left: 2px solid var(--interactive-accent);
 	background-color: var(--background-primary);
+}
+
+/* Addressed note + lossless original (F-270/F-271/F-272). The orange left rule
+ * matches the addressed accent; the original block is the verbatim pre-edit
+ * text, labeled "original (replaced)" when the anchor no longer matches. */
+.annoteca-hover-addressed {
+	margin-top: 8px;
+	padding: 6px 8px;
+	border-left: 2px solid var(--color-orange);
+	background-color: var(--background-primary);
+}
+
+.annoteca-hover-original {
+	margin-top: 6px;
+}
+
+.annoteca-hover-original-label {
+	color: var(--text-muted);
+	font-size: var(--font-smaller);
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+
+.annoteca-hover-original-body {
+	white-space: pre-wrap;
+	line-height: 1.4;
+	font-style: italic;
+	color: var(--text-muted);
 }
 
 .annoteca-hover-resolution-head {

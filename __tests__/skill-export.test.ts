@@ -56,6 +56,30 @@ describe("buildSkillMarkdown", () => {
 		expect(example.resolution?.author).toBe("reviewer");
 	});
 
+	it("teaches the address-by-replace flow and the annoteca-original fence", () => {
+		expect(skill).toContain("[addressed");
+		expect(skill).toContain("annoteca-original");
+		expect(skill).toContain("Address a comment by replacing the passage");
+	});
+
+	it("forbids unprompted resolution and marker deletion, each with a rationale", () => {
+		expect(skill).toContain("Never resolve a comment unprompted");
+		expect(skill).toContain("Never delete a marker");
+		// The rationales are present (parenthetical "rationale:" notes).
+		expect(skill.match(/rationale:/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+	});
+
+	it("ships an addressed example the real parser accepts (fence round-trips)", () => {
+		const comments = parseAll(skill);
+		const addressed = comments.find((c) => c.addressed !== undefined);
+		expect(addressed).toBeDefined();
+		if (!addressed) return;
+		expect(addressed.addressed?.author).toBe("claude");
+		expect(addressed.addressed?.original).toBe("It landed as a shock.");
+		// The original anchor is kept as the historical record (F-272).
+		expect(addressed.anchor?.text).toBe("it landed as a shock");
+	});
+
 	it("names the reviewer's author tag when one is configured", () => {
 		const withTag = buildSkillMarkdown(CATEGORIES, "Charles");
 		expect(withTag).toContain("signs comments as `Charles`");

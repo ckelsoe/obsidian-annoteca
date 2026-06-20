@@ -1,7 +1,7 @@
 // Parser and serializer for the Annoteca marker format. No Obsidian dependency.
 // The format contract this implements is in dev-docs/annoteca/data-format.md.
 
-import type { AnchorText, Comment, Reply, Resolution } from "./types";
+import type { AnchorText, Addressed, Comment, Reply, Resolution } from "./types";
 
 // Canonical regex from data-format.md "greppable regex" section. Matches the
 // entire marker, opening through closing. The category is captured; the rest of
@@ -24,7 +24,16 @@ const AUTHOR_LINE_RE = /^\s*\[author=([^\s\]<>]{1,32})\]\s*$/;
 // forward-compat — but the cap is enforced at serialize time.
 const ANCHOR_LINE_RE = /^\s*\[anchor=([^\]\r\n]{1,200})\]\s*$/;
 const REPLY_LINE_RE = /^\s*\[reply\s+([^\s\]<>]{1,32})\s+(\d{4}-\d{2}-\d{2})\]:\s?([\s\S]*)$/;
+// Addressed trailing line (F-270). Same shape as reply/resolved. Positioned
+// after [reply ...] lines and before any [resolved ...] line; at most one.
+const ADDRESSED_LINE_RE = /^\s*\[addressed\s+([^\s\]<>]{1,32})\s+(\d{4}-\d{2}-\d{2})\]:\s?([\s\S]*)$/;
 const RESOLVED_LINE_RE = /^\s*\[resolved\s+([^\s\]<>]{1,32})\s+(\d{4}-\d{2}-\d{2})\]:\s?([\s\S]*)$/;
+
+// The lossless-original fence (F-271): a fenced block tagged annoteca-original
+// inside the [addressed ...] note, holding the verbatim pre-edit text. Matched
+// as whole lines (m flag); group 1 is the verbatim original. Tolerates CRLF and
+// trailing whitespace on the fence lines.
+const ORIGINAL_FENCE_RE = /^```annoteca-original[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/m;
 
 // Maximum visible characters in an anchor value before mid-truncation kicks
 // in. 80 strikes the balance between "disambiguate the commented words" and
@@ -67,16 +76,33 @@ interface ParsedTail {
 	author: string | undefined;
 	anchor: AnchorText | undefined;
 	replies: Reply[];
+	addressed: Addressed | undefined;
 	resolution: Resolution | undefined;
 }
 
 function parseInnerContent(inner: string): ParsedTail {
-	const lines = inner.split("\n");
+	// Pull the annoteca-original fence out first (F-271). It is the only
+	// multi-line element in the trailing block; removing it lets the backward
+	// line-walk below treat [addressed ...] as an ordinary single structured
+	// line. The fence always lives directly after the [addressed ...] line, so
+	// its content unambiguously belongs to the (at most one) addressed note.
+	let originalText: string | undefined;
+	let stripped = inner;
+	const fenceMatch = ORIGINAL_FENCE_RE.exec(inner);
+	if (fenceMatch && fenceMatch[1] !== undefined && fenceMatch.index !== undefined) {
+		originalText = fenceMatch[1];
+		const before = inner.slice(0, fenceMatch.index).replace(/\r?\n$/, "");
+		const after = inner.slice(fenceMatch.index + fenceMatch[0].length);
+		stripped = before + after;
+	}
+
+	const lines = stripped.split("\n");
 	let id: string | undefined;
 	let date: string | undefined;
 	let author: string | undefined;
 	let anchor: AnchorText | undefined;
 	const replies: Reply[] = [];
+	let addressed: Addressed | undefined;
 	let resolution: Resolution | undefined;
 
 	let bodyEndExclusive = lines.length;
@@ -131,6 +157,20 @@ function parseInnerContent(inner: string): ParsedTail {
 			continue;
 		}
 
+		const addressedMatch = ADDRESSED_LINE_RE.exec(line);
+		if (addressedMatch && addressedMatch[1] !== undefined && addressedMatch[2] !== undefined) {
+			if (!addressed) {
+				addressed = {
+					author: addressedMatch[1],
+					date: addressedMatch[2],
+					note: addressedMatch[3] ?? "",
+					original: originalText,
+				};
+			}
+			bodyEndExclusive = i;
+			continue;
+		}
+
 		const resolvedMatch = RESOLVED_LINE_RE.exec(line);
 		if (resolvedMatch && resolvedMatch[1] !== undefined && resolvedMatch[2] !== undefined) {
 			if (!resolution) {
@@ -163,7 +203,7 @@ function parseInnerContent(inner: string): ParsedTail {
 
 	replies.reverse();
 
-	return { body, id, date, author, anchor, replies, resolution };
+	return { body, id, date, author, anchor, replies, addressed, resolution };
 }
 
 export function parseAll(content: string): Comment[] {
@@ -178,6 +218,7 @@ export function parseAll(content: string): Comment[] {
 			author: tail.author,
 			anchor: tail.anchor,
 			replies: tail.replies,
+			addressed: tail.addressed,
 			resolution: tail.resolution,
 			marker: { start: raw.start, end: raw.end },
 		});
@@ -201,6 +242,7 @@ export function parseAt(content: string, start: number): Comment | undefined {
 		author: tail.author,
 		anchor: tail.anchor,
 		replies: tail.replies,
+		addressed: tail.addressed,
 		resolution: tail.resolution,
 		marker: { start: match.index, end: match.index + match[0].length },
 	};
@@ -214,16 +256,18 @@ export interface SerializeInput {
 	author?: string;
 	anchor?: AnchorText;
 	replies?: readonly Reply[];
+	addressed?: Addressed;
 	resolution?: Resolution;
 }
 
 export function serialize(c: SerializeInput): string {
 	const hasMetadata = c.id !== undefined || c.date !== undefined || c.author !== undefined || c.anchor !== undefined;
 	const hasReplies = (c.replies?.length ?? 0) > 0;
+	const hasAddressed = c.addressed !== undefined;
 	const hasResolution = c.resolution !== undefined;
 	const bodyMultiline = c.body.includes("\n");
 
-	if (!hasMetadata && !hasReplies && !hasResolution && !bodyMultiline) {
+	if (!hasMetadata && !hasReplies && !hasAddressed && !hasResolution && !bodyMultiline) {
 		return `<!-- annoteca/${c.category}: ${c.body} -->`;
 	}
 
@@ -235,6 +279,19 @@ export function serialize(c: SerializeInput): string {
 	if (c.anchor !== undefined) lines.push(`[anchor=${c.anchor.text}]`);
 	for (const r of c.replies ?? []) {
 		lines.push(`[reply ${r.author} ${r.date}]: ${r.body}`);
+	}
+	if (c.addressed) {
+		const note = c.addressed.note.length > 0 ? ` ${c.addressed.note}` : "";
+		lines.push(`[addressed ${c.addressed.author} ${c.addressed.date}]:${note}`);
+		// F-271: the verbatim replaced text lives in a fenced annoteca-original
+		// block directly after the [addressed ...] line. The fence is inert
+		// markdown inside the HTML comment; the only sequence that would break
+		// the wrapper is `-->`, which never appears in the captured prose.
+		if (c.addressed.original !== undefined) {
+			lines.push("```annoteca-original");
+			lines.push(c.addressed.original);
+			lines.push("```");
+		}
 	}
 	if (c.resolution) {
 		const note = c.resolution.note.length > 0 ? ` ${c.resolution.note}` : "";

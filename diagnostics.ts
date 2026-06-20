@@ -47,6 +47,10 @@ export function detectOrphans(content: string, path: string): OrphanFinding[] {
 	const out: OrphanFinding[] = [];
 	const comments = parseAll(content);
 	for (const c of comments) {
+		// F-272: an addressed comment is intentionally in a pending, "replaced"
+		// state; its anchor may no longer match and it can sit on its own line.
+		// That is expected, not an accidental orphan, so do not flag it.
+		if (c.addressed) continue;
 		if (isOrphan(content, c)) out.push({ path, comment: c });
 	}
 	return out;

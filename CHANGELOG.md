@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-06-20
+
+### Added
+- Addressed state for the AI revision flow (F-270). A new `[addressed <author> <date>]: <note>` trailing line marks that an edit was applied in response to a comment and is awaiting your accept / revise / reject. It is a highlighted sub-state of open (orange ring on the marker, "addressed" badge in the hover), never hidden from review.
+- Lossless originals (F-271). When an assistant replaces the commented passage, the verbatim old text is preserved in an `annoteca-original` fenced block inside the comment, shown as "original (replaced)" in the hover.
+- Accept / revise / reject actions in the hover popup. Accept resolves the comment (honoring delete-on-resolve), revise returns it to open for further editing, and reject auto-reverts the prose from the stored original.
+- The exported AI skill now teaches the address-by-replace flow with a worked example, and explicitly forbids deleting markers and resolving comments unprompted.
+
+### Changed
+- Convert-to-standalone on replace (F-272). An addressed comment whose anchor no longer matches the document is treated as the expected "replaced" state, not flagged as an orphan.
+
 ## [1.2.0] - 2026-06-20
 
 ### Added

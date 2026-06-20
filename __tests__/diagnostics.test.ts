@@ -36,6 +36,26 @@ Paragraph two.`;
 		const text = `Paragraph one.\n<!-- annoteca/tone: ok -->\nNext line of paragraph.`;
 		expect(detectOrphans(text, "note.md")).toHaveLength(0);
 	});
+
+	it("does not flag an addressed comment even when it sits alone (F-272)", () => {
+		// An addressed comment may legitimately sit on its own line between blanks
+		// (the AI replaced the surrounding prose). That is an expected pending
+		// state, not an accidental orphan.
+		const text = [
+			"Paragraph one.",
+			"",
+			"<!-- annoteca/clarify: tighten this",
+			"[id=addr0001]",
+			"[addressed claude 2026-06-20]: replaced the passage",
+			"```annoteca-original",
+			"the old passage",
+			"```",
+			"-->",
+			"",
+			"Paragraph two.",
+		].join("\n");
+		expect(detectOrphans(text, "note.md")).toHaveLength(0);
+	});
 });
 
 describe("validateMarkers", () => {

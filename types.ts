@@ -12,6 +12,18 @@ export interface Resolution {
 	note: string; // may be empty
 }
 
+// Addressed state (F-270): an edit has been applied in response to the comment
+// and is awaiting the reviewer's accept / revise / reject. A highlighted
+// sub-state of "open", not a terminal state. When the applied edit replaced the
+// anchored prose, `original` holds the verbatim pre-edit text from the
+// `annoteca-original` fence (F-271) so reject can revert it.
+export interface Addressed {
+	author: string;
+	date: string; // ISO YYYY-MM-DD
+	note: string; // may be empty
+	original?: string; // verbatim replaced text from the annoteca-original fence
+}
+
 export interface MarkerRange {
 	start: number; // byte offset of leading `<` of `<!--`
 	end: number;   // byte offset one past the trailing `>` of `-->`
@@ -30,6 +42,7 @@ export interface Comment {
 	author: string | undefined;       // short author tag
 	anchor: AnchorText | undefined;   // commented text captured at creation; undefined for cursor-position comments
 	replies: Reply[];                 // chronological, oldest first
+	addressed: Addressed | undefined; // F-270: pending accept/revise/reject; absent when not addressed
 	resolution: Resolution | undefined;
 	marker: MarkerRange;
 }

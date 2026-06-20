@@ -255,7 +255,7 @@ describe("parser: round-trip property", () => {
 		{
 			id: undefined, category: "tone", body: "short body",
 			date: undefined, author: undefined, anchor: undefined,
-			replies: [], resolution: undefined,
+			replies: [], addressed: undefined, resolution: undefined,
 			marker: { start: 0, end: 0 },
 		},
 		{
@@ -265,6 +265,7 @@ describe("parser: round-trip property", () => {
 				{ author: "ai", date: "2026-05-23", body: "consider X" },
 				{ author: "charles", date: "2026-05-24", body: "trying it" },
 			],
+			addressed: undefined,
 			resolution: undefined,
 			marker: { start: 0, end: 0 },
 		},
@@ -272,6 +273,7 @@ describe("parser: round-trip property", () => {
 			id: "z1z1z1z1", category: "source-needed", body: "needs citation",
 			date: "2026-05-25", author: "ai", anchor: undefined,
 			replies: [],
+			addressed: undefined,
 			resolution: { author: "charles", date: "2026-05-25", note: "added in revision pass" },
 			marker: { start: 0, end: 0 },
 		},
@@ -279,7 +281,25 @@ describe("parser: round-trip property", () => {
 			id: "anchor01", category: "clarify", body: "be specific",
 			date: "2026-05-26", author: undefined,
 			anchor: { text: "the cold morning air", truncated: false },
-			replies: [], resolution: undefined,
+			replies: [], addressed: undefined, resolution: undefined,
+			marker: { start: 0, end: 0 },
+		},
+		// F-270/F-271: addressed state with a single-line note and a multi-line
+		// annoteca-original fence, plus a reply before it. Exercises ordering
+		// (reply, addressed+fence) and lossless original round-trip.
+		{
+			id: "addr0001", category: "clarify", body: "tighten this",
+			date: "2026-06-20", author: "charles",
+			anchor: { text: "it landed as a shock", truncated: false },
+			replies: [
+				{ author: "charles", date: "2026-06-20", body: "go ahead" },
+			],
+			addressed: {
+				author: "claude", date: "2026-06-20",
+				note: "Cut the self-deprecating framing.",
+				original: "So when I finally read it slowly,\nit landed as a shock.",
+			},
+			resolution: undefined,
 			marker: { start: 0, end: 0 },
 		},
 	];
@@ -293,6 +313,7 @@ describe("parser: round-trip property", () => {
 				date: c.date, author: c.author,
 				anchor: c.anchor,
 				replies: c.replies,
+				addressed: c.addressed,
 				resolution: c.resolution,
 			});
 			const parsed = parseAll(s);
@@ -307,9 +328,103 @@ describe("parser: round-trip property", () => {
 			expect(got.author).toBe(c.author);
 			expect(got.anchor).toEqual(c.anchor);
 			expect(got.replies).toEqual(c.replies);
+			expect(got.addressed).toEqual(c.addressed);
 			expect(got.resolution).toEqual(c.resolution);
 		});
 	}
+});
+
+describe("parser: addressed state (F-270/F-271)", () => {
+	const addressedMarker = [
+		"<!-- annoteca/clarify: tighten this",
+		"[id=addr0001]",
+		"[date=2026-06-20]",
+		"[anchor=it landed as a shock]",
+		"[reply charles 2026-06-20]: go ahead",
+		"[addressed claude 2026-06-20]: Cut the framing.",
+		"```annoteca-original",
+		"So when I finally read it slowly,",
+		"it landed as a shock.",
+		"```",
+		"-->",
+	].join("\n");
+
+	it("parses the [addressed ...] line and extracts the annoteca-original fence", () => {
+		const c = parseAll(addressedMarker)[0];
+		expect(c).toBeDefined();
+		if (!c) return;
+		expect(c.addressed).toBeDefined();
+		expect(c.addressed?.author).toBe("claude");
+		expect(c.addressed?.date).toBe("2026-06-20");
+		expect(c.addressed?.note).toBe("Cut the framing.");
+		expect(c.addressed?.original).toBe("So when I finally read it slowly,\nit landed as a shock.");
+	});
+
+	it("leaves the body clean (fence and addressed line are not body text)", () => {
+		const c = parseAll(addressedMarker)[0];
+		expect(c?.body).toBe("tighten this");
+	});
+
+	it("keeps the reply that precedes the addressed line", () => {
+		const c = parseAll(addressedMarker)[0];
+		expect(c?.replies).toEqual([{ author: "charles", date: "2026-06-20", body: "go ahead" }]);
+	});
+
+	it("still matches the canonical marker (greppable, full span through -->)", () => {
+		const comments = parseAll(`prefix ${addressedMarker} suffix`);
+		expect(comments).toHaveLength(1);
+	});
+
+	it("parses an addressed line with no fence (addressed without replacement)", () => {
+		const text = [
+			"<!-- annoteca/clarify: tighten this",
+			"[id=addr0002]",
+			"[addressed claude 2026-06-20]: tweaked in place",
+			"-->",
+		].join("\n");
+		const c = parseAll(text)[0];
+		expect(c?.addressed?.note).toBe("tweaked in place");
+		expect(c?.addressed?.original).toBeUndefined();
+	});
+
+	it("treats a comment with no addressed line as open (addressed undefined)", () => {
+		const text = "<!-- annoteca/clarify: which products? -->";
+		expect(parseAll(text)[0]?.addressed).toBeUndefined();
+	});
+
+	it("forward-compat: ignores an unknown future trailing key, body stays clean", () => {
+		// The mirror image of an older plugin ignoring [addressed ...]: our
+		// parser drops trailing keys it does not recognize (per data-format
+		// Migration) rather than folding them into the body.
+		const text = [
+			"<!-- annoteca/clarify: tighten this",
+			"[id=addr0004]",
+			"[addressed claude 2026-06-20]: replaced it",
+			"[priority=high]",
+			"-->",
+		].join("\n");
+		const c = parseAll(text)[0];
+		expect(c?.body).toBe("tighten this");
+		expect(c?.addressed?.note).toBe("replaced it");
+	});
+
+	it("round-trips an addressed comment WITH a resolution after it", () => {
+		const text = [
+			"<!-- annoteca/clarify: tighten this",
+			"[id=addr0003]",
+			"[addressed claude 2026-06-20]: replaced the sentence",
+			"```annoteca-original",
+			"the old sentence",
+			"```",
+			"[resolved charles 2026-06-21]: accepted",
+			"-->",
+		].join("\n");
+		const c = parseAll(text)[0];
+		expect(c?.addressed?.original).toBe("the old sentence");
+		expect(c?.resolution?.author).toBe("charles");
+		expect(c?.resolution?.note).toBe("accepted");
+		expect(c?.body).toBe("tighten this");
+	});
 });
 
 describe("parser: parseAt", () => {

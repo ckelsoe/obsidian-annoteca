@@ -194,6 +194,7 @@ export class ComposerForm {
 			author,
 			anchor,
 			replies: [],
+			addressed: undefined,
 			resolution: undefined,
 			marker: { start: 0, end: 0 },
 		};

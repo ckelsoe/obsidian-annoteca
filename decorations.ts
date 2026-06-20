@@ -34,6 +34,9 @@ export interface DecorationContext {
 	openInReviewer(marker: Comment): void;
 	toggleResolution(marker: Comment): void;
 	resolveAndRemove(marker: Comment): void;
+	acceptAddressed(marker: Comment): void;
+	reviseAddressed(marker: Comment): void;
+	rejectAddressed(marker: Comment): void;
 	copyPermalink(marker: Comment): void;
 	submitReply(marker: Comment, body: string): void;
 	getAuthorTag(): string;
@@ -106,6 +109,7 @@ class MarkerIconWidget extends WidgetType {
 			&& o.category === m.category
 			&& o.body === m.body
 			&& o.resolution === m.resolution
+			&& o.addressed === m.addressed
 			&& other.hidden === this.hidden;
 	}
 
@@ -115,6 +119,10 @@ class MarkerIconWidget extends WidgetType {
 		el.setAttribute("data-annoteca-marker-start", String(this.marker.marker.start));
 		el.setAttribute("data-annoteca-marker-end", String(this.marker.marker.end));
 		if (this.marker.resolution) el.classList.add("annoteca-resolved");
+		// F-270: an addressed comment (pending accept/revise/reject) gets a
+		// distinct accent so the reviewer sees at a glance which markers the AI
+		// has acted on. Resolved wins visually if somehow both are present.
+		if (this.marker.addressed && !this.marker.resolution) el.classList.add("annoteca-addressed");
 		if (this.hidden) el.classList.add("annoteca-resolved-hidden");
 		if (this.marker.replies.length > 0) el.classList.add("annoteca-has-replies");
 		el.title = `${this.marker.category}: ${this.marker.body.slice(0, 80)}`;
@@ -308,6 +316,8 @@ function hoverTooltipExtension(ctx: DecorationContext, field: StateField<Comment
 				});
 				if (m.resolution) {
 					header.createSpan({ cls: "annoteca-hover-state", text: "resolved" });
+				} else if (m.addressed) {
+					header.createSpan({ cls: "annoteca-hover-state annoteca-hover-state-addressed", text: "addressed" });
 				}
 				if (m.date) {
 					header.createSpan({ cls: "annoteca-hover-date", text: m.date });
@@ -363,6 +373,27 @@ function hoverTooltipExtension(ctx: DecorationContext, field: StateField<Comment
 					for (const r of shown) renderReplyRow(r, repliesBlock);
 				}
 
+				// F-270/F-271/F-272: the addressed note, plus the verbatim original
+				// when the edit replaced prose. The original is labeled "original
+				// (replaced)" when the stored anchor no longer matches the document
+				// (the expected post-replace state), and "original" otherwise.
+				if (m.addressed) {
+					const block = dom.createDiv({ cls: "annoteca-hover-addressed" });
+					const head = block.createDiv({ cls: "annoteca-hover-resolution-head" });
+					head.createSpan({ cls: "annoteca-hover-reply-author", text: m.addressed.author });
+					head.createSpan({ cls: "annoteca-hover-reply-date", text: m.addressed.date });
+					if (m.addressed.note) {
+						block.createDiv({ cls: "annoteca-hover-reply-body", text: m.addressed.note });
+					}
+					if (m.addressed.original !== undefined) {
+						const anchorResolves = findAnchorRange(view.state.doc, m) !== null;
+						const label = anchorResolves ? "original" : "original (replaced)";
+						const orig = block.createDiv({ cls: "annoteca-hover-original" });
+						orig.createDiv({ cls: "annoteca-hover-original-label", text: label });
+						orig.createDiv({ cls: "annoteca-hover-original-body", text: m.addressed.original });
+					}
+				}
+
 				if (m.resolution && m.resolution.note) {
 					const block = dom.createDiv({ cls: "annoteca-hover-resolution" });
 					const head = block.createDiv({ cls: "annoteca-hover-resolution-head" });
@@ -372,6 +403,39 @@ function hoverTooltipExtension(ctx: DecorationContext, field: StateField<Comment
 				}
 
 				const actions = dom.createDiv({ cls: "annoteca-hover-actions" });
+
+				// F-270: an addressed comment gets accept / revise / reject in
+				// place of the plain resolve actions. Accept resolves it, revise
+				// returns it to open for further editing, reject reverts the prose.
+				if (m.addressed) {
+					const acceptBtn = actions.createEl("button", {
+						cls: "annoteca-hover-action mod-cta",
+						text: "Accept",
+					});
+					acceptBtn.addEventListener("click", e => {
+						e.preventDefault();
+						e.stopPropagation();
+						ctx.acceptAddressed(m);
+					});
+					const reviseBtn = actions.createEl("button", {
+						cls: "annoteca-hover-action",
+						text: "Revise",
+					});
+					reviseBtn.addEventListener("click", e => {
+						e.preventDefault();
+						e.stopPropagation();
+						ctx.reviseAddressed(m);
+					});
+					const rejectBtn = actions.createEl("button", {
+						cls: "annoteca-hover-action",
+						text: "Reject",
+					});
+					rejectBtn.addEventListener("click", e => {
+						e.preventDefault();
+						e.stopPropagation();
+						ctx.rejectAddressed(m);
+					});
+				}
 
 				const openBtn = actions.createEl("button", {
 					cls: "annoteca-hover-action",
@@ -393,26 +457,28 @@ function hoverTooltipExtension(ctx: DecorationContext, field: StateField<Comment
 					view.dispatch({ effects: setReplyComposerEffect.of(m.marker.start) });
 				});
 
-				const resolveBtn = actions.createEl("button", {
-					cls: "annoteca-hover-action",
-					text: m.resolution ? "Reopen" : "Resolve",
-				});
-				resolveBtn.addEventListener("click", e => {
-					e.preventDefault();
-					e.stopPropagation();
-					ctx.toggleResolution(m);
-				});
-
-				if (!m.resolution) {
-					const resolveRemoveBtn = actions.createEl("button", {
+				if (!m.addressed) {
+					const resolveBtn = actions.createEl("button", {
 						cls: "annoteca-hover-action",
-						text: "Resolve and remove",
+						text: m.resolution ? "Reopen" : "Resolve",
 					});
-					resolveRemoveBtn.addEventListener("click", e => {
+					resolveBtn.addEventListener("click", e => {
 						e.preventDefault();
 						e.stopPropagation();
-						ctx.resolveAndRemove(m);
+						ctx.toggleResolution(m);
 					});
+
+					if (!m.resolution) {
+						const resolveRemoveBtn = actions.createEl("button", {
+							cls: "annoteca-hover-action",
+							text: "Resolve and remove",
+						});
+						resolveRemoveBtn.addEventListener("click", e => {
+							e.preventDefault();
+							e.stopPropagation();
+							ctx.resolveAndRemove(m);
+						});
+					}
 				}
 
 				if (m.id) {

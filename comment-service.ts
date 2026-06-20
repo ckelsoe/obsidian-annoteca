@@ -19,7 +19,7 @@
 import { MarkdownView, Notice, TFile } from "obsidian";
 
 import type AnnotecaPlugin from "./main";
-import type { Comment, Reply } from "./types";
+import type { Addressed, Comment, Reply } from "./types";
 import { parseAll, serialize, todayISO } from "./parser";
 
 interface SpliceRange { from: number; to: number; insert: string; }
@@ -90,6 +90,110 @@ export class CommentService {
 		await this.replaceMarker(path, comment, updated);
 	}
 
+	// ---- Addressed-state transitions (F-270) ---------------------------------
+	// open ──applyAddressed──▶ addressed ──accept──▶ resolved
+	//                              ├──revise──▶ open (drop the addressed line)
+	//                              └──reject──▶ open (revert prose from original)
+
+	// open → addressed. Marks a comment as addressed and pending review,
+	// optionally carrying the verbatim replaced text so reject can revert it.
+	// (The AI normally writes the [addressed ...] line directly into the file;
+	// this is the programmatic transition for plugin-driven flows.)
+	async applyAddressed(
+		path: string,
+		comment: Comment,
+		note: string,
+		original?: string,
+	): Promise<void> {
+		const addressed: Addressed = {
+			author: this.resolvedAuthor(),
+			date: todayISO(),
+			note,
+			original,
+		};
+		const next: Comment = { ...comment, addressed };
+		await this.replaceMarker(path, comment, next);
+		new Notice("Marked as addressed.");
+	}
+
+	// addressed → resolved. The reviewer keeps the applied edit. Honors
+	// deleteOnResolve exactly like resolveComment. The original fence is dropped
+	// (revert is no longer needed; Git retains history).
+	async acceptAddressed(path: string, comment: Comment): Promise<void> {
+		if (!comment.addressed) return;
+		if (this.plugin.settings.deleteOnResolve) {
+			await this.resolveAndRemoveComment(path, comment);
+			return;
+		}
+		const next: Comment = {
+			...comment,
+			addressed: undefined,
+			resolution: { author: this.resolvedAuthor(), date: todayISO(), note: "accepted" },
+		};
+		await this.replaceMarker(path, comment, next);
+		new Notice("Accepted.");
+	}
+
+	// addressed → open. The reviewer wants to revise further: drop the
+	// [addressed ...] line (and its fence) so the comment returns to the open
+	// queue. The applied prose is left in place for the reviewer to edit.
+	async reviseAddressed(path: string, comment: Comment): Promise<void> {
+		if (!comment.addressed) return;
+		const next: Comment = { ...comment, addressed: undefined };
+		await this.replaceMarker(path, comment, next);
+		new Notice("Reopened for revision.");
+	}
+
+	// addressed → open, auto-reverting the prose. Restores the annoteca-original
+	// text (F-271) into the document and drops the [addressed ...] line. Under
+	// beginning-placement the marker leads the replaced span, so the new prose is
+	// the text immediately after the marker up to the end of that line; that span
+	// is replaced with the stored original. With no stored original there is
+	// nothing to revert, so this degrades to reviseAddressed. Git is the backstop
+	// for multi-line replacements beyond the marker's line.
+	async rejectAddressed(path: string, comment: Comment): Promise<void> {
+		const addressed = comment.addressed;
+		if (!addressed) return;
+		if (addressed.original === undefined) {
+			await this.reviseAddressed(path, comment);
+			return;
+		}
+
+		const file = this.plugin.app.vault.getAbstractFileByPath(path);
+		if (!(file instanceof TFile)) return;
+		const content = await this.readCurrentContent(file, path);
+
+		const markerStart = comment.marker.start;
+		const markerEnd = comment.marker.end;
+		// Skip the single begin-placement space between the marker and the new
+		// prose, if present.
+		const proseStart = content.charAt(markerEnd) === " " ? markerEnd + 1 : markerEnd;
+		const lineEnd = this.endOfLine(content, proseStart);
+
+		const reopened: Comment = { ...comment, addressed: undefined };
+		const markerText = serialize({
+			id: reopened.id,
+			category: reopened.category,
+			body: reopened.body,
+			date: reopened.date,
+			author: reopened.author,
+			anchor: reopened.anchor,
+			replies: reopened.replies,
+			resolution: reopened.resolution,
+		});
+
+		await this.applySplices(path, file, [
+			{ from: markerStart, to: markerEnd, insert: markerText },
+			{ from: proseStart, to: lineEnd, insert: addressed.original },
+		]);
+		new Notice("Reverted to the original text.");
+	}
+
+	private endOfLine(content: string, from: number): number {
+		const idx = content.indexOf("\n", from);
+		return idx === -1 ? content.length : idx;
+	}
+
 	// Returns the resolved comments in `path` without modifying the file.
 	// Used by the delete-all-resolved command to size its confirmation modal.
 	async listResolvedInFile(path: string): Promise<Comment[]> {
@@ -144,6 +248,7 @@ export class CommentService {
 			author: next.author,
 			anchor: next.anchor,
 			replies: next.replies,
+			addressed: next.addressed,
 			resolution: next.resolution,
 		});
 		await this.applySplices(path, file, [

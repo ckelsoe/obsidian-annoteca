@@ -94,6 +94,7 @@ describe("bucketCommentsByHeading", () => {
 		anchor: undefined,
 		marker: { start, end: start + 10 },
 		replies: [],
+		addressed: undefined,
 		resolution: resolved
 			? { date: "2026-01-01", author: "x", note: "" }
 			: undefined,
@@ -157,6 +158,7 @@ describe("planActiveCommentDecorations (F-276)", () => {
 		anchor: undefined,
 		marker: { start, end },
 		replies: [],
+		addressed: undefined,
 		resolution: undefined,
 	});
 	const markers = [mk(10, 20), mk(50, 60)];

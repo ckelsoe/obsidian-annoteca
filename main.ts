@@ -62,6 +62,9 @@ export default class AnnotecaPlugin extends Plugin {
 			openInReviewer: (m) => this.openReviewerOnComment(m),
 			toggleResolution: (m) => { void this.toggleResolutionFromPopup(m); },
 			resolveAndRemove: (m) => { void this.resolveAndRemoveFromPopup(m); },
+			acceptAddressed: (m) => { void this.acceptAddressedFromPopup(m); },
+			reviseAddressed: (m) => { void this.reviseAddressedFromPopup(m); },
+			rejectAddressed: (m) => { void this.rejectAddressedFromPopup(m); },
 			copyPermalink: (m) => { void this.copyCommentId(m); },
 			submitReply: (m, body) => { void this.submitReplyFromPopup(m, body); },
 			getAuthorTag: () => this.comments.resolvedAuthor(),
@@ -617,6 +620,25 @@ export default class AnnotecaPlugin extends Plugin {
 		const path = this.app.workspace.getActiveFile()?.path;
 		if (!path) return;
 		await this.resolveAndRemoveComment(path, comment);
+	}
+
+	// F-270 addressed-state actions from the hover popup.
+	async acceptAddressedFromPopup(comment: Comment): Promise<void> {
+		const path = this.app.workspace.getActiveFile()?.path;
+		if (!path) return;
+		await this.comments.acceptAddressed(path, comment);
+	}
+
+	async reviseAddressedFromPopup(comment: Comment): Promise<void> {
+		const path = this.app.workspace.getActiveFile()?.path;
+		if (!path) return;
+		await this.comments.reviseAddressed(path, comment);
+	}
+
+	async rejectAddressedFromPopup(comment: Comment): Promise<void> {
+		const path = this.app.workspace.getActiveFile()?.path;
+		if (!path) return;
+		await this.comments.rejectAddressed(path, comment);
 	}
 
 	async submitReplyFromPopup(comment: Comment, body: string): Promise<void> {

@@ -74,7 +74,7 @@ The Q3 forecast assumes a hiring freeze through December.
 -->
 \`\`\`
 
-Structured lines sit at the END of the comment, after all body text, one per line, in this order: \`[id=]\`, \`[date=]\`, \`[author=]\`, \`[anchor=]\`, then \`[reply ...]\` lines oldest first, then at most one \`[resolved ...]\` line.
+Structured lines sit at the END of the comment, after all body text, one per line, in this order: \`[id=]\`, \`[date=]\`, \`[author=]\`, \`[anchor=]\`, then \`[reply ...]\` lines oldest first, then at most one \`[addressed ...]\` line (with its optional \`annoteca-original\` fence), then at most one \`[resolved ...]\` line.
 
 Field rules (match these exactly; the plugin's parser enforces them):
 
@@ -84,14 +84,33 @@ Field rules (match these exactly; the plugin's parser enforces them):
 - id: 8 lowercase base36 chars (\`a3b9c2x7\`), unique in the vault. Generate one for comments you create.
 - Anchor: single line, max 80 chars, no \`]\` or newlines. Quote of the text the comment refers to. Optional.
 - Reply: \`[reply <author> <date>]: <inline markdown>\`.
+- Addressed: \`[addressed <author> <date>]: <note>\`, at most one, after the replies and before any \`[resolved ...]\` line. It means "I applied an edit; the reviewer still needs to accept, revise, or reject." When the edit *replaced* prose, store the verbatim old text in a fenced \`annoteca-original\` block on the lines directly after the \`[addressed ...]\` line so the reviewer can reject and auto-revert.
 - Resolved: \`[resolved <author> <date>]: <optional note>\`.
 
 ## What to do
 
-- **Reply to a comment**: append a \`[reply <you> <today>]: ...\` line as the last line before \`-->\` (after existing replies, before any \`[resolved ...]\` line). Never rewrite the original body or others' replies.
-- **Address a comment**: edit the passage the comment points at (use the \`[anchor=]\` quote to locate it), then reply in the thread saying what you changed and why. Leave the rest of the document byte-for-byte untouched.
-- **Create a comment**: insert a marker immediately after the passage it concerns, with your category choice, an id, today's date, and your author tag.
-- **Resolve a comment**: only when asked. Append one \`[resolved <you> <today>]: <note>\` line. Do not delete the marker unless the user explicitly asks for removal.
+- **Reply to a comment**: append a \`[reply <you> <today>]: ...\` line as the last line before \`-->\` (after existing replies, before any \`[addressed ...]\` or \`[resolved ...]\` line). Never rewrite the original body or others' replies.
+- **Address a comment with a small in-place tweak**: edit the passage the comment points at (use the \`[anchor=]\` quote to locate it), then reply in the thread saying what you changed and why. Leave the rest of the document byte-for-byte untouched.
+- **Address a comment by replacing the passage**: this is the lossless flow. (1) Replace the anchored passage with your new text. (2) Leave the marker at the **head** of the new text (markers lead the text they concern). (3) Inside the marker, add an \`[addressed <you> <today>]: <what you changed and why>\` line; on the line directly after it open a fenced block tagged \`annoteca-original\`, put the verbatim text you replaced on its own line(s), then close the fence. Keep the original \`[anchor=]\` line as-is; it is the historical record of what was commented on. Do not mark the comment resolved; the reviewer decides accept / revise / reject. See the worked example below.
+- **Create a comment**: insert a marker at the **start** of the passage it concerns (the prose it is about follows the marker), with your category choice, an id, today's date, and your author tag.
+- **Resolve a comment**: ONLY when the user explicitly asks. Append one \`[resolved <you> <today>]: <note>\` line. **Never resolve a comment unprompted** (rationale: resolution is the reviewer's decision; resolving feedback the reviewer has not signed off on destroys the review loop this format exists to protect).
+- **Never delete a marker.** Do not remove a marker to "clean up", and never resolve by rewriting the file so the markers disappear (rationale: the markers are the audit trail; deleting them silently discards the conversation and the reviewer's pending decisions). Removal happens only when the user explicitly asks to delete a specific comment.
+
+### Addressing by replacement: worked example
+
+After replacing the passage, the marker leads the new prose and the verbatim old text lives in the fence. The \`annoteca-original\` fence open and close lines start at the left margin inside the comment (not indented), or the plugin will not recognize them:
+
+\`\`\`\`markdown
+<!-- annoteca/clarify: hedging
+[id=6raa4103]
+[date=2026-06-20]
+[anchor=it landed as a shock]
+[addressed claude 2026-06-20]: removed the hedging
+\`\`\`annoteca-original
+It landed as a shock.
+\`\`\`
+--> The discovery reframed the passage entirely.
+\`\`\`\`
 
 ## Categories in this vault
 
