@@ -39,6 +39,7 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 
 	enableAuthorTag: false,
 	authorTag: "",
+	authorStyles: [],
 
 	debugMode: false,
 	debugLogTarget: "console",
@@ -252,6 +253,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 							},
 						},
 					},
+					this.customBlock((host) => this.renderAuthorStyles(host)),
 				],
 			},
 			{
@@ -695,6 +697,67 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 				this.update();
 			});
 		}
+	}
+
+	// Author/collaborator styling (F-274/F-275). Each row is a tag plus an
+	// optional color; the tag list feeds the reply composer's author picker and
+	// the color tints that author's name and replies in the thread and hover.
+	private renderAuthorStyles(host: HTMLElement): void {
+		const { content } = createStackedRow(host, {
+			name: "Collaborators and author colors",
+			description: "Tags for the people and assistants who reply in this vault. Each one appears in the reply author picker, and its color tints that author's name and replies.",
+		});
+
+		const list = content.createDiv({ cls: "annoteca-author-style-list" });
+		for (const style of this.plugin.settings.authorStyles) {
+			const row = list.createDiv({ cls: "annoteca-author-style-row" });
+			row.createSpan({ cls: "annoteca-author-style-tag", text: style.tag });
+			const colorWrap = row.createDiv({ cls: "annoteca-author-style-color" });
+			createColorPicker(colorWrap, {
+				current: style.color,
+				onChange: async next => {
+					style.color = next;
+					await this.plugin.saveSettings();
+				},
+			});
+			const remove = row.createEl("button", {
+				cls: "annoteca-author-style-remove",
+				text: "Remove",
+				attr: { type: "button" },
+			});
+			remove.addEventListener("click", () => {
+				this.plugin.settings.authorStyles =
+					this.plugin.settings.authorStyles.filter(s => s.tag !== style.tag);
+				void this.plugin.saveSettings();
+				this.update();
+			});
+		}
+
+		const addRow = content.createDiv({ cls: "annoteca-author-style-add" });
+		const input = addRow.createEl("input", {
+			cls: "annoteca-author-style-input",
+			attr: { type: "text", placeholder: "Author tag" },
+		});
+		const addBtn = addRow.createEl("button", {
+			cls: "mod-cta",
+			text: "Add author",
+			attr: { type: "button" },
+		});
+		addBtn.addEventListener("click", () => {
+			const tag = input.value.trim();
+			if (tag === "") return;
+			if (!/^[^\s\]<>]{1,32}$/.test(tag)) {
+				new Notice("Use a single tag with no spaces (max 32 characters).");
+				return;
+			}
+			if (this.plugin.settings.authorStyles.some(s => s.tag === tag)) {
+				new Notice("That author is already configured.");
+				return;
+			}
+			this.plugin.settings.authorStyles.push({ tag });
+			void this.plugin.saveSettings();
+			this.update();
+		});
 	}
 
 }

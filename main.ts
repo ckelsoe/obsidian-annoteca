@@ -23,7 +23,7 @@ import {
 	isHideAllComments,
 	setActiveComment,
 } from "./decorations";
-import { decideScrollAction } from "./view-utils";
+import { decideScrollAction, authorColorFor, authorPickerOptions } from "./view-utils";
 import {
 	VAULT_UNRESOLVED_VIEW_TYPE,
 	VaultUnresolvedView,
@@ -66,8 +66,10 @@ export default class AnnotecaPlugin extends Plugin {
 			reviseAddressed: (m) => { void this.reviseAddressedFromPopup(m); },
 			rejectAddressed: (m) => { void this.rejectAddressedFromPopup(m); },
 			copyPermalink: (m) => { void this.copyCommentId(m); },
-			submitReply: (m, body) => { void this.submitReplyFromPopup(m, body); },
+			submitReply: (m, body, author) => { void this.submitReplyFromPopup(m, body, author); },
 			getAuthorTag: () => this.comments.resolvedAuthor(),
+			getAuthorOptions: () => this.authorPickerOptions([]),
+			authorColor: (tag) => this.authorColor(tag),
 			isStarred: (m) => this.isStarred(m),
 			toggleStarred: (m) => { void this.toggleStarred(m); },
 			loadDraft: (id) => this.loadDraft(id),
@@ -641,16 +643,32 @@ export default class AnnotecaPlugin extends Plugin {
 		await this.comments.rejectAddressed(path, comment);
 	}
 
-	async submitReplyFromPopup(comment: Comment, body: string): Promise<void> {
+	async submitReplyFromPopup(comment: Comment, body: string, author?: string): Promise<void> {
 		const trimmed = body.trim();
 		if (trimmed.length === 0) return;
+		const tag = (author ?? "").trim();
 		const reply: Reply = {
-			author: this.comments.resolvedAuthor(),
+			author: tag !== "" ? tag : this.comments.resolvedAuthor(),
 			date: todayISO(),
 			body: trimmed,
 		};
 		await this.comments.appendReply(comment, reply);
 		new Notice("Reply added.");
+	}
+
+	// Author picker options (F-274): the global author tag, the configured
+	// collaborator tags, and any authors already in the given thread, deduped.
+	authorPickerOptions(threadAuthors: string[]): string[] {
+		return authorPickerOptions(
+			this.comments.resolvedAuthor(),
+			this.settings.authorStyles,
+			threadAuthors,
+		);
+	}
+
+	// Per-author color (F-275), or undefined when the author has no style.
+	authorColor(tag: string): string | undefined {
+		return authorColorFor(tag, this.settings.authorStyles);
 	}
 
 	async copyCommentId(comment: Comment): Promise<void> {

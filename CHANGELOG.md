@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-06-20
+
+### Added
+- Per-reply author picker (F-274). The reply composer (both the in-editor popup and the thread panel) now has an author dropdown so distinct collaborators each sign their own reply, instead of every reply using one global tag. Options come from the configured author tag, the collaborators you set up, and anyone already in the thread.
+- Per-author styling (F-275). A new "Collaborators and author colors" setting lets you give each author tag a color; that color tints the author's name and replies in the hover popup and the thread panel, so a multi-party conversation is easy to scan.
+
 ## [1.3.0] - 2026-06-20
 
 ### Added

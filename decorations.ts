@@ -38,8 +38,10 @@ export interface DecorationContext {
 	reviseAddressed(marker: Comment): void;
 	rejectAddressed(marker: Comment): void;
 	copyPermalink(marker: Comment): void;
-	submitReply(marker: Comment, body: string): void;
+	submitReply(marker: Comment, body: string, author: string): void;
 	getAuthorTag(): string;
+	getAuthorOptions(): string[];
+	authorColor(tag: string): string | undefined;
 	isStarred(marker: Comment): boolean;
 	toggleStarred(marker: Comment): void;
 	loadDraft(commentId: string): string;
@@ -255,10 +257,25 @@ function decorationsCompute(ctx: DecorationContext, field: StateField<Comment[]>
 
 const MAX_REPLIES_IN_POPUP = 3;
 
-function renderReplyRow(reply: { author: string; date: string; body: string }, parent: HTMLElement): void {
+// Tint an author label with its configured color (F-275). Uses a CSS variable
+// the .annoteca-author rule consumes, set programmatically (like the category
+// color dots), so no per-author static CSS is needed for a dynamic tag set.
+function applyAuthorColor(el: HTMLElement, tag: string, ctx: DecorationContext): void {
+	const color = ctx.authorColor(tag);
+	if (!color) return;
+	el.addClass("annoteca-author");
+	el.style.setProperty("--annoteca-author-color", color);
+}
+
+function renderReplyRow(
+	reply: { author: string; date: string; body: string },
+	parent: HTMLElement,
+	ctx: DecorationContext,
+): void {
 	const row = parent.createDiv({ cls: "annoteca-hover-reply" });
 	const head = row.createDiv({ cls: "annoteca-hover-reply-head" });
-	head.createSpan({ cls: "annoteca-hover-reply-author", text: reply.author });
+	const authorEl = head.createSpan({ cls: "annoteca-hover-reply-author", text: reply.author });
+	applyAuthorColor(authorEl, reply.author, ctx);
 	head.createSpan({ cls: "annoteca-hover-reply-date", text: reply.date });
 	row.createDiv({ cls: "annoteca-hover-reply-body", text: reply.body });
 }
@@ -323,7 +340,8 @@ function hoverTooltipExtension(ctx: DecorationContext, field: StateField<Comment
 					header.createSpan({ cls: "annoteca-hover-date", text: m.date });
 				}
 				if (m.author) {
-					header.createSpan({ cls: "annoteca-hover-author", text: m.author });
+					const authorEl = header.createSpan({ cls: "annoteca-hover-author", text: m.author });
+					applyAuthorColor(authorEl, m.author, ctx);
 				}
 
 				// Star toggle pinned to the far right via margin-left: auto in CSS.
@@ -370,7 +388,7 @@ function hoverTooltipExtension(ctx: DecorationContext, field: StateField<Comment
 							ctx.openInReviewer(m);
 						});
 					}
-					for (const r of shown) renderReplyRow(r, repliesBlock);
+					for (const r of shown) renderReplyRow(r, repliesBlock, ctx);
 				}
 
 				// F-270/F-271/F-272: the addressed note, plus the verbatim original
@@ -549,11 +567,25 @@ function buildReplyComposerDom(view: EditorView, ctx: DecorationContext, m: Comm
 		cls: "annoteca-reply-composer-title",
 		text: `Reply to ${m.category}`,
 	});
-	const authorTag = ctx.getAuthorTag();
-	head.createSpan({
-		cls: "annoteca-reply-composer-author",
-		text: `as ${authorTag}`,
-	});
+
+	// F-274: per-reply author picker. Options are the configured author tags plus
+	// any authors already in this thread, so distinct collaborators can each sign
+	// their own reply. Defaults to the configured author tag.
+	const defaultAuthor = ctx.getAuthorTag();
+	const threadAuthors = [m.author, ...m.replies.map(r => r.author)]
+		.filter((a): a is string => typeof a === "string" && a.trim() !== "");
+	const optionTags: string[] = [];
+	const seenTags = new Set<string>();
+	for (const tag of [defaultAuthor, ...ctx.getAuthorOptions(), ...threadAuthors]) {
+		const t = tag.trim();
+		if (t === "" || seenTags.has(t)) continue;
+		seenTags.add(t);
+		optionTags.push(t);
+	}
+	const authorLabel = head.createSpan({ cls: "annoteca-reply-composer-author", text: "as" });
+	const authorSelect = authorLabel.createEl("select", { cls: "annoteca-reply-composer-author-select dropdown" });
+	for (const tag of optionTags) authorSelect.createEl("option", { value: tag, text: tag });
+	authorSelect.value = defaultAuthor;
 
 	const textarea = dom.createEl("textarea", { cls: "annoteca-reply-composer-textarea" });
 	textarea.rows = 3;
@@ -608,7 +640,7 @@ function buildReplyComposerDom(view: EditorView, ctx: DecorationContext, m: Comm
 	const submit = (): void => {
 		const body = textarea.value.trim();
 		if (body.length === 0) return;
-		ctx.submitReply(m, body);
+		ctx.submitReply(m, body, authorSelect.value);
 		if (draftKey) ctx.clearDraft(draftKey);
 		view.dispatch({ effects: setReplyComposerEffect.of(null) });
 	};

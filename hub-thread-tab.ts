@@ -12,6 +12,7 @@ import type { Comment, ScopeState, StatusFilter } from "./types";
 import { getCategoryOrFallback } from "./categories";
 import { resolveSettingsCategories } from "./settings";
 import { todayISO } from "./parser";
+import { authorColorFor, authorPickerOptions } from "./view-utils";
 
 export class ThreadTabRenderer {
 	activePath: string | undefined;
@@ -310,7 +311,10 @@ export class ThreadTabRenderer {
 		catBadge.createSpan({ text: def.displayName });
 		if (c.resolution) compact.createSpan({ cls: "annoteca-reviewer-state", text: "resolved" });
 		if (c.date) compact.createSpan({ cls: "annoteca-reviewer-meta", text: c.date });
-		if (c.author) compact.createSpan({ cls: "annoteca-reviewer-meta", text: c.author });
+		if (c.author) {
+			const authorEl = compact.createSpan({ cls: "annoteca-reviewer-meta", text: c.author });
+			this.applyAuthorColor(authorEl, c.author);
+		}
 
 		// Star toggle at the right of the compact row.
 		const starBtn = compact.createEl("button", {
@@ -358,7 +362,7 @@ export class ThreadTabRenderer {
 			for (const r of c.replies) {
 				const item = thread.createDiv({ cls: "annoteca-reply" });
 				const meta = item.createDiv({ cls: "annoteca-reply-meta" });
-				meta.createSpan({ text: r.author });
+				this.applyAuthorColor(meta.createSpan({ text: r.author }), r.author);
 				meta.createSpan({ text: r.date });
 				item.createDiv({ cls: "annoteca-reply-body", text: r.body });
 			}
@@ -389,19 +393,39 @@ export class ThreadTabRenderer {
 			}, 300);
 		});
 
-		const submitBtn = wrap.createEl("button", { cls: "annoteca-reply-submit", text: "Reply" });
+		// F-274: per-reply author picker. Default plus configured collaborators
+		// plus authors already in this thread.
+		const controls = wrap.createDiv({ cls: "annoteca-reply-controls" });
+		const defaultAuthor = this.plugin.settings.authorTag !== "" ? this.plugin.settings.authorTag : "user";
+		const threadAuthors = [c.author, ...c.replies.map(r => r.author)]
+			.filter((a): a is string => typeof a === "string" && a.trim() !== "");
+		const options = authorPickerOptions(defaultAuthor, this.plugin.settings.authorStyles, threadAuthors);
+		const authorSelect = controls.createEl("select", { cls: "annoteca-reply-author-select dropdown" });
+		for (const tag of options) authorSelect.createEl("option", { value: tag, text: tag });
+		authorSelect.value = defaultAuthor;
+
+		const submitBtn = controls.createEl("button", { cls: "annoteca-reply-submit", text: "Reply" });
 		submitBtn.addEventListener("click", () => {
 			const body = textarea.value.trim();
 			if (body === "") {
 				new Notice("Reply is empty.");
 				return;
 			}
-			const author = this.plugin.settings.authorTag !== "" ? this.plugin.settings.authorTag : "user";
+			const author = authorSelect.value.trim() || defaultAuthor;
 			void this.plugin.appendReply(c, { author, date: todayISO(), body }).then(() => {
 				textarea.value = "";
 				if (c.id) this.plugin.clearDraft(c.id);
 			});
 		});
+	}
+
+	// F-275: tint an author label with its configured color via the CSS variable
+	// the .annoteca-author rule consumes. No-op when the author has no style.
+	private applyAuthorColor(el: HTMLElement, tag: string): void {
+		const color = authorColorFor(tag, this.plugin.settings.authorStyles);
+		if (!color) return;
+		el.addClass("annoteca-author");
+		el.style.setProperty("--annoteca-author-color", color);
 	}
 
 	private renderActions(container: HTMLElement, c: Comment, path: string): void {

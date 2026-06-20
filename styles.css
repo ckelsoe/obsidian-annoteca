@@ -1705,3 +1705,47 @@ settings:
 .annoteca-settings-footer a {
 	margin: 0 4px;
 }
+
+/* Per-author styling (F-274/F-275). Author labels in the hover popup and the
+ * thread tab get tinted via a CSS variable set programmatically per element, so
+ * a dynamic set of author tags needs no static per-author rules. */
+.annoteca-author {
+	color: var(--annoteca-author-color, inherit);
+}
+
+/* Reply composer author picker (pinned popup + thread tab). */
+.annoteca-reply-composer-author-select,
+.annoteca-reply-author-select {
+	margin-left: 6px;
+}
+
+.annoteca-reply-controls {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+	margin-top: 6px;
+}
+
+/* Author/collaborator styling settings rows. */
+.annoteca-author-style-row {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+	padding: 4px 0;
+}
+
+.annoteca-author-style-tag {
+	flex: 1;
+	font-weight: var(--font-semibold);
+}
+
+.annoteca-author-style-add {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+	margin-top: 8px;
+}
+
+.annoteca-author-style-input {
+	flex: 1;
+}

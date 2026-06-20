@@ -63,6 +63,15 @@ export interface CategoryDefinition {
 	tier?: AnchorTier;      // anchor-underline urgency; undefined === "normal"
 }
 
+// Per-author / per-collaborator styling (F-274/F-275). `tag` is the author
+// token written to [author=...] / [reply <tag> ...] lines; `color` tints that
+// author's name and replies so a multi-party thread is scannable. The tag list
+// also populates the reply composer's author picker.
+export interface AuthorStyle {
+	tag: string;
+	color?: string; // CSS color (hex or variable); falls back to the theme default
+}
+
 // User-saved preset. Stored in settings alongside the built-in presets in
 // categories.ts. Built-ins are read-only; user-saved ones can be loaded,
 // renamed, deleted.
@@ -111,6 +120,12 @@ export interface AnnotecaSettings {
 
 	enableAuthorTag: boolean;
 	authorTag: string;
+
+	// Per-author/per-collaborator tags and colors (F-274/F-275). Drives the
+	// reply composer's author picker and the per-author tinting of names and
+	// replies. Empty by default; the single authorTag above still works for the
+	// one-human-plus-AI case.
+	authorStyles: AuthorStyle[];
 
 	composerLocation: "modal" | "panel";
 

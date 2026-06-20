@@ -1,7 +1,37 @@
 // Pure helpers used by the hub panel views. No Obsidian dependency so
 // they can be unit-tested without mocking the runtime API.
 
-import type { Comment } from "./types";
+import type { AuthorStyle, Comment } from "./types";
+
+// Per-author color lookup (F-275). Returns the configured color for an author
+// tag, or undefined when the author has no style. Case-sensitive: author tags
+// are stored verbatim (the parser preserves casing).
+export function authorColorFor(tag: string, styles: AuthorStyle[]): string | undefined {
+	return styles.find(s => s.tag === tag)?.color;
+}
+
+// Build the author picker options for the reply composer (F-274). Combines, in
+// order and deduped: the configured global author tag, the configured
+// collaborator/author-style tags, and the authors already present in the thread
+// (so you can reply as anyone who has spoken). Empty/blank tags are dropped.
+export function authorPickerOptions(
+	globalTag: string | undefined,
+	styles: AuthorStyle[],
+	threadAuthors: string[],
+): string[] {
+	const out: string[] = [];
+	const seen = new Set<string>();
+	const add = (tag: string | undefined): void => {
+		const t = (tag ?? "").trim();
+		if (t === "" || seen.has(t)) return;
+		seen.add(t);
+		out.push(t);
+	};
+	add(globalTag);
+	for (const s of styles) add(s.tag);
+	for (const a of threadAuthors) add(a);
+	return out;
+}
 
 export type ScrollAction = "center" | "minimal" | "none";
 

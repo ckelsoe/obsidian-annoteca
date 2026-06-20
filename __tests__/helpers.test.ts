@@ -7,7 +7,10 @@ import {
 	ACTIVE_COMMENT_CLASS,
 	ACTIVE_COMMENT_MARKER_CLASS,
 	resolveAnchorRange,
+	authorColorFor,
+	authorPickerOptions,
 } from "../view-utils";
+import type { AuthorStyle } from "../types";
 import { computeScopeFileSet, type ScopeFile } from "../scope";
 import { parseAll, serialize, buildAnchorFromSelection } from "../parser";
 import type { Comment, ScopeShape } from "../types";
@@ -306,6 +309,52 @@ describe("resolveAnchorRange (F-273 direction-agnostic anchoring)", () => {
 		const r = resolveAnchorRange(doc, c.marker.start, c.marker.end, c.anchor.text);
 		expect(r).not.toBeNull();
 		if (r) expect(doc.slice(r.from, r.to)).toBe(selection);
+	});
+});
+
+describe("authorColorFor (F-275)", () => {
+	const styles: AuthorStyle[] = [
+		{ tag: "charles", color: "#3366ff" },
+		{ tag: "claude" },
+	];
+
+	it("returns the configured color for a styled author", () => {
+		expect(authorColorFor("charles", styles)).toBe("#3366ff");
+	});
+
+	it("returns undefined for an author with no color", () => {
+		expect(authorColorFor("claude", styles)).toBeUndefined();
+	});
+
+	it("returns undefined for an unknown author", () => {
+		expect(authorColorFor("nobody", styles)).toBeUndefined();
+	});
+
+	it("is case-sensitive (author tags are stored verbatim)", () => {
+		expect(authorColorFor("Charles", styles)).toBeUndefined();
+	});
+});
+
+describe("authorPickerOptions (F-274)", () => {
+	const styles: AuthorStyle[] = [{ tag: "claude" }, { tag: "beta-reader" }];
+
+	it("orders global tag first, then styles, then thread authors, deduped", () => {
+		expect(authorPickerOptions("charles", styles, ["claude", "guest"]))
+			.toEqual(["charles", "claude", "beta-reader", "guest"]);
+	});
+
+	it("drops blank and whitespace-only tags", () => {
+		expect(authorPickerOptions("", [{ tag: "  " }], ["", "ai"]))
+			.toEqual(["ai"]);
+	});
+
+	it("does not duplicate an author present in several sources", () => {
+		expect(authorPickerOptions("ai", [{ tag: "ai" }], ["ai"]))
+			.toEqual(["ai"]);
+	});
+
+	it("returns an empty list when there are no authors at all", () => {
+		expect(authorPickerOptions(undefined, [], [])).toEqual([]);
 	});
 });
 

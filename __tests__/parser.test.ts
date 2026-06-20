@@ -427,6 +427,34 @@ describe("parser: addressed state (F-270/F-271)", () => {
 	});
 });
 
+describe("parser: multi-party threads (F-274)", () => {
+	it("round-trips a thread with several distinct authors in order", () => {
+		const text = [
+			"<!-- annoteca/tone: sounds off",
+			"[id=multi0001]",
+			"[author=human1]",
+			"[reply human2 2026-06-20]: agree, too stiff",
+			"[reply claude 2026-06-20]: how about this rewrite",
+			"[reply human1 2026-06-21]: better, keep it",
+			"[reply human2 2026-06-21]: works for me",
+			"-->",
+		].join("\n");
+		const c = parseAll(text)[0];
+		expect(c).toBeDefined();
+		if (!c) return;
+		expect(c.author).toBe("human1");
+		expect(c.replies.map(r => r.author)).toEqual(["human2", "claude", "human1", "human2"]);
+		// Serializing it back reproduces the same authors in the same order.
+		const round = serialize({
+			id: c.id, category: c.category, body: c.body,
+			date: c.date, author: c.author, anchor: c.anchor,
+			replies: c.replies, addressed: c.addressed, resolution: c.resolution,
+		});
+		const c2 = parseAll(round)[0];
+		expect(c2?.replies.map(r => r.author)).toEqual(["human2", "claude", "human1", "human2"]);
+	});
+});
+
 describe("parser: parseAt", () => {
 	it("returns the marker at a known offset", () => {
 		const text = `prefix <!-- annoteca/tone: body --> suffix`;
