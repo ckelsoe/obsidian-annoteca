@@ -20,6 +20,110 @@ export function decideScrollAction(
 	return targetVisible ? "none" : "minimal";
 }
 
+// Window size searched on each side of a marker for its anchor text. Bounds the
+// look-around to the longest legal anchor (80 chars) plus slack. Mirrors the
+// historical 200-char look-back window.
+export const ANCHOR_WINDOW = 200;
+
+export interface AnchorMatch { from: number; to: number; }
+
+// Direction-agnostic anchor resolver (F-273). Locate the document range that
+// matches a comment's stored anchor text, searching BOTH the window before the
+// marker (legacy end-placement, matched backward) and the window after it
+// (begin-placement, matched forward). Returns the absolute {from,to} of the
+// matched prose, or null when neither side matches (the underline then degrades
+// silently, per the data-format contract).
+//
+// Pure over plain strings so it is unit-testable without a CodeMirror view.
+// `precedingWindow` is doc[backStart, markerStart]; `followingWindow` is
+// doc[markerEnd, ...]. A single optional space between the marker and the anchor
+// (introduced by the composer) is tolerated on whichever side matches and is
+// excluded from the returned range. Backward is tried first so a legacy
+// end-placed marker resolves identically to before.
+export function resolveAnchorRangeInWindows(
+	precedingWindow: string,
+	backStart: number,
+	markerStart: number,
+	followingWindow: string,
+	markerEnd: number,
+	anchorText: string,
+): AnchorMatch | null {
+	if (anchorText.length === 0) return null;
+	const back = precedingWindow;
+	const fwd = followingWindow;
+	const ellipsisIdx = anchorText.indexOf("…");
+
+	if (ellipsisIdx === -1) {
+		// Non-truncated: the anchor sits flush against the marker, possibly with
+		// one composer-introduced space between them.
+		if (back.endsWith(anchorText)) {
+			return { from: markerStart - anchorText.length, to: markerStart };
+		}
+		if (back.endsWith(anchorText + " ")) {
+			return { from: markerStart - anchorText.length - 1, to: markerStart - 1 };
+		}
+		if (fwd.startsWith(anchorText)) {
+			return { from: markerEnd, to: markerEnd + anchorText.length };
+		}
+		if (fwd.startsWith(" " + anchorText)) {
+			return { from: markerEnd + 1, to: markerEnd + 1 + anchorText.length };
+		}
+		return null;
+	}
+
+	// Truncated head…tail. Match symmetrically:
+	//  - backward: tail flush to the marker, head somewhere earlier;
+	//  - forward:  head flush to the marker, tail somewhere later.
+	const head = anchorText.slice(0, ellipsisIdx);
+	const tail = anchorText.slice(ellipsisIdx + 1);
+	if (head.length === 0 || tail.length === 0) return null;
+
+	// Backward.
+	let tailEnd: number | null = null;
+	if (back.endsWith(tail)) tailEnd = markerStart;
+	else if (back.endsWith(tail + " ")) tailEnd = markerStart - 1;
+	if (tailEnd !== null) {
+		const tailStart = tailEnd - tail.length;
+		const headHaystack = back.slice(0, tailStart - backStart);
+		const headIdxLocal = headHaystack.lastIndexOf(head);
+		if (headIdxLocal !== -1) {
+			return { from: backStart + headIdxLocal, to: tailEnd };
+		}
+	}
+
+	// Forward.
+	let headStart: number | null = null;
+	if (fwd.startsWith(head)) headStart = markerEnd;
+	else if (fwd.startsWith(" " + head)) headStart = markerEnd + 1;
+	if (headStart !== null) {
+		const afterHeadLocal = (headStart - markerEnd) + head.length;
+		const tailHaystack = fwd.slice(afterHeadLocal);
+		const tailIdxLocal = tailHaystack.indexOf(tail);
+		if (tailIdxLocal !== -1) {
+			const to = markerEnd + afterHeadLocal + tailIdxLocal + tail.length;
+			return { from: headStart, to };
+		}
+	}
+
+	return null;
+}
+
+// String convenience wrapper over resolveAnchorRangeInWindows: slices the
+// before/after windows from a full document string. Used by tests; the editor
+// path in decorations.ts slices CM windows directly to avoid materializing the
+// whole document per marker.
+export function resolveAnchorRange(
+	doc: string,
+	markerStart: number,
+	markerEnd: number,
+	anchorText: string,
+): AnchorMatch | null {
+	const backStart = Math.max(0, markerStart - ANCHOR_WINDOW);
+	const preceding = doc.slice(backStart, markerStart);
+	const following = doc.slice(markerEnd, Math.min(doc.length, markerEnd + ANCHOR_WINDOW));
+	return resolveAnchorRangeInWindows(preceding, backStart, markerStart, following, markerEnd, anchorText);
+}
+
 // Decoration spec for the active-comment highlight (F-276). Pure data so the
 // planner can be unit-tested without a CodeMirror view.
 export interface ActiveDecoSpec { from: number; to: number; cls: string; }

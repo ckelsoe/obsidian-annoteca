@@ -264,10 +264,16 @@ export class ComposerForm {
 
 		let markerStart: number;
 		if (selection.length > 0) {
-			const to = editor.getCursor("to");
-			const toOffset = editor.posToOffset(to);
-			editor.replaceRange(` ${text}`, to);
-			markerStart = toOffset + 1;
+			// F-273: beginning-placement. Insert the marker at the START of the
+			// selection so the text the comment concerns follows it. The leading
+			// space here mirrors the old trailing-space handling: it sits between
+			// the marker and the anchored prose, and findAnchorRange tolerates it
+			// on the forward (begin-placed) side just as it did on the backward
+			// (end-placed) side.
+			const from = editor.getCursor("from");
+			const fromOffset = editor.posToOffset(from);
+			editor.replaceRange(`${text} `, from);
+			markerStart = fromOffset;
 		} else {
 			const cursor = editor.getCursor();
 			markerStart = editor.posToOffset(cursor);

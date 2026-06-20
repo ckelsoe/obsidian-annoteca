@@ -22,7 +22,11 @@ import {
 import type { Comment } from "./types";
 import type { AnnotecaSettings } from "./types";
 import { parseAll } from "./parser";
-import { planActiveCommentDecorations } from "./view-utils";
+import {
+	planActiveCommentDecorations,
+	resolveAnchorRangeInWindows,
+	ANCHOR_WINDOW,
+} from "./view-utils";
 
 export interface DecorationContext {
 	getSettings(): AnnotecaSettings;
@@ -133,16 +137,16 @@ class MarkerIconWidget extends WidgetType {
 	}
 }
 
-// Locate the doc range immediately preceding the marker that matches the
-// stored anchor text. Returns null when:
-//  - the marker has no anchor, OR
-//  - the chars before the marker do not match the anchor text.
+// Locate the doc range matching the stored anchor text (F-273: direction-
+// agnostic). Searches both immediately before the marker (legacy end-placement)
+// and immediately after it (begin-placement) and underlines whichever side
+// resolves. Returns null when the marker has no anchor or neither side matches.
 //
-// Truncated anchors are matched in two halves around the U+2026 ellipsis: the
-// tail must sit flush against the marker, and the head must appear somewhere
-// in the preceding window. The matched range is "head start" → "tail end" so
-// the underline covers everything the comment is about, including any prose
-// the truncation skipped over.
+// Truncated anchors are matched in two halves around the U+2026 ellipsis so the
+// underline covers everything the comment is about, including prose the
+// truncation skipped. The string-matching logic lives in
+// resolveAnchorRangeInWindows (view-utils.ts) and is unit-tested there; this
+// wrapper slices the CM windows so the whole document is never materialized.
 function findAnchorRange(doc: import("@codemirror/state").Text, m: Comment): { from: number; to: number } | null {
 	const a = m.anchor;
 	if (!a) return null;
@@ -150,49 +154,14 @@ function findAnchorRange(doc: import("@codemirror/state").Text, m: Comment): { f
 	if (text.length === 0) return null;
 
 	const markerStart = m.marker.start;
+	const markerEnd = m.marker.end;
+	const backStart = Math.max(0, markerStart - ANCHOR_WINDOW);
+	const preceding = doc.sliceString(backStart, markerStart);
+	const following = doc.sliceString(markerEnd, Math.min(doc.length, markerEnd + ANCHOR_WINDOW));
 
-	// Look back a reasonable window: enough to cover the longest legal anchor
-	// (80 chars) plus a small slack for whitespace differences. 200 chars is
-	// safe and bounded.
-	const windowStart = Math.max(0, markerStart - 200);
-	const window = doc.sliceString(windowStart, markerStart);
-
-	const ellipsisIdx = text.indexOf("…");
-	if (ellipsisIdx === -1) {
-		// Non-truncated: anchor sits flush against the marker, possibly with
-		// a single space introduced by the composer when inserting after a
-		// selection.
-		if (window.endsWith(text)) {
-			const from = markerStart - text.length;
-			return { from, to: markerStart };
-		}
-		if (window.endsWith(text + " ")) {
-			const from = markerStart - text.length - 1;
-			return { from, to: markerStart - 1 };
-		}
-		return null;
-	}
-
-	// Truncated: head ... tail. Tail flushes the marker; head sits earlier
-	// in the same window.
-	const head = text.slice(0, ellipsisIdx);
-	const tail = text.slice(ellipsisIdx + 1);
-	if (head.length === 0 || tail.length === 0) return null;
-
-	let tailEnd: number;
-	if (window.endsWith(tail)) {
-		tailEnd = markerStart;
-	} else if (window.endsWith(tail + " ")) {
-		tailEnd = markerStart - 1;
-	} else {
-		return null;
-	}
-	const tailStart = tailEnd - tail.length;
-	const headHaystack = window.slice(0, tailStart - windowStart);
-	const headIdxLocal = headHaystack.lastIndexOf(head);
-	if (headIdxLocal === -1) return null;
-	const from = windowStart + headIdxLocal;
-	return { from, to: tailEnd };
+	return resolveAnchorRangeInWindows(
+		preceding, backStart, markerStart, following, markerEnd, text,
+	);
 }
 
 function anchorClassesFor(c: Comment, settings: AnnotecaSettings): string {

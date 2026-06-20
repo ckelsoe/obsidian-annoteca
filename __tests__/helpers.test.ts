@@ -6,8 +6,10 @@ import {
 	planActiveCommentDecorations,
 	ACTIVE_COMMENT_CLASS,
 	ACTIVE_COMMENT_MARKER_CLASS,
+	resolveAnchorRange,
 } from "../view-utils";
 import { computeScopeFileSet, type ScopeFile } from "../scope";
+import { parseAll, serialize, buildAnchorFromSelection } from "../parser";
 import type { Comment, ScopeShape } from "../types";
 
 describe("rgbStringToHex", () => {
@@ -197,6 +199,111 @@ describe("planActiveCommentDecorations (F-276)", () => {
 		expect(planActiveCommentDecorations(50, markers, { from: 40, to: 40 }, false)).toEqual([
 			{ from: 50, to: 60, cls: ACTIVE_COMMENT_MARKER_CLASS },
 		]);
+	});
+});
+
+describe("resolveAnchorRange (F-273 direction-agnostic anchoring)", () => {
+	const MARK = "<!-- annoteca/clarify: x -->";
+	// Returns the substring the resolved range covers, so assertions read as the
+	// underlined prose rather than raw offsets.
+	const covered = (doc: string, markerStart: number, anchor: string): string | null => {
+		const r = resolveAnchorRange(doc, markerStart, markerStart + MARK.length, anchor);
+		return r ? doc.slice(r.from, r.to) : null;
+	};
+
+	describe("non-truncated", () => {
+		it("matches a legacy end-placed marker (anchor before, with composer space)", () => {
+			const anchor = "assumes a hiring freeze";
+			const doc = `${anchor} ${MARK} trailing`;
+			expect(covered(doc, anchor.length + 1, anchor)).toBe(anchor);
+		});
+
+		it("matches a begin-placed marker (anchor after, with composer space)", () => {
+			const anchor = "assumes a hiring freeze";
+			const doc = `${MARK} ${anchor} trailing`;
+			expect(covered(doc, 0, anchor)).toBe(anchor);
+		});
+
+		it("matches an end-placed marker flush against the anchor (no space)", () => {
+			const anchor = "flush text";
+			const doc = `${anchor}${MARK}`;
+			expect(covered(doc, anchor.length, anchor)).toBe(anchor);
+		});
+
+		it("matches a begin-placed marker flush against the anchor (no space)", () => {
+			const anchor = "flush text";
+			const doc = `${MARK}${anchor} more`;
+			expect(covered(doc, 0, anchor)).toBe(anchor);
+		});
+
+		it("returns null when neither side matches", () => {
+			const doc = `nothing relevant here ${MARK} or here`;
+			expect(covered(doc, 22, "absent anchor")).toBeNull();
+		});
+	});
+
+	describe("truncated head…tail", () => {
+		const full = "AAAA BBBB CCCC DDDD";
+		const anchor = "AAAA…DDDD";
+
+		it("spans the whole original for a legacy end-placed marker", () => {
+			const doc = `${full} ${MARK}`;
+			expect(covered(doc, full.length + 1, anchor)).toBe(full);
+		});
+
+		it("spans the whole original for a begin-placed marker", () => {
+			const doc = `${MARK} ${full} after`;
+			expect(covered(doc, 0, anchor)).toBe(full);
+		});
+
+		it("returns null when the tail/head cannot be located on either side", () => {
+			const doc = `AAAA only no tail ${MARK}`;
+			expect(covered(doc, 18, anchor)).toBeNull();
+		});
+	});
+
+	it("round-trips: a legacy end-placed serialized marker still resolves via the parser", () => {
+		// Build the document the OLD composer produced: `<selection> <marker>`.
+		const selection = "the original commented passage";
+		const anchor = buildAnchorFromSelection(selection);
+		expect(anchor).toBeDefined();
+		if (!anchor) return;
+		const marker = serialize({
+			id: "a1b2c3d4",
+			category: "clarify",
+			body: "needs work",
+			date: "2026-06-20",
+			anchor,
+		});
+		const doc = `${selection} ${marker}\n\nMore prose.`;
+		const comments = parseAll(doc);
+		expect(comments).toHaveLength(1);
+		const c = comments[0];
+		if (!c || !c.anchor) throw new Error("comment did not parse");
+		const r = resolveAnchorRange(doc, c.marker.start, c.marker.end, c.anchor.text);
+		expect(r).not.toBeNull();
+		if (r) expect(doc.slice(r.from, r.to)).toBe(selection);
+	});
+
+	it("round-trips: a new begin-placed serialized marker resolves via the parser", () => {
+		const selection = "the original commented passage";
+		const anchor = buildAnchorFromSelection(selection);
+		if (!anchor) return;
+		const marker = serialize({
+			id: "a1b2c3d4",
+			category: "clarify",
+			body: "needs work",
+			date: "2026-06-20",
+			anchor,
+		});
+		// The NEW composer produces: `<marker> <selection>`.
+		const doc = `${marker} ${selection}\n\nMore prose.`;
+		const comments = parseAll(doc);
+		const c = comments[0];
+		if (!c || !c.anchor) throw new Error("comment did not parse");
+		const r = resolveAnchorRange(doc, c.marker.start, c.marker.end, c.anchor.text);
+		expect(r).not.toBeNull();
+		if (r) expect(doc.slice(r.from, r.to)).toBe(selection);
 	});
 });
 

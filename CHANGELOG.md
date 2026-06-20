@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-06-20
+
+### Added
+- Direction-agnostic anchor underlines (F-273). The underline over commented text now resolves whether the marker sits before or after the passage, so anchors render on both new and existing comments.
+
+### Changed
+- New comments now place their marker at the beginning of the selected text (the prose the comment is about follows the marker). This reads warning-before-text, like `eslint-disable-next-line`. Existing comments whose marker trails the text keep working unchanged: no migration, and end-placement stays valid and supported.
+
 ## [1.1.0] - 2026-06-20
 
 ### Added
