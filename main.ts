@@ -21,7 +21,9 @@ import {
 	buildAnnotecaExtension,
 	setHideAllComments,
 	isHideAllComments,
+	setActiveComment,
 } from "./decorations";
+import { decideScrollAction } from "./view-utils";
 import {
 	VAULT_UNRESOLVED_VIEW_TYPE,
 	VaultUnresolvedView,
@@ -852,8 +854,34 @@ export default class AnnotecaPlugin extends Plugin {
 		const view = targetLeaf.view as MarkdownView;
 		const pos = view.editor.offsetToPos(offset);
 		view.editor.setCursor(pos);
-		view.editor.scrollIntoView({ from: pos, to: pos }, true);
+
+		// F-276: do not force-center. Center only when the user opted in; else
+		// scroll the minimum needed, and not at all when the comment is already
+		// in view, so navigating does not yank the reader's position.
+		const action = decideScrollAction(
+			this.settings.centerCommentOnNavigate,
+			this.isOffsetVisible(view, offset),
+		);
+		if (action === "center") {
+			view.editor.scrollIntoView({ from: pos, to: pos }, true);
+		} else if (action === "minimal") {
+			view.editor.scrollIntoView({ from: pos, to: pos }, false);
+		}
 		this.app.workspace.setActiveLeaf(targetLeaf, { focus: true });
+	}
+
+	// True when the given document offset is inside the editor's current
+	// viewport. Uses the CodeMirror view (editor.cm) for pixel-accurate bounds.
+	// When the CM view or the position's coordinates are unavailable (offset far
+	// outside the rendered range), report not-visible so the caller does a
+	// minimal scroll rather than risk leaving the target off-screen.
+	private isOffsetVisible(view: MarkdownView, offset: number): boolean {
+		const cm = view.editor.cm;
+		if (!cm) return false;
+		const coords = cm.coordsAtPos(offset);
+		if (!coords) return false;
+		const rect = cm.scrollDOM.getBoundingClientRect();
+		return coords.top >= rect.top && coords.bottom <= rect.bottom;
 	}
 
 	private async jumpToAdjacentComment(
@@ -926,6 +954,11 @@ export default class AnnotecaPlugin extends Plugin {
 		const filePath = path ?? this.app.workspace.getActiveFile()?.path;
 		if (!filePath) return;
 		const start = comment.marker.start;
+		// F-276: revealLeaf below uncollapses the right sidebar, which narrows
+		// and reflows the document editor and would otherwise shift the reading
+		// position. Capture the editor's scroll before the reveal and restore it
+		// after, so opening the panel keeps the document exactly where it was.
+		const restoreScroll = this.captureEditorScrollForPath(filePath);
 		// Activate the view first so its active-comment-changed listener exists
 		// before we emit. If the view is newly created, setViewState resolves
 		// after onOpen runs and the listener is registered. If the view is
@@ -933,8 +966,48 @@ export default class AnnotecaPlugin extends Plugin {
 		// Emitting before activation lost the event on first open and made
 		// the panel fall back to comments[0] (the first item).
 		void this.activateView(ANNOTECA_HUB_VIEW_TYPE, "right").then(() => {
+			restoreScroll();
 			this.events.trigger("active-comment-changed", { path: filePath, start });
+			this.highlightActiveComment(filePath, start);
 		});
+	}
+
+	// Snapshot the scroll position of the editor showing `path` and return a
+	// restore function. The restore runs on the next animation frame so it lands
+	// after the sidebar reflow settles. No-op when the file is not open in a
+	// markdown editor.
+	private captureEditorScrollForPath(path: string): () => void {
+		for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+			const v = leaf.view;
+			if (v instanceof MarkdownView && v.file?.path === path) {
+				const editor = v.editor;
+				const info = editor.getScrollInfo();
+				return () => {
+					window.requestAnimationFrame(() => editor.scrollTo(info.left, info.top));
+				};
+			}
+		}
+		return () => undefined;
+	}
+
+	// F-276: paint the active-comment background in the editor showing `path`
+	// and clear it in every other markdown editor, so exactly one comment is
+	// highlighted at a time. `start` of null clears everywhere.
+	private highlightActiveComment(path: string, start: number | null): void {
+		for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+			const v = leaf.view;
+			if (!(v instanceof MarkdownView)) continue;
+			const cm = v.editor.cm;
+			if (!cm) continue;
+			const match = v.file?.path === path;
+			setActiveComment(cm, match ? start : null);
+		}
+	}
+
+	// Clear the active-comment highlight in every markdown editor. Called when
+	// the comment panel closes (deselect).
+	clearActiveCommentHighlight(): void {
+		this.highlightActiveComment("", null);
 	}
 
 	// Display toggles ----------------------------------------------------

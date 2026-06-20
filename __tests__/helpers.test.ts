@@ -1,5 +1,12 @@
 import { rgbStringToHex } from "../ui-helpers";
-import { extractIndexTerm, bucketCommentsByHeading } from "../view-utils";
+import {
+	extractIndexTerm,
+	bucketCommentsByHeading,
+	decideScrollAction,
+	planActiveCommentDecorations,
+	ACTIVE_COMMENT_CLASS,
+	ACTIVE_COMMENT_MARKER_CLASS,
+} from "../view-utils";
 import { computeScopeFileSet, type ScopeFile } from "../scope";
 import type { Comment, ScopeShape } from "../types";
 
@@ -119,6 +126,76 @@ describe("bucketCommentsByHeading", () => {
 		expect(bucketCommentsByHeading(headings, comments)).toEqual([
 			{ open: 1, resolved: 1 },
 			{ open: 2, resolved: 0 },
+		]);
+	});
+});
+
+describe("decideScrollAction (F-276)", () => {
+	it("centers when the user opted into centering, even if already visible", () => {
+		expect(decideScrollAction(true, true)).toBe("center");
+		expect(decideScrollAction(true, false)).toBe("center");
+	});
+
+	it("does not scroll when the target is already in the viewport", () => {
+		expect(decideScrollAction(false, true)).toBe("none");
+	});
+
+	it("scrolls minimally when the target is off-screen", () => {
+		expect(decideScrollAction(false, false)).toBe("minimal");
+	});
+});
+
+describe("planActiveCommentDecorations (F-276)", () => {
+	const mk = (start: number, end: number): Comment => ({
+		id: undefined,
+		category: "clarify",
+		body: "x",
+		date: undefined,
+		author: undefined,
+		anchor: undefined,
+		marker: { start, end },
+		replies: [],
+		resolution: undefined,
+	});
+	const markers = [mk(10, 20), mk(50, 60)];
+
+	it("returns no decorations when nothing is selected (cleared on deselect)", () => {
+		expect(planActiveCommentDecorations(null, markers, null, false)).toEqual([]);
+	});
+
+	it("returns no decorations when the active marker no longer exists", () => {
+		expect(planActiveCommentDecorations(999, markers, null, false)).toEqual([]);
+	});
+
+	it("returns no decorations when comments are hidden", () => {
+		expect(planActiveCommentDecorations(10, markers, { from: 0, to: 9 }, true)).toEqual([]);
+	});
+
+	it("marks only the marker when the active comment has no resolvable anchor", () => {
+		expect(planActiveCommentDecorations(10, markers, null, false)).toEqual([
+			{ from: 10, to: 20, cls: ACTIVE_COMMENT_MARKER_CLASS },
+		]);
+	});
+
+	it("marks the anchor and the marker, sorted, for a backward (end-placed) anchor", () => {
+		// Anchor precedes the marker (legacy end-placement): anchor mark sorts first.
+		expect(planActiveCommentDecorations(10, markers, { from: 2, to: 10 }, false)).toEqual([
+			{ from: 2, to: 10, cls: ACTIVE_COMMENT_CLASS },
+			{ from: 10, to: 20, cls: ACTIVE_COMMENT_MARKER_CLASS },
+		]);
+	});
+
+	it("marks the marker then the anchor, sorted, for a forward (begin-placed) anchor", () => {
+		// Anchor follows the marker (begin-placement): marker mark sorts first.
+		expect(planActiveCommentDecorations(10, markers, { from: 20, to: 30 }, false)).toEqual([
+			{ from: 10, to: 20, cls: ACTIVE_COMMENT_MARKER_CLASS },
+			{ from: 20, to: 30, cls: ACTIVE_COMMENT_CLASS },
+		]);
+	});
+
+	it("ignores an empty anchor range", () => {
+		expect(planActiveCommentDecorations(50, markers, { from: 40, to: 40 }, false)).toEqual([
+			{ from: 50, to: 60, cls: ACTIVE_COMMENT_MARKER_CLASS },
 		]);
 	});
 });

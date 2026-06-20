@@ -136,6 +136,20 @@ settings:
 .annoteca-anchor.annoteca-cat-meditation { --annoteca-anchor-color: var(--annoteca-color-meditation, var(--color-pink)); }
 .annoteca-anchor.annoteca-cat-index-entry { --annoteca-anchor-color: var(--text-accent); }
 
+/* Active-comment highlight (F-276): the comment whose thread is open in the
+ * side panel. A soft theme-aware background keeps the commented passage and its
+ * marker visually anchored while the reviewer works in the panel. Cleared when
+ * the panel closes or another comment is selected. */
+.annoteca-active-comment {
+	background-color: var(--text-highlight-bg);
+	border-radius: 3px;
+}
+
+.annoteca-active-comment-marker {
+	background-color: var(--background-modifier-active-hover);
+	border-radius: 3px;
+}
+
 .annoteca-icon:hover {
 	color: var(--text-normal);
 	transform: scale(1.15);

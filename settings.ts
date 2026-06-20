@@ -35,6 +35,7 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 	deleteOnResolve: false,
 
 	composerLocation: "modal",
+	centerCommentOnNavigate: false,
 
 	enableAuthorTag: false,
 	authorTag: "",
@@ -218,6 +219,11 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 						name: "Auto-collapse other files in scope",
 						desc: "When the thread panel shows comments from multiple files, collapse files other than the one you are editing. Click a file header to expand it manually.",
 						control: { type: "toggle", key: "autoCollapseInactiveFiles" },
+					},
+					{
+						name: "Center comment when navigating",
+						desc: "When on, jumping to a comment centers it in the editor. When off, the editor scrolls the minimum needed and stays put if the comment is already visible, so opening the panel does not move your place.",
+						control: { type: "toggle", key: "centerCommentOnNavigate" },
 					},
 				],
 			},

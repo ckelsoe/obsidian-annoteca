@@ -101,6 +101,12 @@ export interface AnnotecaSettings {
 
 	composerLocation: "modal" | "panel";
 
+	// When true, navigating to a comment centers it in the editor. When false
+	// (default), the editor scrolls the minimum needed and does not move at all
+	// when the comment is already visible (F-276). Keeps the reading position
+	// stable when clicking a comment in the side panel.
+	centerCommentOnNavigate: boolean;
+
 	debugMode: boolean;
 	debugLogTarget: "console" | "vault";
 

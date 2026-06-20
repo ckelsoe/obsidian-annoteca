@@ -349,6 +349,13 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 		}));
 	}
 
+	async onClose(): Promise<void> {
+		// F-276: dropping the panel deselects the active comment, so clear its
+		// editor highlight. The marker decorations themselves are untouched.
+		this.plugin.clearActiveCommentHighlight();
+		await super.onClose();
+	}
+
 	private async setActiveTab(tab: HubTab): Promise<void> {
 		if (this.activeTab === tab) return;
 		this.activeTab = tab;

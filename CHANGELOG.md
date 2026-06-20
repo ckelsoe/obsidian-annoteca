@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-06-20
+
+### Added
+- Active-comment highlight (F-276): the comment whose thread is open in the side panel now gets a soft background over its anchored text and marker in the editor, so you never lose track of which comment you are reading.
+- "Center comment when navigating" setting (off by default). When off, jumping to a comment scrolls the editor the minimum needed and does not move at all when the comment is already on screen.
+
+### Changed
+- Navigating to a comment no longer force-centers it. Opening the comment panel preserves your reading position: the editor's scroll is captured before the sidebar expands and restored after, so the document stays put.
+
 ## [1.0.4] - 2026-06-11
 
 ### Changed

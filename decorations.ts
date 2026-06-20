@@ -22,6 +22,7 @@ import {
 import type { Comment } from "./types";
 import type { AnnotecaSettings } from "./types";
 import { parseAll } from "./parser";
+import { planActiveCommentDecorations } from "./view-utils";
 
 export interface DecorationContext {
 	getSettings(): AnnotecaSettings;
@@ -48,6 +49,20 @@ export const setHideAllCommentsEffect = StateEffect.define<boolean>();
 // Reply composer state. The pinned tooltip below uses this to render a textarea
 // at a specific marker. `null` means no composer is open.
 const setReplyComposerEffect = StateEffect.define<number | null>();
+
+// Active-comment state (F-276). Carries the marker start of the comment whose
+// thread is currently open in the side panel, or `null` when nothing is
+// selected. The plugin dispatches this when the panel focuses a comment and
+// clears it when the panel closes; the StateField below paints a background
+// over the active comment so the reviewer never loses track of which marker the
+// thread belongs to. Mirrors the reply-composer effect/field pair.
+const setActiveCommentEffect = StateEffect.define<number | null>();
+
+// Dispatch the active-comment highlight into a specific editor. `null` clears
+// it. Called from main.ts on panel focus / close.
+export function setActiveComment(view: EditorView, markerStart: number | null): void {
+	view.dispatch({ effects: setActiveCommentEffect.of(markerStart) });
+}
 
 export function setHideAllComments(view: EditorView, hide: boolean): void {
 	hideAllFlag.value = hide;
@@ -615,6 +630,48 @@ function dismissReplyOnOutsideClick(): Extension {
 // inside buildAnnotecaExtension once replyField has been constructed.
 const replyComposerStateRef: { field?: StateField<number | null> } = {};
 
+// --------------------------------------------------------------------------
+// Active-comment highlight (F-276): a background mark over the comment whose
+// thread is open in the side panel, so selecting a comment keeps it visually
+// anchored in the editor.
+// --------------------------------------------------------------------------
+
+function activeCommentField(markersField: StateField<Comment[]>): StateField<number | null> {
+	return StateField.define<number | null>({
+		create: () => null,
+		update(value, tr) {
+			for (const e of tr.effects) {
+				if (e.is(setActiveCommentEffect)) return e.value;
+			}
+			// Drop the highlight if the underlying marker no longer exists
+			// (deleted, rewritten, or shifted by an edit that changed its start).
+			if (tr.docChanged && value !== null) {
+				const markers = tr.state.field(markersField);
+				if (!markers.some(m => m.marker.start === value)) return null;
+			}
+			return value;
+		},
+	});
+}
+
+function activeCommentDecorations(
+	markersField: StateField<Comment[]>,
+	activeField: StateField<number | null>,
+): Extension {
+	return EditorView.decorations.compute([markersField, activeField], state => {
+		const start = state.field(activeField);
+		const markers = state.field(markersField);
+		const m = start === null ? undefined : markers.find(c => c.marker.start === start);
+		const anchorRange = m ? findAnchorRange(state.doc, m) : null;
+		const specs = planActiveCommentDecorations(start, markers, anchorRange, hideAllFlag.value);
+		if (specs.length === 0) return Decoration.none;
+		return Decoration.set(
+			specs.map(s => Decoration.mark({ class: s.cls }).range(s.from, s.to)),
+			true,
+		);
+	});
+}
+
 function clickHandlerExtension(ctx: DecorationContext, field: StateField<Comment[]>): Extension {
 	return EditorView.domEventHandlers({
 		click: (event, view) => {
@@ -652,9 +709,12 @@ export function buildAnnotecaExtension(ctx: DecorationContext): Extension {
 	const field = markerStateField(ctx);
 	const replyField = replyComposerField(ctx, field);
 	replyComposerStateRef.field = replyField;
+	const activeField = activeCommentField(field);
 	return [
 		field,
 		replyField,
+		activeField,
+		activeCommentDecorations(field, activeField),
 		// Render tooltips into document.body instead of the editor's DOM so
 		// they can escape the sidebar leaf bounds. Without this override,
 		// markers near the right edge of a narrow sidebar leaf produce a
