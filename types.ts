@@ -176,6 +176,12 @@ export interface AnnotecaSettings {
 	// .claude/skills/ (Claude Code), .agent/skills/ (other assistants), or both.
 	skillExportTarget: "claude" | "agent" | "both";
 
+	// Skill staleness tracking. exportedSkillVersion is the schema version
+	// stamped at the last export; skillStaleNoticeShownFor is the schema version
+	// the on-load "re-export" notice last fired for, so it warns once per bump.
+	exportedSkillVersion?: number;
+	skillStaleNoticeShownFor?: number;
+
 	// Reading-view comment indicator. Markers are HTML comments, which the
 	// renderer drops; this surfaces their presence in reading view.
 	// "banner"      → one note-level pill with file totals

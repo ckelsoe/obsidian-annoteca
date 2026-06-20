@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-06-20
+
+### Added
+- Exported AI skill staleness detection (F-277). The exported `SKILL.md` now carries a schema version. When the guidance changes in a future update, the "Export AI skill" setting shows an "out of date" indicator and a one-time notice appears on load, so a previously exported skill does not silently teach an assistant the old rules. Re-exporting clears it. The schema version is bumped only when the teaching actually changes, not on every release.
+
 ## [1.4.0] - 2026-06-20
 
 ### Added

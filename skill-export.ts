@@ -8,6 +8,33 @@ import type { CategoryDefinition } from "./types";
 
 export type SkillExportTarget = "claude" | "agent" | "both";
 
+// Schema version of the exported skill's teaching. Bumped only when the
+// assistant-facing guidance materially changes, so users are prompted to
+// re-export when the content is genuinely different rather than on every plugin
+// release. 1 = the original skill; 2 = the AI-revision-flow skill
+// (begin-placement, addressed flow, forbid marker deletion / unprompted resolve).
+export const SKILL_SCHEMA_VERSION = 2;
+
+const SKILL_VERSION_RE = /^annoteca-skill-version:\s*(\d+)\s*$/m;
+
+// Read the schema version stamped into an exported skill. Returns 0 when the
+// stamp is absent (a skill exported before versioning), which is always treated
+// as older than the current version.
+export function parseSkillVersion(content: string): number {
+	const m = SKILL_VERSION_RE.exec(content);
+	const raw = m?.[1];
+	return raw !== undefined ? Number.parseInt(raw, 10) : 0;
+}
+
+export type SkillStatus = "missing" | "stale" | "current";
+
+// Status of an exported skill given its on-disk content (null = the file does
+// not exist). Pure so it is unit-testable without the vault adapter.
+export function skillStatus(content: string | null): SkillStatus {
+	if (content === null) return "missing";
+	return parseSkillVersion(content) < SKILL_SCHEMA_VERSION ? "stale" : "current";
+}
+
 // Vault-relative destinations. Dot-folders are hidden from the vault file
 // index, so callers must write through the DataAdapter, not the Vault API.
 const SKILL_FILE_BY_TARGET: Record<"claude" | "agent", string> = {
@@ -39,6 +66,7 @@ export function buildSkillMarkdown(
 	return `---
 name: annoteca-comments
 description: Read, reply to, create, and resolve Annoteca feedback comments stored as HTML markers in markdown files. Use when asked to review a note, address comments, reply to feedback, or annotate a document in a vault that contains Annoteca markers.
+annoteca-skill-version: ${SKILL_SCHEMA_VERSION}
 ---
 
 # Annoteca comment markers

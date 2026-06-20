@@ -1749,3 +1749,19 @@ settings:
 .annoteca-author-style-input {
 	flex: 1;
 }
+
+/* Exported-skill staleness indicator (F-277). */
+.annoteca-skill-status {
+	margin-top: 4px;
+	font-size: var(--font-smaller);
+}
+.annoteca-skill-status.is-current {
+	color: var(--text-success);
+}
+.annoteca-skill-status.is-stale {
+	color: var(--text-warning);
+	font-weight: var(--font-semibold);
+}
+.annoteca-skill-status.is-missing {
+	color: var(--text-muted);
+}

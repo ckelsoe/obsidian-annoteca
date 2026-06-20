@@ -14,7 +14,13 @@ import {
 import type { AnnotecaSettings, Comment, Reply, ScopeShape, ScopeState, StatusFilter } from "./types";
 import { CommentIndex } from "./index";
 import { DEFAULT_SETTINGS, AnnotecaSettingTab, resolveSettingsCategories } from "./settings";
-import { buildSkillMarkdown, skillTargetPaths } from "./skill-export";
+import {
+	buildSkillMarkdown,
+	skillTargetPaths,
+	parseSkillVersion,
+	SKILL_SCHEMA_VERSION,
+	type SkillStatus,
+} from "./skill-export";
 import { registerReadingViewIndicator } from "./reading-view";
 import { AddCommentModal } from "./modal";
 import {
@@ -99,6 +105,7 @@ export default class AnnotecaPlugin extends Plugin {
 		this.app.workspace.onLayoutReady(() => {
 			this.refreshActiveFileIndex();
 			this.ensureRightSidebarTab();
+			void this.checkSkillStaleness();
 		});
 	}
 
@@ -1105,8 +1112,52 @@ export default class AnnotecaPlugin extends Plugin {
 				}
 				await adapter.write(normalizePath(filePath), body);
 			}
+			// Record what we exported so the staleness check and the settings
+			// indicator know the on-disk skill is current; suppress the load
+			// notice for this schema version.
+			this.settings.exportedSkillVersion = SKILL_SCHEMA_VERSION;
+			this.settings.skillStaleNoticeShownFor = SKILL_SCHEMA_VERSION;
+			await this.saveSettings();
 			new Notice(`Skill written to ${paths.join(" and ")}.`);
 		});
+	}
+
+	// Read the lowest schema version among the exported skill files on disk
+	// (both targets are checked, regardless of the current target setting), or
+	// null when no skill has been exported. "Lowest" so a partially-updated pair
+	// reports as stale.
+	async readExportedSkillVersion(): Promise<number | null> {
+		const adapter = this.app.vault.adapter;
+		let found: number | null = null;
+		for (const filePath of skillTargetPaths("both")) {
+			const p = normalizePath(filePath);
+			if (!(await adapter.exists(p))) continue;
+			const version = parseSkillVersion(await adapter.read(p));
+			found = found === null ? version : Math.min(found, version);
+		}
+		return found;
+	}
+
+	// Status of the exported skill for the settings indicator.
+	async readExportedSkillStatus(): Promise<SkillStatus> {
+		const version = await this.readExportedSkillVersion();
+		if (version === null) return "missing";
+		return version < SKILL_SCHEMA_VERSION ? "stale" : "current";
+	}
+
+	// On load: if an exported skill exists and is older than the current schema
+	// version, warn once per bump so the user knows to re-export. The settings
+	// indicator carries the persistent signal; this is the nudge.
+	private async checkSkillStaleness(): Promise<void> {
+		const version = await this.readExportedSkillVersion();
+		if (version === null || version >= SKILL_SCHEMA_VERSION) return;
+		if (this.settings.skillStaleNoticeShownFor === SKILL_SCHEMA_VERSION) return;
+		new Notice(
+			"Annoteca's AI skill guidance changed. Re-export it from settings so your assistant gets the new instructions.",
+			8000,
+		);
+		this.settings.skillStaleNoticeShownFor = SKILL_SCHEMA_VERSION;
+		await this.saveSettings();
 	}
 
 	private async backupSettings(): Promise<void> {

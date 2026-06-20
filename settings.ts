@@ -368,13 +368,37 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 	}
 
 	private renderSkillExport(container: HTMLElement): void {
-		new Setting(container)
+		const setting = new Setting(container)
 			.setName("Export AI skill")
-			.setDesc("Write a skill file into the vault that teaches an AI assistant this vault's comment format and categories. Re-export after changing categories.")
-			.addButton(b => b
-				.setButtonText("Export")
-				.setCta()
-				.onClick(() => { this.plugin.exportAiSkill(); }));
+			.setDesc("Write a skill file into the vault that teaches an AI assistant this vault's comment format and categories. Re-export after changing categories or updating the plugin.");
+
+		// Live staleness indicator (F-277): reads the on-disk skill and reports
+		// whether it matches the current guidance.
+		const status = setting.descEl.createDiv({ cls: "annoteca-skill-status" });
+		const updateStatus = async (): Promise<void> => {
+			const s = await this.plugin.readExportedSkillStatus();
+			status.removeClasses(["is-stale", "is-current", "is-missing"]);
+			if (s === "missing") {
+				status.setText("Not yet exported.");
+				status.addClass("is-missing");
+			} else if (s === "stale") {
+				status.setText("Out of date; re-export to update your assistant.");
+				status.addClass("is-stale");
+			} else {
+				status.setText("Up to date.");
+				status.addClass("is-current");
+			}
+		};
+		void updateStatus();
+
+		setting.addButton(b => b
+			.setButtonText("Export")
+			.setCta()
+			.onClick(() => {
+				this.plugin.exportAiSkill();
+				// Refresh the indicator after the async write settles.
+				window.setTimeout(() => { void updateStatus(); }, 400);
+			}));
 	}
 
 	private renderAddCategory(container: HTMLElement): void {

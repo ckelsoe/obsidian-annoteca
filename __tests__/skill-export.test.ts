@@ -1,4 +1,10 @@
-import { buildSkillMarkdown, skillTargetPaths } from "../skill-export";
+import {
+	buildSkillMarkdown,
+	skillTargetPaths,
+	parseSkillVersion,
+	skillStatus,
+	SKILL_SCHEMA_VERSION,
+} from "../skill-export";
 import { parseAll } from "../parser";
 import type { CategoryDefinition } from "../types";
 
@@ -80,6 +86,11 @@ describe("buildSkillMarkdown", () => {
 		expect(addressed.anchor?.text).toBe("it landed as a shock");
 	});
 
+	it("stamps the current skill schema version in the frontmatter", () => {
+		expect(skill).toContain(`annoteca-skill-version: ${SKILL_SCHEMA_VERSION}`);
+		expect(parseSkillVersion(skill)).toBe(SKILL_SCHEMA_VERSION);
+	});
+
 	it("names the reviewer's author tag when one is configured", () => {
 		const withTag = buildSkillMarkdown(CATEGORIES, "Charles");
 		expect(withTag).toContain("signs comments as `Charles`");
@@ -87,5 +98,23 @@ describe("buildSkillMarkdown", () => {
 
 	it("suggests a generic tag when no author tag is configured", () => {
 		expect(skill).toContain("such as `claude` or `ai`");
+	});
+});
+
+describe("skill staleness detection (F-277)", () => {
+	const current = buildSkillMarkdown(CATEGORIES, undefined);
+
+	it("parseSkillVersion reads the stamp, and returns 0 when absent", () => {
+		expect(parseSkillVersion(current)).toBe(SKILL_SCHEMA_VERSION);
+		expect(parseSkillVersion("# a skill with no version stamp")).toBe(0);
+	});
+
+	it("skillStatus reports missing / stale / current", () => {
+		expect(skillStatus(null)).toBe("missing");
+		expect(skillStatus("an old skill, no stamp")).toBe("stale");
+		expect(skillStatus("---\nannoteca-skill-version: 1\n---")).toBe(
+			SKILL_SCHEMA_VERSION > 1 ? "stale" : "current",
+		);
+		expect(skillStatus(current)).toBe("current");
 	});
 });
