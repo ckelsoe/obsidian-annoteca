@@ -118,6 +118,32 @@ describe("resolveAndRemoveComment", () => {
 	});
 });
 
+describe("deleteComment", () => {
+	it("removes the marker from the document body (same as resolve-and-remove)", async () => {
+		const h = makeHarness(false);
+		await h.service.deleteComment("note.md", firstComment(h.content));
+		expect(parseAll(h.content)).toHaveLength(0);
+		expect(h.content).not.toContain("annoteca");
+		// The surrounding prose survives.
+		expect(h.content).toContain("Prose under review.");
+		expect(h.content).toContain("More prose.");
+	});
+
+	it("removes the marker by id even when the cached offsets are stale", async () => {
+		// The Thread panel can hold a comment whose marker offsets no longer
+		// match the document (edited since the last index build). Splicing on
+		// those stale offsets used to remove the wrong range and leave the
+		// marker; re-resolving by id fixes it.
+		const h = makeHarness(false);
+		const c = firstComment(h.content);
+		const stale = { ...c, marker: { start: 0, end: 3 } };
+		await h.service.deleteComment("note.md", stale);
+		expect(parseAll(h.content)).toHaveLength(0);
+		expect(h.content).not.toContain("annoteca");
+		expect(h.content).toContain("Prose under review.");
+	});
+});
+
 describe("addressed-state transitions (F-270/F-271/F-272)", () => {
 	// Begin-placed marker leading the replaced prose, with an annoteca-original
 	// fence holding the verbatim old text.

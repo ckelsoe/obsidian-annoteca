@@ -98,7 +98,11 @@ const markerStateField = (_ctx: DecorationContext) => StateField.define<Comment[
 });
 
 class MarkerIconWidget extends WidgetType {
-	constructor(private readonly marker: Comment, private readonly hidden: boolean) {
+	constructor(
+		private readonly marker: Comment,
+		private readonly hidden: boolean,
+		private readonly onClick: (marker: Comment) => void,
+	) {
 		super();
 	}
 
@@ -133,15 +137,26 @@ class MarkerIconWidget extends WidgetType {
 		// a different character — switching shapes (◆ vs ●) at small font
 		// sizes reads as visual noise rather than meaningful state.
 		el.textContent = "◆";
+		// Handle the click on the widget directly. A replaced widget that returns
+		// true from ignoreEvent does NOT route its clicks to the editor's
+		// domEventHandlers, so the icon would otherwise be unclickable (point
+		// comments, which have only an icon and no underline, could not be opened
+		// at all). The anchor underline is plain marked text and still goes
+		// through the editor click handler. stopPropagation prevents a double
+		// open if the event ever does bubble.
+		el.addEventListener("click", (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			this.onClick(this.marker);
+		});
 		return el;
 	}
 
 	override ignoreEvent(event: Event): boolean {
-		// Prevent CM6 from treating clicks on the icon as cursor placement.
-		// Without this, clicking the icon moves the cursor into the marker
-		// range, which triggers the raw-text "edit" rendering branch below.
-		// The plugin's domEventHandlers click handler still fires and routes
-		// to openReviewerOnComment via onMarkerClick.
+		// Keep CM6 from treating a press on the icon as cursor placement (which
+		// would move the cursor into the marker range). The icon handles its own
+		// click via the listener in toDOM, so we do not depend on CM routing the
+		// click to domEventHandlers (it does not, for a widget that ignores it).
 		if (event.type === "mousedown" || event.type === "click") return true;
 		return false;
 	}
@@ -242,7 +257,7 @@ function decorationsCompute(ctx: DecorationContext, field: StateField<Comment[]>
 			// raw HTML doesn't leak) but renders display: none.
 			decorations.push(
 				Decoration.replace({
-					widget: new MarkerIconWidget(m, isHidden),
+					widget: new MarkerIconWidget(m, isHidden, (marker) => ctx.onMarkerClick(marker)),
 					inclusive: false,
 				}).range(m.marker.start, m.marker.end),
 			);
