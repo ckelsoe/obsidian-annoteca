@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- New installs now default the composer location to the right side panel instead of the modal dialog, so the document and the passage you are commenting on stay visible while you draft. Existing installs keep their current choice; switch any time under settings.
+
 ## [1.6.0] - 2026-06-21
 
 ### Changed

@@ -35,7 +35,7 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 	resolvedDisplay: "dim",
 	deleteOnResolve: false,
 
-	composerLocation: "modal",
+	composerLocation: "panel",
 	centerCommentOnNavigate: false,
 
 	enableAuthorTag: false,
