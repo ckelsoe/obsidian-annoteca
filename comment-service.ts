@@ -52,11 +52,9 @@ export class CommentService {
 	async resolveAndRemoveComment(path: string, comment: Comment): Promise<void> {
 		const file = this.plugin.app.vault.getAbstractFileByPath(path);
 		if (!(file instanceof TFile)) return;
-		const splice = this.buildDeleteSplice(
-			await this.readCurrentContent(file, path),
-			comment.marker.start,
-			comment.marker.end,
-		);
+		const content = await this.readCurrentContent(file, path);
+		const { start, end } = this.freshOffsets(content, comment);
+		const splice = this.buildDeleteSplice(content, start, end);
 		await this.applySplices(path, file, [splice]);
 		new Notice("Resolved and removed.");
 	}
@@ -71,11 +69,9 @@ export class CommentService {
 	async deleteComment(path: string, comment: Comment): Promise<void> {
 		const file = this.plugin.app.vault.getAbstractFileByPath(path);
 		if (!(file instanceof TFile)) return;
-		const splice = this.buildDeleteSplice(
-			await this.readCurrentContent(file, path),
-			comment.marker.start,
-			comment.marker.end,
-		);
+		const content = await this.readCurrentContent(file, path);
+		const { start, end } = this.freshOffsets(content, comment);
+		const splice = this.buildDeleteSplice(content, start, end);
 		await this.applySplices(path, file, [splice]);
 		new Notice("Deleted.");
 	}
@@ -251,8 +247,12 @@ export class CommentService {
 			addressed: next.addressed,
 			resolution: next.resolution,
 		});
+		// Re-resolve offsets by id against current content so a stale cached
+		// comment (e.g. from the panel) does not splice the wrong range.
+		const content = await this.readCurrentContent(file, path);
+		const { start, end } = this.freshOffsets(content, prev);
 		await this.applySplices(path, file, [
-			{ from: prev.marker.start, to: prev.marker.end, insert: serialized },
+			{ from: start, to: end, insert: serialized },
 		]);
 	}
 
@@ -280,6 +280,20 @@ export class CommentService {
 		const view = this.getOpenMarkdownView(path);
 		if (view) return view.editor.getValue();
 		return this.plugin.app.vault.read(file);
+	}
+
+	// Re-resolve a comment's marker offsets against the current file content by
+	// id. Callers (the Thread panel especially) hold a cached comment whose
+	// marker.start/end can be stale if the document changed since the index was
+	// last built; splicing on stale offsets removes the wrong range and leaves
+	// the real marker in place. Matching by id against a fresh parse fixes that.
+	// Falls back to the cached offsets when there is no id or no match.
+	private freshOffsets(content: string, comment: Comment): { start: number; end: number } {
+		if (comment.id !== undefined) {
+			const match = parseAll(content).find(c => c.id === comment.id);
+			if (match) return { start: match.marker.start, end: match.marker.end };
+		}
+		return { start: comment.marker.start, end: comment.marker.end };
 	}
 
 	private buildDeleteSplice(content: string, start: number, end: number): SpliceRange {

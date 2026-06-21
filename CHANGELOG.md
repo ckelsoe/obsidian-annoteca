@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.2] - 2026-06-21
+
+### Fixed
+- Clicking a comment's inline marker icon now opens it in the panel, the same as clicking its underline. Point comments (an icon with no underlined text) were previously unclickable in the editor because the icon is a replaced widget whose clicks were not routed to the editor's click handler; the icon now handles its own click.
+- Deleting a comment (and resolve-and-remove) now re-resolves the marker by its id against the current file content before editing. A comment acted on from the side panel could carry a stale cached position if the document had changed since it was indexed, which removed the wrong range and left the marker in the body; matching by id removes the right one.
+
 ## [1.7.1] - 2026-06-21
 
 ### Fixed
