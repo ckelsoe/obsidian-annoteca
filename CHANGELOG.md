@@ -7,8 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-06-21
+
 ### Changed
 - New installs now default the composer location to the right side panel instead of the modal dialog, so the document and the passage you are commenting on stay visible while you draft. Existing installs keep their current choice; switch any time under settings.
+- Reorganized the settings tab into focused groups so it is clear what each section controls. The previous catch-all "Indicators" group is split into Editor indicators, Resolved comments, Composer, Reading view, and Panel and navigation; "Metadata" is renamed "Authors".
 
 ## [1.6.0] - 2026-06-21
 

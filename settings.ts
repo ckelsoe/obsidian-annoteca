@@ -119,7 +119,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			},
 			{
 				type: "group",
-				heading: "Indicators",
+				heading: "Editor indicators",
 				items: [
 					{
 						name: "Indicator style",
@@ -171,6 +171,12 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 							options: { show: "Show", hide: "Hide", last: "Last state" },
 						},
 					},
+				],
+			},
+			{
+				type: "group",
+				heading: "Resolved comments",
+				items: [
 					{
 						name: "Resolved comment display",
 						desc: "How resolved comments appear in the editor.",
@@ -194,6 +200,12 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 							options: { normal: "Normal", bright: "Bright" },
 						},
 					},
+				],
+			},
+			{
+				type: "group",
+				heading: "Composer",
+				items: [
 					{
 						name: "Composer location",
 						desc: "Where the add-comment form appears. The side panel keeps the document visible while you draft.",
@@ -203,6 +215,12 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 							options: { modal: "Modal dialog", panel: "Right side panel" },
 						},
 					},
+				],
+			},
+			{
+				type: "group",
+				heading: "Reading view",
+				items: [
 					{
 						name: "Reading view indicator",
 						desc: "Comments are invisible in reading view (markers are HTML comments). Show a note-level banner with totals, a badge on each section that has comments, or both. Click an indicator to open the comment panel. Counts are threads; replies are not counted.",
@@ -217,6 +235,12 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 							},
 						},
 					},
+				],
+			},
+			{
+				type: "group",
+				heading: "Panel and navigation",
+				items: [
 					{
 						name: "Auto-collapse other files in scope",
 						desc: "When the thread panel shows comments from multiple files, collapse files other than the one you are editing. Click a file header to expand it manually.",
@@ -231,7 +255,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			},
 			{
 				type: "group",
-				heading: "Metadata",
+				heading: "Authors",
 				items: [
 					{
 						name: "Author tag",
@@ -341,8 +365,8 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		this.renderCustomBlock(containerEl, (host) => this.renderCategoryList(host));
 		this.renderCustomBlock(containerEl, (host) => this.renderAddCategory(host));
 
-		// Indicators
-		this.heading(containerEl, "Indicators");
+		// Editor indicators
+		this.heading(containerEl, "Editor indicators");
 		this.addDropdownRow(containerEl, "Indicator style",
 			"How comments are surfaced in the editor. The underline marks the text the comment was made against. The icon marks the comment's location when no text was selected at create time.",
 			"indicatorStyle",
@@ -359,6 +383,8 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		this.addDropdownRow(containerEl, "Default visibility on file open",
 			"Whether comments are visible when a file opens.",
 			"defaultVisibility", { show: "Show", hide: "Hide", last: "Last state" });
+
+		this.heading(containerEl, "Resolved comments");
 		this.addDropdownRow(containerEl, "Resolved comment display",
 			"How resolved comments appear in the editor.",
 			"resolvedDisplay", { dim: "Dim", hide: "Hide" });
@@ -368,13 +394,19 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		this.addDropdownRow(containerEl, "Resolved brightness",
 			"How aggressively resolved comments are dimmed. Normal works well in light themes; bright keeps resolved content legible against dark backgrounds where the base text is already muted.",
 			"resolvedBrightness", { normal: "Normal", bright: "Bright" });
+
+		this.heading(containerEl, "Composer");
 		this.addDropdownRow(containerEl, "Composer location",
 			"Where the add-comment form appears. The side panel keeps the document visible while you draft.",
 			"composerLocation", { modal: "Modal dialog", panel: "Right side panel" });
+
+		this.heading(containerEl, "Reading view");
 		this.addDropdownRow(containerEl, "Reading view indicator",
 			"Comments are invisible in reading view (markers are HTML comments). Show a note-level banner with totals, a badge on each section that has comments, or both. Click an indicator to open the comment panel. Counts are threads; replies are not counted.",
 			"readingViewIndicator",
 			{ off: "Off", banner: "Note banner", "per-section": "Per-section badges", both: "Banner and badges" });
+
+		this.heading(containerEl, "Panel and navigation");
 		this.addToggleRow(containerEl, "Auto-collapse other files in scope",
 			"When the thread panel shows comments from multiple files, collapse files other than the one you are editing. Click a file header to expand it manually.",
 			"autoCollapseInactiveFiles");
@@ -382,8 +414,8 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			"When on, jumping to a comment centers it in the editor. When off, the editor scrolls the minimum needed and stays put if the comment is already visible, so opening the panel does not move your place.",
 			"centerCommentOnNavigate");
 
-		// Metadata
-		this.heading(containerEl, "Metadata");
+		// Authors
+		this.heading(containerEl, "Authors");
 		this.addToggleRow(containerEl, "Author tag",
 			"When enabled, new comments include an [author=...] line. Useful when collaborating with an AI agent or multiple reviewers.",
 			"enableAuthorTag");
