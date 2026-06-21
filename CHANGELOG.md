@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-06-21
+
+### Changed
+- README updated to document the features added across 1.1.0 to 1.5.0: the AI revision flow (addressed state, lossless originals, accept / revise / reject), the active-comment highlight and stable navigation, the per-reply author picker and per-author colors, and the exported-skill out-of-date indicator. Documentation only; no code changes.
+
 ## [1.5.0] - 2026-06-20
 
 ### Added

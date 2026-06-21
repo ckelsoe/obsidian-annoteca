@@ -11,14 +11,15 @@ Annoteca is built for revision work on long documents: book manuscripts, theses,
 ## Features
 
 - **Categorized comments.** Every comment carries a category that says what kind of feedback it is. Seven defaults ship for general revision work (Tone, Clarify, Cut, Expand, Tighten, Source needed, Uncategorized); presets add sets for scholarly writing, fiction, code review, and project planning. Categories are fully editable, each with its own icon, color, and underline urgency tier, and you can save your own preset lists.
-- **Anchored to the text.** Comment a selection and the commented words get a category-tinted underline in the editor. Comment at the cursor and a small marker icon shows the location. Underline style and thickness are configurable.
-- **Threaded conversations.** Replies live inside the same marker, in order, each signed with an author tag and date. A conversation about a sentence stays attached to that sentence, even when the paragraph moves.
+- **Anchored to the text.** Comment a selection and the commented words get a category-tinted underline in the editor; new markers sit at the start of the passage they concern. Comment at the cursor and a small marker icon shows the location. Underline style and thickness are configurable. Opening a comment highlights its passage in the editor, and jumping to a comment no longer yanks your reading position.
+- **Threaded conversations.** Replies live inside the same marker, in order, each signed with an author tag and date. A per-reply author picker lets several collaborators each sign their own reply, and you can give each author a color so a multi-party thread is easy to scan. A conversation about a sentence stays attached to that sentence, even when the paragraph moves.
+- **AI revision flow.** When an assistant rewrites a passage in response to a comment, it marks the comment *addressed* and keeps the original text verbatim inside the marker. The comment stays in your queue with an accept, revise, or reject choice: accept resolves it, revise reopens it for more work, and reject restores the original prose automatically. You always see what changed and stay in control.
 - **Comment hub.** A right-sidebar panel with three tabs: Thread (the conversation view), Outline (open and resolved counts per heading, click to jump), and Starred (bookmarked comments). The Thread tab scopes to the current file, a folder with or without subfolders, the whole vault, a frontmatter property value, or a tag, and the scope can be pinned.
 - **Reading view indicators.** Markers are invisible in reading view by design, so Annoteca can show a note-level banner with open and resolved totals, a badge on each section that has comments, both, or nothing. Click an indicator to open the hub on that comment.
 - **Resolve your way.** Resolving keeps the comment in the file as a dimmed record by default, and resolved comments can be reopened with one click. Prefer clean files? Use "Resolve and remove", turn on delete-on-resolve, or sweep a file with "Delete all resolved comments".
 - **Hover popup.** Hover a marker to read the thread and reply, resolve, or jump to the hub without leaving the editor.
 - **Import what you already have.** Commands convert Obsidian `%%comments%%` and plain HTML comments into Annoteca markers, with a backup confirmation first.
-- **AI-ready by design.** The file is the API: any assistant that can read and edit markdown can read and write Annoteca comments. An "Export AI skill" command writes a skill file into your vault that teaches the assistant the format and your category vocabulary.
+- **AI-ready by design.** The file is the API: any assistant that can read and edit markdown can read and write Annoteca comments. An "Export AI skill" command writes a skill file into your vault that teaches the assistant the format and your category vocabulary. The exported skill is versioned, so the plugin tells you when it has gone out of date after an update and should be re-exported.
 
 ## How it works
 
@@ -42,6 +43,17 @@ The Q3 forecast assumes a hiring freeze through December.
 -->
 ```
 
+When an assistant addresses a comment by rewriting the passage, it records the change on an `[addressed ...]` line and keeps the original text verbatim in a fenced block inside the marker, so a Reject can restore it:
+
+```markdown
+<!-- annoteca/clarify: hedging
+[id=6raa4103]
+[anchor=it landed as a shock]
+[addressed claude 2026-06-20]: removed the hedging; original preserved inside the marker
+-->
+The discovery reframed the passage entirely.
+```
+
 Why HTML comments?
 
 - **Nothing breaks without the plugin.** The file stays a normal markdown document. Markers never render in reading view or exports, and other tools pass them through untouched.
@@ -54,24 +66,24 @@ Why HTML comments?
 1. Select a passage and run **Add comment for selection** (or **Add comment here** at a bare cursor) from the command palette or the right-click menu.
 2. Pick a category, write the feedback. The composer opens as a modal or as a side panel, your choice.
 3. Reply from the hover popup, the hub's Thread tab, or by typing a `[reply ...]` line directly in the file.
-4. Resolve when addressed. Reopen if it comes back. Use "Resolve and remove" when you want the marker gone instead of kept as history.
-5. Navigate with "Next comment" / "Previous comment", which follow your current scope across files.
+4. When an assistant has addressed a comment, the hover popup offers **Accept**, **Revise**, or **Reject** (reject restores the original text). Otherwise resolve when done and reopen if it comes back, or use "Resolve and remove" to drop the marker instead of keeping it as history.
+5. Navigate with "Next comment" / "Previous comment", which follow your current scope across files. The active comment is highlighted in the editor, and opening the panel keeps your place in the document.
 
 Diagnostics commands cover the edge cases: find orphaned comments whose surrounding prose was deleted, detect markers that drifted, validate malformed markers, and back up or restore plugin settings.
 
 ## Working with AI assistants
 
-Because comments are plain text in the file, an AI assistant needs no plugin API or special integration. Ask it to review a chapter and it can leave categorized comments at the passages it means. Ask it to address your comments and it can edit exactly the flagged passages and reply in each thread explaining the change, leaving the rest of the document untouched. Author tags (`author=ai`, `author=claude`) keep the conversation attributed.
+Because comments are plain text in the file, an AI assistant needs no plugin API or special integration. Ask it to review a chapter and it can leave categorized comments at the passages it means. Ask it to address your comments and it can edit exactly the flagged passages and reply in each thread explaining the change, leaving the rest of the document untouched. When the fix is a rewrite, the assistant marks the comment addressed and keeps the original text inside the marker, so you can accept, revise, or reject the change from the hover popup. Author tags (`author=ai`, `author=claude`) keep the conversation attributed.
 
-To teach an assistant the format, run **Export AI skill**. It writes a skill file into the vault describing the marker grammar, the reply and resolve conventions, and the exact categories you have configured. The destination is a setting: `.claude/skills/` for Claude Code, a `.agent/skills/` folder for other assistants, or both.
+To teach an assistant the format, run **Export AI skill**. It writes a skill file into the vault describing the marker grammar, the reply, address, and resolve conventions, and the exact categories you have configured. The exported skill instructs the assistant never to delete markers or resolve comments unprompted, so your review queue is never quietly cleared. The destination is a setting: `.claude/skills/` for Claude Code, a `.agent/skills/` folder for other assistants, or both. The skill is versioned; when an update changes the guidance, the plugin flags the exported file as out of date so you can re-export.
 
 ## Settings overview
 
 - **Categories**: edit the list, browse presets, set per-category icon, color, and underline tier.
-- **Indicators**: marker icon and underline style, size, thickness, default visibility, resolved-comment display and brightness, reading view indicator, composer location.
+- **Indicators**: marker icon and underline style, size, thickness, default visibility, resolved-comment display and brightness, reading view indicator, composer location, and whether jumping to a comment centers it or scrolls the minimum needed.
 - **Resolution**: delete-on-resolve toggle.
-- **Metadata**: author tag for your comments.
-- **AI integration**: skill export destination and button.
+- **Metadata**: author tag for your comments, plus collaborators and their colors for multi-party threads.
+- **AI integration**: skill export destination, export button, and an out-of-date indicator.
 - **Diagnostics**: debug logging.
 
 ## Installation
