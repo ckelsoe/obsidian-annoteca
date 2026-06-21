@@ -6,6 +6,7 @@ import {
 	Notice,
 	ButtonComponent,
 	setIcon,
+	requireApiVersion,
 } from "obsidian";
 
 import type AnnotecaPlugin from "./main";
@@ -301,6 +302,215 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		];
 	}
 
+	// Imperative settings tab for Obsidian < 1.13.0 (dual-support Path B from the
+	// Obsidian "Migrate to declarative settings" guide). On 1.13.0+ Obsidian
+	// renders from getSettingDefinitions() and skips display() entirely; older
+	// builds have no knowledge of getSettingDefinitions() and call display().
+	//
+	// This method and its row helpers use ONLY pre-1.13 Obsidian APIs and never
+	// reference the declarative SettingDefinition* types (which are imported
+	// type-only, so they leave no runtime trace in main.js): the marketplace
+	// no-unsupported-api scan rejects any 1.13.0 API reference while
+	// minAppVersion is below 1.13.0. The one 1.13 method, update(), is reached
+	// only through rerender(), guarded by requireApiVersion so it never runs on
+	// older builds. This path mirrors getSettingDefinitions() above; any change
+	// to one must be mirrored in the other or users on different Obsidian
+	// versions will see different settings.
+	//
+	// display() is marked deprecated in the 1.13 types because the declarative
+	// API supersedes it, but it is exactly the supported < 1.13 fallback in the
+	// dual-support pattern, so its use is intentional (see rerender()).
+	display(): void {
+		const { containerEl } = this;
+		containerEl.empty();
+
+		const categoryOptions: Record<string, string> = {};
+		for (const c of resolveSettingsCategories(this.plugin.settings)) {
+			categoryOptions[c.id] = c.displayName;
+		}
+
+		// Categories
+		this.heading(containerEl, "Categories");
+		this.renderCustomBlock(containerEl, (host) => this.renderPresetSection(host));
+		this.addToggleRow(containerEl, "Index-entry preset",
+			"Add an index-entry category for tagging concepts that should appear in a printed index. Pairs with the pandoc filter shipped under docs in the plugin repository.",
+			"enableIndexEntryPreset");
+		this.addDropdownRow(containerEl, "Default category",
+			"Selected in the add-comment modal by default.",
+			"defaultCategory", categoryOptions);
+		this.renderCustomBlock(containerEl, (host) => this.renderCategoryList(host));
+		this.renderCustomBlock(containerEl, (host) => this.renderAddCategory(host));
+
+		// Indicators
+		this.heading(containerEl, "Indicators");
+		this.addDropdownRow(containerEl, "Indicator style",
+			"How comments are surfaced in the editor. The underline marks the text the comment was made against. The icon marks the comment's location when no text was selected at create time.",
+			"indicatorStyle",
+			{ icon: "Inline icon only", underline: "Anchor underline only", both: "Icon and underline", none: "Hidden" });
+		this.addDropdownRow(containerEl, "Indicator size",
+			"Visual size of the marker icon in the editor.",
+			"indicatorSize", { small: "Small", medium: "Medium", large: "Large" });
+		this.addDropdownRow(containerEl, "Anchor underline style",
+			"Visual character of the underline drawn over commented text. Applies to every category.",
+			"anchorStyle", { wavy: "Wavy", solid: "Solid", dotted: "Dotted", dashed: "Dashed" });
+		this.addDropdownRow(containerEl, "Anchor underline thickness",
+			"Baseline thickness for categories on the normal tier. Subtle always renders thin, strong always renders thick, regardless of this setting.",
+			"anchorThickness", { thin: "Thin", medium: "Medium", thick: "Thick" });
+		this.addDropdownRow(containerEl, "Default visibility on file open",
+			"Whether comments are visible when a file opens.",
+			"defaultVisibility", { show: "Show", hide: "Hide", last: "Last state" });
+		this.addDropdownRow(containerEl, "Resolved comment display",
+			"How resolved comments appear in the editor.",
+			"resolvedDisplay", { dim: "Dim", hide: "Hide" });
+		this.addToggleRow(containerEl, "Delete on resolve",
+			"Resolving a comment permanently removes it from the file instead of keeping it as a dimmed [resolved] marker. The thread and its replies are gone; rely on git or backups for history. The separate \"Resolve and remove\" action always asks first; with this on, plain Resolve removes without asking.",
+			"deleteOnResolve");
+		this.addDropdownRow(containerEl, "Resolved brightness",
+			"How aggressively resolved comments are dimmed. Normal works well in light themes; bright keeps resolved content legible against dark backgrounds where the base text is already muted.",
+			"resolvedBrightness", { normal: "Normal", bright: "Bright" });
+		this.addDropdownRow(containerEl, "Composer location",
+			"Where the add-comment form appears. The side panel keeps the document visible while you draft.",
+			"composerLocation", { modal: "Modal dialog", panel: "Right side panel" });
+		this.addDropdownRow(containerEl, "Reading view indicator",
+			"Comments are invisible in reading view (markers are HTML comments). Show a note-level banner with totals, a badge on each section that has comments, or both. Click an indicator to open the comment panel. Counts are threads; replies are not counted.",
+			"readingViewIndicator",
+			{ off: "Off", banner: "Note banner", "per-section": "Per-section badges", both: "Banner and badges" });
+		this.addToggleRow(containerEl, "Auto-collapse other files in scope",
+			"When the thread panel shows comments from multiple files, collapse files other than the one you are editing. Click a file header to expand it manually.",
+			"autoCollapseInactiveFiles");
+		this.addToggleRow(containerEl, "Center comment when navigating",
+			"When on, jumping to a comment centers it in the editor. When off, the editor scrolls the minimum needed and stays put if the comment is already visible, so opening the panel does not move your place.",
+			"centerCommentOnNavigate");
+
+		// Metadata
+		this.heading(containerEl, "Metadata");
+		this.addToggleRow(containerEl, "Author tag",
+			"When enabled, new comments include an [author=...] line. Useful when collaborating with an AI agent or multiple reviewers.",
+			"enableAuthorTag");
+		if (this.plugin.settings.enableAuthorTag) {
+			this.addTextRow(containerEl, "Author identifier",
+				"Short tag with no spaces; maximum 32 characters.",
+				"authorTag", "reviewer", (value: string) => {
+					const v = value.trim();
+					return v === "" || /^[^\s\]<>]{1,32}$/.test(v)
+						? undefined
+						: "Use a single tag with no spaces (max 32 characters).";
+				});
+		}
+		this.renderCustomBlock(containerEl, (host) => this.renderAuthorStyles(host));
+
+		// AI integration
+		this.heading(containerEl, "AI integration");
+		this.addDropdownRow(containerEl, "Skill export destination",
+			"Vault folder the exported skill file is written to. Claude Code reads .claude/skills; some other assistants read a .agent folder.",
+			"skillExportTarget",
+			{ claude: ".claude/skills (Claude Code)", agent: ".agent/skills (other assistants)", both: "Both folders" });
+		this.renderCustomBlock(containerEl, (host) => this.renderSkillExport(host));
+
+		// Diagnostics
+		this.heading(containerEl, "Diagnostics");
+		this.addToggleRow(containerEl, "Debug mode",
+			"Log additional information for troubleshooting. Off by default to avoid log spam.",
+			"debugMode");
+		if (this.plugin.settings.debugMode) {
+			this.addDropdownRow(containerEl, "Debug log destination",
+				"Where diagnostic output is written.",
+				"debugLogTarget", { console: "Browser console", vault: "Log file in the vault" });
+		}
+		this.renderCustomBlock(containerEl, (host) => this.renderFooter(host));
+	}
+
+	// Re-render after a data change. On 1.13.0+ Obsidian owns the declarative
+	// tree, so call update(); on older builds re-run the imperative display().
+	// update() is the only 1.13 method touched anywhere in this tab and is
+	// reached solely through this guard.
+	private rerender(): void {
+		if (requireApiVersion("1.13.0")) {
+			// 1.13+ owns the declarative tree; update() is the new (non-deprecated)
+			// re-render entry point.
+			this.update();
+		} else {
+			// Intentional: display() is the supported < 1.13 fallback (dual-support
+			// pattern). @typescript-eslint rule, not an obsidianmd/* rule.
+			// eslint-disable-next-line @typescript-eslint/no-deprecated -- dual-support fallback for Obsidian < 1.13.0
+			this.display();
+		}
+	}
+
+	private heading(container: HTMLElement, text: string): void {
+		new Setting(container).setName(text).setHeading();
+	}
+
+	// Read a control value as a display string for dropdown/text rows. Mirrors
+	// getControlValue()'s coercion and avoids stringifying a non-primitive.
+	private controlString(key: string): string {
+		const value = this.getControlValue(key);
+		if (typeof value === "string") return value;
+		if (typeof value === "number" || typeof value === "boolean") return String(value);
+		return "";
+	}
+
+	// Imperative row helpers used only by display(). Each binds through the same
+	// getControlValue() / setControlValue() the declarative path uses, so
+	// coercion and side effects stay in one place.
+	private addToggleRow(
+		container: HTMLElement,
+		name: string,
+		desc: string,
+		key: string,
+	): void {
+		new Setting(container).setName(name).setDesc(desc).addToggle((toggle) =>
+			toggle
+				.setValue(Boolean(this.getControlValue(key)))
+				.onChange((value) => { void this.setControlValue(key, value); }),
+		);
+	}
+
+	private addDropdownRow(
+		container: HTMLElement,
+		name: string,
+		desc: string,
+		key: string,
+		options: Record<string, string>,
+	): void {
+		new Setting(container).setName(name).setDesc(desc).addDropdown((dropdown) => {
+			for (const [value, label] of Object.entries(options)) {
+				dropdown.addOption(value, label);
+			}
+			dropdown
+				.setValue(this.controlString(key))
+				.onChange((value) => { void this.setControlValue(key, value); });
+		});
+	}
+
+	private addTextRow(
+		container: HTMLElement,
+		name: string,
+		desc: string,
+		key: string,
+		placeholder: string,
+		validate?: (value: string) => string | undefined,
+	): void {
+		new Setting(container).setName(name).setDesc(desc).addText((text) =>
+			text
+				.setPlaceholder(placeholder)
+				.setValue(this.controlString(key))
+				.onChange((value) => {
+					if (validate) {
+						const error = validate(value);
+						if (error) { new Notice(error); return; }
+					}
+					void this.setControlValue(key, value);
+				}),
+		);
+	}
+
+	// Wraps a custom block in a full-width row, reusing the same builder the
+	// declarative path runs via customBlock().render().
+	private renderCustomBlock(container: HTMLElement, build: (host: HTMLElement) => void): void {
+		this.customBlock(build).render(new Setting(container));
+	}
+
 	// Version + links footer, the same trailing row the workspace's reference
 	// plugin renders (shell-path-copy settings-tab renderFooter).
 	private renderFooter(host: HTMLElement): void {
@@ -345,7 +555,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			case "enableIndexEntryPreset":
 			case "enableAuthorTag":
 			case "debugMode":
-				this.update();
+				this.rerender();
 				break;
 		}
 	}
@@ -427,7 +637,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 							displayName: pendingName.charAt(0).toUpperCase() + pendingName.slice(1).replace(/-/g, " "),
 						});
 						await this.plugin.saveSettings();
-						this.update();
+						this.rerender();
 					});
 			}));
 	}
@@ -498,7 +708,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 				this.plugin.settings.categories.push(...chosen.map(c => ({ ...c })));
 				void this.plugin.saveSettings();
 				new Notice(`Added ${chosen.length} categor${chosen.length === 1 ? "y" : "ies"}.`);
-				this.update();
+				this.rerender();
 			});
 
 			if (selected.isCustom) {
@@ -511,7 +721,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 					this.plugin.settings.customPresets =
 						this.plugin.settings.customPresets.filter(p => p.id !== selected.id);
 					void this.plugin.saveSettings();
-					this.update();
+					this.rerender();
 				});
 			}
 		};
@@ -549,7 +759,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			this.plugin.settings.customPresets.push(preset);
 			void this.plugin.saveSettings();
 			new Notice(`Saved preset “${name}”.`);
-			this.update();
+			this.rerender();
 		});
 	}
 
@@ -718,7 +928,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 					this.plugin.settings.categories.filter(c => c.id !== cat.id);
 				this.expandedCategoryIds.delete(cat.id);
 				void this.plugin.saveSettings();
-				this.update();
+				this.rerender();
 			});
 		}
 	}
@@ -753,7 +963,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 				this.plugin.settings.authorStyles =
 					this.plugin.settings.authorStyles.filter(s => s.tag !== style.tag);
 				void this.plugin.saveSettings();
-				this.update();
+				this.rerender();
 			});
 		}
 
@@ -780,7 +990,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			}
 			this.plugin.settings.authorStyles.push({ tag });
 			void this.plugin.saveSettings();
-			this.update();
+			this.rerender();
 		});
 	}
 

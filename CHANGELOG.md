@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-06-21
+
+### Changed
+- Lowered the minimum Obsidian version from 1.13.0 to 1.8.7. The settings tab now supports both the declarative settings API (Obsidian 1.13.0+) and the classic imperative settings tab (older versions), following Obsidian's dual-support migration pattern. Users on Obsidian 1.8.7 through 1.12.x can now install and use the plugin. No change to behavior on 1.13.0+.
+
 ## [1.5.1] - 2026-06-21
 
 ### Changed
