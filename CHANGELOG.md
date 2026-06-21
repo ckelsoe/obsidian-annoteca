@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-06-21
+
+### Fixed
+- The settings tab's pre-1.13 fallback no longer relies on suppressing the deprecated-API lint. The imperative re-render now calls a shared renderer instead of the deprecated `display()`, so the build contains no deprecated-API use and no lint suppression. No behavior change on any Obsidian version.
+
 ## [1.7.0] - 2026-06-21
 
 ### Changed

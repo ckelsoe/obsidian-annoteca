@@ -342,9 +342,16 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 	// versions will see different settings.
 	//
 	// display() is marked deprecated in the 1.13 types because the declarative
-	// API supersedes it, but it is exactly the supported < 1.13 fallback in the
-	// dual-support pattern, so its use is intentional (see rerender()).
+	// API supersedes it, but Obsidian still calls it on < 1.13 builds. It only
+	// delegates to renderImperativeSettings(), so our own code never calls the
+	// deprecated method (rerender() calls renderImperativeSettings() directly).
+	// That keeps the build free of any @typescript-eslint/no-deprecated use, so
+	// there is nothing to suppress.
 	display(): void {
+		this.renderImperativeSettings();
+	}
+
+	private renderImperativeSettings(): void {
 		const { containerEl } = this;
 		containerEl.empty();
 
@@ -462,10 +469,9 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			// re-render entry point.
 			this.update();
 		} else {
-			// Intentional: display() is the supported < 1.13 fallback (dual-support
-			// pattern). @typescript-eslint rule, not an obsidianmd/* rule.
-			// eslint-disable-next-line @typescript-eslint/no-deprecated -- dual-support fallback for Obsidian < 1.13.0
-			this.display();
+			// < 1.13: re-render the imperative tree directly. Calling the shared
+			// renderer (not the deprecated display()) avoids any no-deprecated use.
+			this.renderImperativeSettings();
 		}
 	}
 
