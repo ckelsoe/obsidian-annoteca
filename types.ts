@@ -129,6 +129,11 @@ export interface AnnotecaSettings {
 
 	composerLocation: "modal" | "panel";
 
+	// When true (default), Enter submits a comment/reply and Shift+Enter inserts
+	// a newline. When false, Cmd/Ctrl+Enter submits and Enter inserts a newline.
+	// Applies to both the new-comment composer and the reply composer.
+	submitCommentOnEnter: boolean;
+
 	// When true, navigating to a comment centers it in the editor. When false
 	// (default), the editor scrolls the minimum needed and does not move at all
 	// when the comment is already visible (F-276). Keeps the reading position

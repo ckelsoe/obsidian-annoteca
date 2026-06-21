@@ -26,6 +26,7 @@ import {
 	planActiveCommentDecorations,
 	resolveAnchorRangeInWindows,
 	ANCHOR_WINDOW,
+	shouldSubmitOnKeydown,
 } from "./view-utils";
 
 export interface DecorationContext {
@@ -669,7 +670,7 @@ function buildReplyComposerDom(view: EditorView, ctx: DecorationContext, m: Comm
 		if (e.key === "Escape") {
 			e.preventDefault();
 			view.dispatch({ effects: setReplyComposerEffect.of(null) });
-		} else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+		} else if (shouldSubmitOnKeydown(e, ctx.getSettings().submitCommentOnEnter)) {
 			e.preventDefault();
 			submit();
 		}

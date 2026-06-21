@@ -8,6 +8,7 @@ import type AnnotecaPlugin from "./main";
 import type { AnchorText, Comment } from "./types";
 import { buildAnchorFromSelection, generateId, serialize, todayISO } from "./parser";
 import { resolveSettingsCategories } from "./settings";
+import { shouldSubmitOnKeydown } from "./view-utils";
 import { getTemplate, resolvePlaceholder, type ModalTemplate } from "./templates";
 import { createStackedRow } from "./ui-helpers";
 
@@ -116,6 +117,12 @@ export class ComposerForm {
 		bodyArea.value = this.state.body;
 		bodyArea.addEventListener("input", () => {
 			this.state.body = bodyArea.value;
+		});
+		bodyArea.addEventListener("keydown", (e) => {
+			if (shouldSubmitOnKeydown(e, this.plugin.settings.submitCommentOnEnter)) {
+				e.preventDefault();
+				void this.submit();
+			}
 		});
 
 		const actions = container.createDiv({ cls: "annoteca-composer-actions" });

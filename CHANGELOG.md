@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-06-21
+
+### Added
+- "Send comment on Enter" setting (on by default, under Composer). Enter now sends a comment or reply and Shift+Enter starts a new line. Turn it off to send with Cmd/Ctrl+Enter instead, with Enter starting a new line. Applies to both the new-comment composer and the reply box.
+
 ## [1.7.2] - 2026-06-21
 
 ### Fixed

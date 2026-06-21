@@ -36,6 +36,7 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 	deleteOnResolve: false,
 
 	composerLocation: "panel",
+	submitCommentOnEnter: true,
 	centerCommentOnNavigate: false,
 
 	enableAuthorTag: false,
@@ -214,6 +215,11 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 							key: "composerLocation",
 							options: { modal: "Modal dialog", panel: "Right side panel" },
 						},
+					},
+					{
+						name: "Send comment on Enter",
+						desc: "When on, Enter sends the comment and Shift+Enter starts a new line. When off, send with Cmd or Ctrl plus Enter, and Enter starts a new line. Applies to the comment box and the reply box.",
+						control: { type: "toggle", key: "submitCommentOnEnter" },
 					},
 				],
 			},
@@ -406,6 +412,9 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		this.addDropdownRow(containerEl, "Composer location",
 			"Where the add-comment form appears. The side panel keeps the document visible while you draft.",
 			"composerLocation", { modal: "Modal dialog", panel: "Right side panel" });
+		this.addToggleRow(containerEl, "Send comment on Enter",
+			"When on, Enter sends the comment and Shift+Enter starts a new line. When off, send with Cmd or Ctrl plus Enter, and Enter starts a new line. Applies to the comment box and the reply box.",
+			"submitCommentOnEnter");
 
 		this.heading(containerEl, "Reading view");
 		this.addDropdownRow(containerEl, "Reading view indicator",

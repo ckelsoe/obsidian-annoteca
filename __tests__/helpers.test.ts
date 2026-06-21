@@ -9,6 +9,7 @@ import {
 	resolveAnchorRange,
 	authorColorFor,
 	authorPickerOptions,
+	shouldSubmitOnKeydown,
 } from "../view-utils";
 import type { AuthorStyle } from "../types";
 import { computeScopeFileSet, type ScopeFile } from "../scope";
@@ -133,6 +134,35 @@ describe("bucketCommentsByHeading", () => {
 			{ open: 1, resolved: 1 },
 			{ open: 2, resolved: 0 },
 		]);
+	});
+});
+
+describe("shouldSubmitOnKeydown", () => {
+	const key = (k: string, mods: Partial<{ shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }> = {}) =>
+		({ key: k, shiftKey: false, ctrlKey: false, metaKey: false, ...mods });
+
+	describe("submit-on-Enter mode", () => {
+		it("submits on plain Enter", () => {
+			expect(shouldSubmitOnKeydown(key("Enter"), true)).toBe(true);
+		});
+		it("does not submit on Shift+Enter (newline)", () => {
+			expect(shouldSubmitOnKeydown(key("Enter", { shiftKey: true }), true)).toBe(false);
+		});
+		it("ignores non-Enter keys", () => {
+			expect(shouldSubmitOnKeydown(key("a"), true)).toBe(false);
+		});
+	});
+
+	describe("modifier-Enter mode", () => {
+		it("does not submit on plain Enter (newline)", () => {
+			expect(shouldSubmitOnKeydown(key("Enter"), false)).toBe(false);
+		});
+		it("submits on Ctrl+Enter", () => {
+			expect(shouldSubmitOnKeydown(key("Enter", { ctrlKey: true }), false)).toBe(true);
+		});
+		it("submits on Cmd+Enter", () => {
+			expect(shouldSubmitOnKeydown(key("Enter", { metaKey: true }), false)).toBe(true);
+		});
 	});
 });
 

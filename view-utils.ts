@@ -33,6 +33,18 @@ export function authorPickerOptions(
 	return out;
 }
 
+// Decide whether a keydown in a comment composer (new-comment box or reply box)
+// should submit. When submitOnEnter is true, Enter submits and Shift+Enter
+// inserts a newline; when false, Cmd/Ctrl+Enter submits and plain Enter inserts
+// a newline. Pure so the rule is unit-tested once and shared by both composers.
+export function shouldSubmitOnKeydown(
+	e: { key: string; shiftKey: boolean; ctrlKey: boolean; metaKey: boolean },
+	submitOnEnter: boolean,
+): boolean {
+	if (e.key !== "Enter") return false;
+	return submitOnEnter ? !e.shiftKey : (e.ctrlKey || e.metaKey);
+}
+
 export type ScrollAction = "center" | "minimal" | "none";
 
 // Decide how to scroll the editor when navigating to a comment (F-276).
