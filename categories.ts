@@ -131,6 +131,30 @@ export function resolveEnabledCategories(
 	return Array.from(merged.values());
 }
 
+// Reorder the working category list by moving the `dragId` entry to the slot
+// currently held by `targetId`, shifting the rest to make room. Returns a new
+// array; the input is never mutated. When either id is absent or the two are
+// the same, the list comes back unchanged (as a copy) so callers can assign
+// the result unconditionally. The settings list order is load-bearing: it is
+// what the composer dropdown and the sidebar grouping render by, via
+// resolveEnabledCategories' insertion-ordered Map.
+export function reorderCategories(
+	categories: readonly CategoryDefinition[],
+	dragId: string,
+	targetId: string,
+): CategoryDefinition[] {
+	const next = categories.slice();
+	const from = next.findIndex(c => c.id === dragId);
+	const to = next.findIndex(c => c.id === targetId);
+	if (from === -1 || to === -1 || from === to) return next;
+	const [moved] = next.splice(from, 1);
+	// `from` is a valid index, so splice always yields one element; this guard
+	// only satisfies noUncheckedIndexedAccess.
+	if (!moved) return next;
+	next.splice(to, 0, moved);
+	return next;
+}
+
 // Look up a category definition by id, falling back to a stand-in when the id
 // is not in the active set. Views and decorations need a non-null result so
 // they can render even when a comment uses a category the user has since

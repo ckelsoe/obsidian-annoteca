@@ -16,6 +16,7 @@ import {
 	DEFAULT_PRESETS,
 	isValidCategoryName,
 	resolveEnabledCategories,
+	reorderCategories,
 } from "./categories";
 import { createStackedRow, createColorPicker, createIconPicker } from "./ui-helpers";
 
@@ -84,6 +85,12 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 	// re-renders (after saves) preserve expansion, but opening Settings fresh
 	// starts collapsed. Not persisted to data.json.
 	private readonly expandedCategoryIds = new Set<string>();
+
+	// Id of the category row currently being dragged for reordering, or null
+	// when no drag is in progress. Tracked on the instance (not dataTransfer
+	// alone) so dragover can decide whether the pointer is over a valid target
+	// without reading transfer data, which browsers withhold during dragover.
+	private draggedCategoryId: string | null = null;
 
 	constructor(app: App, plugin: AnnotecaPlugin) {
 		super(app, plugin);
@@ -837,6 +844,33 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			},
 		});
 
+		// Drag handle for reordering. Lives inside the summary button but stops
+		// click propagation so grabbing it never toggles the accordion. Only the
+		// handle is draggable; the rest of the summary stays a plain expand
+		// button. Drag is pointer-only (HTML5 DnD), so reordering is a desktop
+		// affordance; mobile users add categories in the order they want them.
+		const handle = summary.createSpan({
+			cls: "annoteca-category-drag-handle",
+			attr: { draggable: "true", "aria-label": "Drag to reorder" },
+		});
+		setIcon(handle, "grip-vertical");
+		handle.addEventListener("click", e => e.stopPropagation());
+		handle.addEventListener("dragstart", (e: DragEvent) => {
+			this.draggedCategoryId = cat.id;
+			row.addClass("is-dragging");
+			if (e.dataTransfer) {
+				e.dataTransfer.effectAllowed = "move";
+				e.dataTransfer.setData("text/plain", cat.id);
+			}
+		});
+		handle.addEventListener("dragend", () => {
+			this.draggedCategoryId = null;
+			row.removeClass("is-dragging");
+			for (const r of list.findAll(".annoteca-category-row")) {
+				r.removeClass("is-drag-over");
+			}
+		});
+
 		const summaryIcon = summary.createSpan({ cls: "annoteca-category-summary-icon" });
 		if (cat.icon) {
 			setIcon(summaryIcon, cat.icon);
@@ -877,6 +911,28 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			}
 			row.toggleClass("is-expanded", nowExpanded);
 			summary.setAttribute("aria-expanded", nowExpanded ? "true" : "false");
+		});
+
+		// Drop target: any row accepts the dragged category and reorders the
+		// working list so the dragged entry lands at this row's position.
+		row.addEventListener("dragover", (e: DragEvent) => {
+			if (!this.draggedCategoryId || this.draggedCategoryId === cat.id) return;
+			e.preventDefault(); // required for the row to be a valid drop target
+			if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+			row.addClass("is-drag-over");
+		});
+		row.addEventListener("dragleave", () => row.removeClass("is-drag-over"));
+		row.addEventListener("drop", (e: DragEvent) => {
+			e.preventDefault();
+			row.removeClass("is-drag-over");
+			const dragId = this.draggedCategoryId;
+			this.draggedCategoryId = null;
+			if (!dragId || dragId === cat.id) return;
+			this.plugin.settings.categories = reorderCategories(
+				this.plugin.settings.categories, dragId, cat.id,
+			);
+			void this.plugin.saveSettings();
+			this.rerender();
 		});
 
 		const controls = detail.createDiv({ cls: "annoteca-category-controls" });

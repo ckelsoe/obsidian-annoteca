@@ -1411,6 +1411,34 @@ settings:
 	background-color: var(--background-modifier-hover);
 }
 
+.annoteca-category-drag-handle {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
+	height: 20px;
+	color: var(--text-faint);
+	flex: 0 0 auto;
+	cursor: grab;
+}
+
+.annoteca-category-drag-handle:hover {
+	color: var(--text-muted);
+}
+
+.annoteca-category-drag-handle svg {
+	width: 16px;
+	height: 16px;
+}
+
+.annoteca-category-row.is-dragging {
+	opacity: 0.5;
+}
+
+.annoteca-category-row.is-drag-over {
+	border-top: 2px solid var(--interactive-accent);
+}
+
 .annoteca-category-summary-icon {
 	display: inline-flex;
 	align-items: center;

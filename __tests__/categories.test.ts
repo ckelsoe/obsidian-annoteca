@@ -5,7 +5,9 @@ import {
 	isValidCategoryName,
 	resolveEnabledCategories,
 	getCategoryOrFallback,
+	reorderCategories,
 } from "../categories";
+import type { CategoryDefinition } from "../types";
 
 describe("categories: validation", () => {
 	it("accepts valid category names", () => {
@@ -89,5 +91,39 @@ describe("categories: getCategoryOrFallback", () => {
 		const fallback = getCategoryOrFallback("ghost", DEFAULT_CATEGORIES);
 		expect(fallback.id).toBe("ghost");
 		expect(fallback.displayName.toLowerCase()).toContain("ghost");
+	});
+});
+
+describe("categories: reorderCategories", () => {
+	const cat = (id: string): CategoryDefinition => ({ id, displayName: id });
+	const ids = (list: readonly CategoryDefinition[]) => list.map(c => c.id);
+	const base = [cat("a"), cat("b"), cat("c"), cat("d")];
+
+	it("moves a row down to the target slot, shifting the rest", () => {
+		expect(ids(reorderCategories(base, "a", "c"))).toEqual(["b", "c", "a", "d"]);
+	});
+
+	it("moves a row up to the target slot, shifting the rest", () => {
+		expect(ids(reorderCategories(base, "d", "b"))).toEqual(["a", "d", "b", "c"]);
+	});
+
+	it("moving onto the first slot puts the dragged item at the front", () => {
+		expect(ids(reorderCategories(base, "c", "a"))).toEqual(["c", "a", "b", "d"]);
+	});
+
+	it("returns an unchanged copy when drag and target are the same", () => {
+		const result = reorderCategories(base, "b", "b");
+		expect(ids(result)).toEqual(["a", "b", "c", "d"]);
+		expect(result).not.toBe(base);
+	});
+
+	it("returns an unchanged copy when an id is missing", () => {
+		expect(ids(reorderCategories(base, "a", "ghost"))).toEqual(["a", "b", "c", "d"]);
+		expect(ids(reorderCategories(base, "ghost", "a"))).toEqual(["a", "b", "c", "d"]);
+	});
+
+	it("does not mutate the input array", () => {
+		reorderCategories(base, "a", "d");
+		expect(ids(base)).toEqual(["a", "b", "c", "d"]);
 	});
 });
