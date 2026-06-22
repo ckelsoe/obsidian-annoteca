@@ -208,16 +208,12 @@ settings:
 /* Neutralize CM6's default .cm-tooltip chrome so our inner popovers control
    their own background, border, shadow, and padding. Without this, themes
    that style .cm-tooltip layer their chrome on top of ours and produce a
-   washed-out, double-bordered look. */
-/* The :has() selectors neutralize the frame based on the popup content itself,
-   so the default chrome never shows even on the first paint before the JS-added
-   wrapper class lands (that class is applied in a microtask, so a class-only
-   rule can flash a double-bordered box). The class selectors stay as a fallback
-   for engines without :has(). */
+   washed-out, double-bordered look. The marker class is added to the real
+   .cm-tooltip ancestor (via closest() in decorations.ts), so a plain class
+   selector is enough; the has-pseudo-class is avoided because the marketplace
+   flags it for selector-invalidation cost. */
 .cm-tooltip.annoteca-hover-tooltip,
-.cm-tooltip.annoteca-reply-composer-tooltip,
-.cm-tooltip:has(.annoteca-hover-preview),
-.cm-tooltip:has(.annoteca-reply-composer) {
+.cm-tooltip.annoteca-reply-composer-tooltip {
 	background: transparent;
 	border: none;
 	box-shadow: none;
@@ -226,8 +222,7 @@ settings:
 	color: var(--text-normal);
 }
 
-.cm-tooltip.annoteca-selection-popup-tooltip,
-.cm-tooltip:has(.annoteca-selection-popup) {
+.cm-tooltip.annoteca-selection-popup-tooltip {
 	background: transparent;
 	border: none;
 	box-shadow: none;
