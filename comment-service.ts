@@ -20,7 +20,7 @@ import { MarkdownView, Notice, TFile } from "obsidian";
 
 import type AnnotecaPlugin from "./main";
 import type { Addressed, Comment, Reply } from "./types";
-import { parseAll, serialize, todayISO } from "./parser";
+import { parseAll, serialize, nowISO } from "./parser";
 
 interface SpliceRange { from: number; to: number; insert: string; }
 
@@ -39,7 +39,7 @@ export class CommentService {
 		const author = this.resolvedAuthor();
 		const resolved: Comment = {
 			...comment,
-			resolution: { author, date: todayISO(), note: "" },
+			resolution: { author, date: nowISO(), note: "" },
 		};
 		await this.replaceMarker(path, comment, resolved);
 		new Notice("Resolved.");
@@ -103,7 +103,7 @@ export class CommentService {
 	): Promise<void> {
 		const addressed: Addressed = {
 			author: this.resolvedAuthor(),
-			date: todayISO(),
+			date: nowISO(),
 			note,
 			original,
 		};
@@ -124,7 +124,7 @@ export class CommentService {
 		const next: Comment = {
 			...comment,
 			addressed: undefined,
-			resolution: { author: this.resolvedAuthor(), date: todayISO(), note: "accepted" },
+			resolution: { author: this.resolvedAuthor(), date: nowISO(), note: "accepted" },
 		};
 		await this.replaceMarker(path, comment, next);
 		new Notice("Accepted.");

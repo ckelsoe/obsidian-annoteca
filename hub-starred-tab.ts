@@ -8,6 +8,7 @@ import type AnnotecaPlugin from "./main";
 import type { Comment } from "./types";
 import { getCategoryOrFallback } from "./categories";
 import { resolveSettingsCategories } from "./settings";
+import { formatStamp } from "./view-utils";
 
 export class StarredTabRenderer {
 	constructor(private readonly plugin: AnnotecaPlugin) {}
@@ -80,7 +81,7 @@ export class StarredTabRenderer {
 			if (c.date || c.author || c.resolution) {
 				const meta = card.createDiv({ cls: "annoteca-starred-meta" });
 				if (c.resolution) meta.createSpan({ cls: "annoteca-reviewer-state", text: "resolved" });
-				if (c.date) meta.createSpan({ text: c.date });
+				if (c.date) meta.createSpan({ text: formatStamp(c.date) });
 				if (c.author) meta.createSpan({ text: c.author });
 			}
 

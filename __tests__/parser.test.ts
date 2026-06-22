@@ -1,4 +1,4 @@
-import { parseAll, parseAt, serialize, generateId, todayISO, findMalformedMarkers, buildAnchorFromSelection, ANCHOR_MAX_CHARS } from "../parser";
+import { parseAll, parseAt, serialize, generateId, todayISO, nowISO, findMalformedMarkers, buildAnchorFromSelection, ANCHOR_MAX_CHARS } from "../parser";
 import type { Comment } from "../types";
 
 describe("parser: single-line markers", () => {
@@ -494,5 +494,98 @@ describe("parser: findMalformedMarkers", () => {
 		const text = `<!-- annoteca/TONE: x --> end`;
 		const flagged = findMalformedMarkers(text);
 		expect(flagged.length).toBeGreaterThanOrEqual(1);
+	});
+});
+
+describe("parser: full timestamps and reply ordering", () => {
+	it("parses a full timestamp on date, reply, resolved, and addressed lines", () => {
+		const text = [
+			"<!-- annoteca/tone: needs work",
+			"[id=stamp001]",
+			"[date=2026-06-22T14:30:12]",
+			"[author=charles]",
+			"[reply ai 2026-06-22T14:31:05]: how about this",
+			"[addressed ai 2026-06-22T14:32:00]: applied",
+			"[resolved charles 2026-06-22T14:33:48]: good",
+			"-->",
+		].join("\n");
+		const c = parseAll(text)[0];
+		expect(c).toBeDefined();
+		if (!c) return;
+		expect(c.date).toBe("2026-06-22T14:30:12");
+		expect(c.replies[0]?.date).toBe("2026-06-22T14:31:05");
+		expect(c.addressed?.date).toBe("2026-06-22T14:32:00");
+		expect(c.resolution?.date).toBe("2026-06-22T14:33:48");
+	});
+
+	it("still parses legacy date-only stamps", () => {
+		const text = [
+			"<!-- annoteca/tone: legacy",
+			"[date=2026-05-23]",
+			"[reply ai 2026-05-23]: ok",
+			"-->",
+		].join("\n");
+		const c = parseAll(text)[0];
+		expect(c?.date).toBe("2026-05-23");
+		expect(c?.replies[0]?.date).toBe("2026-05-23");
+	});
+
+	it("sorts replies by timestamp even when written out of order", () => {
+		const text = [
+			"<!-- annoteca/tone: ordering",
+			"[id=order001]",
+			"[reply ai 2026-06-22T14:33:48]: third",
+			"[reply charles 2026-06-22T14:30:00]: first",
+			"[reply ai 2026-06-22T14:31:05]: second",
+			"-->",
+		].join("\n");
+		const c = parseAll(text)[0];
+		expect(c?.replies.map(r => r.body)).toEqual(["first", "second", "third"]);
+	});
+
+	it("breaks ties on equal timestamps by file order (stable sort)", () => {
+		const text = [
+			"<!-- annoteca/tone: ties",
+			"[id=ties0001]",
+			"[reply a 2026-06-22T14:30:00]: one",
+			"[reply b 2026-06-22T14:30:00]: two",
+			"[reply c 2026-06-22T14:30:00]: three",
+			"-->",
+		].join("\n");
+		const c = parseAll(text)[0];
+		expect(c?.replies.map(r => r.author)).toEqual(["a", "b", "c"]);
+	});
+
+	it("round-trips a full-timestamp thread, re-sorting on the second parse", () => {
+		const text = [
+			"<!-- annoteca/tone: rt",
+			"[id=rtstamp01]",
+			"[reply ai 2026-06-22T09:00:00]: early",
+			"[reply charles 2026-06-22T17:00:00]: late",
+			"-->",
+		].join("\n");
+		const c = parseAll(text)[0];
+		if (!c) throw new Error("no comment");
+		const round = serialize({
+			id: c.id, category: c.category, body: c.body, date: c.date,
+			author: c.author, anchor: c.anchor, replies: c.replies,
+			addressed: c.addressed, resolution: c.resolution,
+		});
+		const c2 = parseAll(round)[0];
+		expect(c2?.replies.map(r => r.body)).toEqual(["early", "late"]);
+	});
+});
+
+describe("parser: nowISO", () => {
+	it("emits a full local timestamp YYYY-MM-DDTHH:MM:SS for a known instant", () => {
+		expect(nowISO(new Date(2026, 4, 25, 9, 7, 3))).toBe("2026-05-25T09:07:03");
+	});
+
+	it("zero-pads every component", () => {
+		expect(nowISO(new Date(2026, 0, 1, 0, 0, 0))).toBe("2026-01-01T00:00:00");
+	});
+
+	it("keeps todayISO date-only", () => {
+		expect(todayISO(new Date(2026, 4, 25, 9, 7, 3))).toBe("2026-05-25");
 	});
 });

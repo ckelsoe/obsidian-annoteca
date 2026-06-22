@@ -2,13 +2,13 @@
 
 export interface Reply {
 	author: string;
-	date: string; // ISO YYYY-MM-DD
+	date: string; // ISO date (YYYY-MM-DD) or full timestamp (YYYY-MM-DDTHH:MM:SS)
 	body: string;
 }
 
 export interface Resolution {
 	author: string;
-	date: string; // ISO YYYY-MM-DD
+	date: string; // ISO date (YYYY-MM-DD) or full timestamp (YYYY-MM-DDTHH:MM:SS)
 	note: string; // may be empty
 }
 
@@ -19,7 +19,7 @@ export interface Resolution {
 // `annoteca-original` fence (F-271) so reject can revert it.
 export interface Addressed {
 	author: string;
-	date: string; // ISO YYYY-MM-DD
+	date: string; // ISO date (YYYY-MM-DD) or full timestamp (YYYY-MM-DDTHH:MM:SS)
 	note: string; // may be empty
 	original?: string; // verbatim replaced text from the annoteca-original fence
 }
@@ -38,7 +38,7 @@ export interface Comment {
 	id: string | undefined;          // 8-char base36 when present
 	category: string;                 // matches /^[a-z](-?[a-z0-9])*$/
 	body: string;                     // freeform inline markdown
-	date: string | undefined;         // ISO YYYY-MM-DD
+	date: string | undefined;         // ISO date or full timestamp (YYYY-MM-DDTHH:MM:SS)
 	author: string | undefined;       // short author tag
 	anchor: AnchorText | undefined;   // commented text captured at creation; undefined for cursor-position comments
 	replies: Reply[];                 // chronological, oldest first

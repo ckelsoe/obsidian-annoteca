@@ -10,6 +10,17 @@ export function authorColorFor(tag: string, styles: AuthorStyle[]): string | und
 	return styles.find(s => s.tag === tag)?.color;
 }
 
+// Format an Annoteca timestamp for display in the panel and hover popups. A
+// full timestamp (YYYY-MM-DDTHH:MM:SS) renders as "YYYY-MM-DD HH:MM" — seconds
+// are dropped for scannability while still distinguishing fast replies. A
+// legacy date-only stamp (YYYY-MM-DD) renders unchanged. Input is trusted
+// parser output, so this only splits on the "T" rather than validating.
+export function formatStamp(iso: string): string {
+	const t = iso.indexOf("T");
+	if (t === -1) return iso;
+	return `${iso.slice(0, t)} ${iso.slice(t + 1, t + 6)}`;
+}
+
 // Build the author picker options for the reply composer (F-274). Combines, in
 // order and deduped: the configured global author tag, the configured
 // collaborator/author-style tags, and the authors already present in the thread

@@ -11,8 +11,8 @@ import type AnnotecaPlugin from "./main";
 import type { Comment, ScopeState, StatusFilter } from "./types";
 import { getCategoryOrFallback } from "./categories";
 import { resolveSettingsCategories } from "./settings";
-import { todayISO } from "./parser";
-import { authorColorFor, authorPickerOptions } from "./view-utils";
+import { nowISO } from "./parser";
+import { authorColorFor, authorPickerOptions, formatStamp } from "./view-utils";
 
 export class ThreadTabRenderer {
 	activePath: string | undefined;
@@ -310,7 +310,7 @@ export class ThreadTabRenderer {
 		}
 		catBadge.createSpan({ text: def.displayName });
 		if (c.resolution) compact.createSpan({ cls: "annoteca-reviewer-state", text: "resolved" });
-		if (c.date) compact.createSpan({ cls: "annoteca-reviewer-meta", text: c.date });
+		if (c.date) compact.createSpan({ cls: "annoteca-reviewer-meta", text: formatStamp(c.date) });
 		if (c.author) {
 			const authorEl = compact.createSpan({ cls: "annoteca-reviewer-meta", text: c.author });
 			this.applyAuthorColor(authorEl, c.author);
@@ -350,7 +350,7 @@ export class ThreadTabRenderer {
 
 		if (c.resolution) {
 			const res = expandedSection.createDiv({ cls: "annoteca-reviewer-resolution" });
-			res.createSpan({ text: `Resolved ${c.resolution.date} by ${c.resolution.author}` });
+			res.createSpan({ text: `Resolved ${formatStamp(c.resolution.date)} by ${c.resolution.author}` });
 			if (c.resolution.note) {
 				res.createDiv({ cls: "annoteca-reviewer-resolution-note", text: c.resolution.note });
 			}
@@ -363,7 +363,7 @@ export class ThreadTabRenderer {
 				const item = thread.createDiv({ cls: "annoteca-reply" });
 				const meta = item.createDiv({ cls: "annoteca-reply-meta" });
 				this.applyAuthorColor(meta.createSpan({ text: r.author }), r.author);
-				meta.createSpan({ text: r.date });
+				meta.createSpan({ text: formatStamp(r.date) });
 				item.createDiv({ cls: "annoteca-reply-body", text: r.body });
 			}
 		}
@@ -412,7 +412,7 @@ export class ThreadTabRenderer {
 				return;
 			}
 			const author = authorSelect.value.trim() || defaultAuthor;
-			void this.plugin.appendReply(c, { author, date: todayISO(), body }).then(() => {
+			void this.plugin.appendReply(c, { author, date: nowISO(), body }).then(() => {
 				textarea.value = "";
 				if (c.id) this.plugin.clearDraft(c.id);
 			});

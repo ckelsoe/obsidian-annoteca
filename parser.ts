@@ -16,18 +16,24 @@ const MARKER_RE = /<!--\s*annoteca\/([a-z][a-z0-9-]*)\s*:([\s\S]*?)-->/g;
 // wrapper). Everything else (mixed case, dots, underscores, unicode) is allowed.
 // Backward compatible: the old lowercase tags still match.
 const ID_LINE_RE = /^\s*\[id=([a-z0-9]{1,32})\]\s*$/;
-const DATE_LINE_RE = /^\s*\[date=(\d{4}-\d{2}-\d{2})\]\s*$/;
+// Shared timestamp sub-pattern for every date-bearing line. Accepts the legacy
+// date-only form (YYYY-MM-DD) and the full-timestamp form written since the
+// timestamped-threads change (YYYY-MM-DDTHH:MM:SS, seconds optional). Markers
+// from older versions still parse; one definition keeps the four line patterns
+// below from drifting apart.
+const STAMP_SRC = "\\d{4}-\\d{2}-\\d{2}(?:T\\d{2}:\\d{2}(?::\\d{2})?)?";
+const DATE_LINE_RE = new RegExp(`^\\s*\\[date=(${STAMP_SRC})\\]\\s*$`);
 const AUTHOR_LINE_RE = /^\s*\[author=([^\s\]<>]{1,32})\]\s*$/;
 // Anchor value is permissive: anything but `]` or a line break. Length is
 // capped to 80 visible chars + an optional single ellipsis character to
 // indicate truncation (per data-format.md). Longer values are still parsed —
 // forward-compat — but the cap is enforced at serialize time.
 const ANCHOR_LINE_RE = /^\s*\[anchor=([^\]\r\n]{1,200})\]\s*$/;
-const REPLY_LINE_RE = /^\s*\[reply\s+([^\s\]<>]{1,32})\s+(\d{4}-\d{2}-\d{2})\]:\s?([\s\S]*)$/;
+const REPLY_LINE_RE = new RegExp(`^\\s*\\[reply\\s+([^\\s\\]<>]{1,32})\\s+(${STAMP_SRC})\\]:\\s?([\\s\\S]*)$`);
 // Addressed trailing line (F-270). Same shape as reply/resolved. Positioned
 // after [reply ...] lines and before any [resolved ...] line; at most one.
-const ADDRESSED_LINE_RE = /^\s*\[addressed\s+([^\s\]<>]{1,32})\s+(\d{4}-\d{2}-\d{2})\]:\s?([\s\S]*)$/;
-const RESOLVED_LINE_RE = /^\s*\[resolved\s+([^\s\]<>]{1,32})\s+(\d{4}-\d{2}-\d{2})\]:\s?([\s\S]*)$/;
+const ADDRESSED_LINE_RE = new RegExp(`^\\s*\\[addressed\\s+([^\\s\\]<>]{1,32})\\s+(${STAMP_SRC})\\]:\\s?([\\s\\S]*)$`);
+const RESOLVED_LINE_RE = new RegExp(`^\\s*\\[resolved\\s+([^\\s\\]<>]{1,32})\\s+(${STAMP_SRC})\\]:\\s?([\\s\\S]*)$`);
 
 // The lossless-original fence (F-271): a fenced block tagged annoteca-original
 // inside the [addressed ...] note, holding the verbatim pre-edit text. Matched
@@ -202,6 +208,13 @@ function parseInnerContent(inner: string): ParsedTail {
 	const body = bodyRaw.trim();
 
 	replies.reverse();
+	// Stable-sort by timestamp so a thread reads oldest-first even if its
+	// marker was rewritten with replies out of order (e.g. an assistant
+	// regenerating the block). Array.sort is stable, so replies that share a
+	// stamp keep their file order as the tiebreak. ISO stamps compare correctly
+	// with a plain lexical compare, and a legacy date-only stamp sorts at the
+	// start of its day relative to same-day timestamped replies.
+	replies.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 
 	return { body, id, date, author, anchor, replies, addressed, resolution };
 }
@@ -346,6 +359,17 @@ export function todayISO(now: Date = new Date()): string {
 	const m = String(now.getMonth() + 1).padStart(2, "0");
 	const d = String(now.getDate()).padStart(2, "0");
 	return `${y}-${m}-${d}`;
+}
+
+// Full local timestamp YYYY-MM-DDTHH:MM:SS, no timezone (matching the format's
+// existing no-timezone convention). Used for new comments, replies, resolutions
+// and addressed stamps so fast back-and-forth threads stay ordered to the
+// second. todayISO remains for the rare date-granularity case.
+export function nowISO(now: Date = new Date()): string {
+	const pad = (n: number): string => String(n).padStart(2, "0");
+	const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+	const time = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+	return `${date}T${time}`;
 }
 
 export interface MalformedMarker {

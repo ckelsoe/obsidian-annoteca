@@ -29,6 +29,7 @@ import {
 	resolveAnchorRangeInWindows,
 	ANCHOR_WINDOW,
 	shouldSubmitOnKeydown,
+	formatStamp,
 } from "./view-utils";
 
 export interface DecorationContext {
@@ -295,7 +296,7 @@ function renderReplyRow(
 	const head = row.createDiv({ cls: "annoteca-hover-reply-head" });
 	const authorEl = head.createSpan({ cls: "annoteca-hover-reply-author", text: reply.author });
 	applyAuthorColor(authorEl, reply.author, ctx);
-	head.createSpan({ cls: "annoteca-hover-reply-date", text: reply.date });
+	head.createSpan({ cls: "annoteca-hover-reply-date", text: formatStamp(reply.date) });
 	row.createDiv({ cls: "annoteca-hover-reply-body", text: reply.body });
 }
 
@@ -356,7 +357,7 @@ function hoverTooltipExtension(ctx: DecorationContext, field: StateField<Comment
 					header.createSpan({ cls: "annoteca-hover-state annoteca-hover-state-addressed", text: "addressed" });
 				}
 				if (m.date) {
-					header.createSpan({ cls: "annoteca-hover-date", text: m.date });
+					header.createSpan({ cls: "annoteca-hover-date", text: formatStamp(m.date) });
 				}
 				if (m.author) {
 					const authorEl = header.createSpan({ cls: "annoteca-hover-author", text: m.author });
@@ -418,7 +419,7 @@ function hoverTooltipExtension(ctx: DecorationContext, field: StateField<Comment
 					const block = dom.createDiv({ cls: "annoteca-hover-addressed" });
 					const head = block.createDiv({ cls: "annoteca-hover-resolution-head" });
 					head.createSpan({ cls: "annoteca-hover-reply-author", text: m.addressed.author });
-					head.createSpan({ cls: "annoteca-hover-reply-date", text: m.addressed.date });
+					head.createSpan({ cls: "annoteca-hover-reply-date", text: formatStamp(m.addressed.date) });
 					if (m.addressed.note) {
 						block.createDiv({ cls: "annoteca-hover-reply-body", text: m.addressed.note });
 					}
@@ -435,7 +436,7 @@ function hoverTooltipExtension(ctx: DecorationContext, field: StateField<Comment
 					const block = dom.createDiv({ cls: "annoteca-hover-resolution" });
 					const head = block.createDiv({ cls: "annoteca-hover-resolution-head" });
 					head.createSpan({ cls: "annoteca-hover-reply-author", text: m.resolution.author });
-					head.createSpan({ cls: "annoteca-hover-reply-date", text: m.resolution.date });
+					head.createSpan({ cls: "annoteca-hover-reply-date", text: formatStamp(m.resolution.date) });
 					block.createDiv({ cls: "annoteca-hover-reply-body", text: m.resolution.note });
 				}
 

@@ -6,7 +6,7 @@ import { Notice, Setting, type Editor, type EditorPosition } from "obsidian";
 
 import type AnnotecaPlugin from "./main";
 import type { AnchorText, Comment } from "./types";
-import { buildAnchorFromSelection, generateId, serialize, todayISO } from "./parser";
+import { buildAnchorFromSelection, generateId, serialize, nowISO } from "./parser";
 import { resolveSettingsCategories } from "./settings";
 import { shouldSubmitOnKeydown } from "./view-utils";
 import { getTemplate, resolvePlaceholder, type ModalTemplate } from "./templates";
@@ -189,7 +189,7 @@ export class ComposerForm {
 
 	private buildCommentForCreate(category: string, body: string, anchor: AnchorText | undefined): Comment {
 		const id = this.uniqueId();
-		const date = todayISO();
+		const date = nowISO();
 		const author = this.plugin.settings.enableAuthorTag && this.plugin.settings.authorTag !== ""
 			? this.plugin.settings.authorTag
 			: undefined;
