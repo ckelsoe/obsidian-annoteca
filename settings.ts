@@ -828,6 +828,18 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 
 	private renderCategoryList(container: HTMLElement): void {
 		const list = container.createDiv({ cls: "annoteca-category-list" });
+		this.refreshCategoryList(list);
+	}
+
+	// Repaint the category rows into their existing list element. Used after a
+	// reorder or remove. We refresh the list directly instead of calling
+	// rerender(): on the 1.13 declarative path, update() reconciles bound
+	// controls (the default-category dropdown) from fresh definitions but does
+	// NOT re-invoke a custom block's render callback, so the list would not
+	// repaint until the settings pane was reopened. `list` stays attached
+	// because nothing here rebuilds the host around it.
+	private refreshCategoryList(list: HTMLElement): void {
+		list.empty();
 		for (const cat of this.plugin.settings.categories) {
 			this.renderCategoryRow(list, cat);
 		}
@@ -941,6 +953,9 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 				this.plugin.settings.categories, dragId, cat.id,
 			);
 			void this.plugin.saveSettings();
+			// Repaint the list directly (the custom block does not refresh via
+			// update()); rerender() then reconciles the default-category dropdown.
+			this.refreshCategoryList(list);
 			this.rerender();
 		});
 
@@ -1040,6 +1055,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 					this.plugin.settings.categories.filter(c => c.id !== cat.id);
 				this.expandedCategoryIds.delete(cat.id);
 				void this.plugin.saveSettings();
+				this.refreshCategoryList(list);
 				this.rerender();
 			});
 		}
