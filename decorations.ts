@@ -21,10 +21,10 @@ import {
 
 import { setIcon } from "obsidian";
 
-import { renderReplyRow as renderSharedReplyRow } from "./ui-helpers";
+import { renderReplyRow as renderSharedReplyRow, renderCategoryBadge, renderStarButton } from "./ui-helpers";
 
 import type { Comment } from "./types";
-import type { AnnotecaSettings } from "./types";
+import type { AnnotecaSettings, CategoryDefinition } from "./types";
 import { parseAll } from "./parser";
 import {
 	planActiveCommentDecorations,
@@ -39,6 +39,7 @@ export interface DecorationContext {
 	onMarkerClick(marker: Comment): void;
 	openInReviewer(marker: Comment): void;
 	addCommentForSelection(): void;
+	categoryFor(id: string): CategoryDefinition;
 	toggleResolution(marker: Comment): void;
 	resolveAndRemove(marker: Comment): void;
 	acceptAddressed(marker: Comment): void;
@@ -367,9 +368,8 @@ function hoverTooltipExtension(ctx: DecorationContext, field: StateField<Comment
 				});
 
 				const header = dom.createDiv({ cls: "annoteca-hover-header" });
-				header.createSpan({
-					cls: `annoteca-hover-category annoteca-cat-${m.category}`,
-					text: m.category,
+				renderCategoryBadge(header, ctx.categoryFor(m.category), {
+					badge: "annoteca-hover-category",
 				});
 				if (m.resolution) {
 					header.createSpan({ cls: "annoteca-hover-state", text: "resolved" });
@@ -385,29 +385,14 @@ function hoverTooltipExtension(ctx: DecorationContext, field: StateField<Comment
 				}
 
 				// Star toggle pinned to the far right via margin-left: auto in CSS.
-				// Disabled visually + interactively for comments without an id.
-				const starBtn = header.createEl("button", {
+				// reflectInPlace: the hover popup is ephemeral, so it flips the
+				// star itself rather than waiting for a panel re-render.
+				renderStarButton(header, {
 					cls: "annoteca-hover-star",
-					text: "★",
-				});
-				const hasId = Boolean(m.id);
-				const starred = hasId && ctx.isStarred(m);
-				if (starred) starBtn.addClass("is-starred");
-				if (!hasId) starBtn.addClass("is-disabled");
-				starBtn.setAttribute(
-					"aria-label",
-					hasId ? (starred ? "Unstar comment" : "Star comment") : "Comment has no ID",
-				);
-				starBtn.addEventListener("click", e => {
-					e.preventDefault();
-					e.stopPropagation();
-					if (!hasId) return;
-					ctx.toggleStarred(m);
-					starBtn.toggleClass("is-starred", !starred);
-					starBtn.setAttribute(
-						"aria-label",
-						!starred ? "Unstar comment" : "Star comment",
-					);
+					hasId: Boolean(m.id),
+					starred: Boolean(m.id) && ctx.isStarred(m),
+					onToggle: () => ctx.toggleStarred(m),
+					reflectInPlace: true,
 				});
 
 				dom.createDiv({ cls: "annoteca-hover-body", text: m.body });

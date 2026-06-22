@@ -6,7 +6,71 @@
 
 import { App, Modal, setIcon, getIconIds } from "obsidian";
 
+import type { CategoryDefinition } from "./types";
 import { formatStamp } from "./view-utils";
+
+// Class names for a category badge on a given surface. `icon` is optional: the
+// panels show the category icon, the hover popup omits it. Passing each
+// surface's own classes keeps the existing CSS while sharing the structure.
+export interface CategoryBadgeClasses {
+	badge: string;
+	icon?: string;
+}
+
+// Render a category badge: an optional icon plus the category display name,
+// inside a span carrying the surface's badge class and the shared
+// `annoteca-cat-<id>` color hook. Previously inlined in the Thread tab, Starred
+// tab, and hover popup; the hover copy had drifted to showing the raw category
+// id instead of the display name, so this also fixes that inconsistency.
+export function renderCategoryBadge(
+	parent: HTMLElement,
+	def: CategoryDefinition,
+	classes: CategoryBadgeClasses,
+): HTMLElement {
+	const badge = parent.createSpan({ cls: `${classes.badge} annoteca-cat-${def.id}` });
+	if (def.icon && classes.icon) {
+		const iconEl = badge.createSpan({ cls: classes.icon });
+		setIcon(iconEl, def.icon);
+	}
+	badge.createSpan({ text: def.displayName });
+	return badge;
+}
+
+export interface StarButtonOpts {
+	cls: string;            // surface base class, e.g. annoteca-row-star / annoteca-hover-star
+	hasId: boolean;         // a comment with no id cannot be starred (no stable key)
+	starred: boolean;
+	onToggle: () => void;
+	// When true, flip the star's class and label in place on click rather than
+	// waiting for a re-render. The hover popup is ephemeral (it dismisses on
+	// mouse-out), so it must reflect the new state immediately; the panels
+	// re-render from the starred-changed event instead.
+	reflectInPlace?: boolean;
+}
+
+// Render a star toggle. Centralizes the hasId/starred/disabled state and the
+// click guard that was repeated in the hover popup, Thread tab, and Starred tab.
+export function renderStarButton(parent: HTMLElement, opts: StarButtonOpts): HTMLButtonElement {
+	const btn = parent.createEl("button", { cls: opts.cls, text: "★" });
+	let starred = opts.starred;
+	const applyState = (): void => {
+		btn.toggleClass("is-starred", starred);
+		btn.toggleClass("is-disabled", !opts.hasId);
+		btn.setAttribute("aria-label", opts.hasId ? (starred ? "Unstar" : "Star") : "Comment has no ID");
+	};
+	applyState();
+	btn.addEventListener("click", e => {
+		e.preventDefault();
+		e.stopPropagation();
+		if (!opts.hasId) return;
+		opts.onToggle();
+		if (opts.reflectInPlace) {
+			starred = !starred;
+			applyState();
+		}
+	});
+	return btn;
+}
 
 // Class names for one reply row. Each surface (hover popup, Thread tab) passes
 // its own so the shared renderer below reproduces that surface's existing DOM

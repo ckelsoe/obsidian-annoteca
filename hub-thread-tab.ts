@@ -12,8 +12,8 @@ import type { Comment, ScopeState, StatusFilter } from "./types";
 import { getCategoryOrFallback } from "./categories";
 import { resolveSettingsCategories } from "./settings";
 import { nowISO } from "./parser";
-import { authorColorFor, authorPickerOptions, formatStamp } from "./view-utils";
-import { renderReplyRow } from "./ui-helpers";
+import { authorColorFor, authorPickerOptions, formatStamp, truncate } from "./view-utils";
+import { renderReplyRow, renderCategoryBadge, renderStarButton } from "./ui-helpers";
 
 // Thread-tab class names for the shared reply-row renderer (ui-helpers). Author
 // and date spans stay unclassed here, matching the prior inline markup; tinting
@@ -311,14 +311,10 @@ export class ThreadTabRenderer {
 		const def = getCategoryOrFallback(c.category, enabled);
 
 		const compact = card.createDiv({ cls: "annoteca-reviewer-compact" });
-		const catBadge = compact.createSpan({
-			cls: `annoteca-reviewer-category annoteca-cat-${def.id}`,
+		renderCategoryBadge(compact, def, {
+			badge: "annoteca-reviewer-category",
+			icon: "annoteca-reviewer-category-icon",
 		});
-		if (def.icon) {
-			const iconEl = catBadge.createSpan({ cls: "annoteca-reviewer-category-icon" });
-			setIcon(iconEl, def.icon);
-		}
-		catBadge.createSpan({ text: def.displayName });
 		if (c.resolution) compact.createSpan({ cls: "annoteca-reviewer-state", text: "resolved" });
 		if (c.date) compact.createSpan({ cls: "annoteca-reviewer-meta", text: formatStamp(c.date) });
 		if (c.author) {
@@ -326,24 +322,17 @@ export class ThreadTabRenderer {
 			this.applyAuthorColor(authorEl, c.author);
 		}
 
-		// Star toggle at the right of the compact row.
-		const starBtn = compact.createEl("button", {
-			cls: "annoteca-row-star",
-			text: "★",
-		});
+		// Star toggle at the right of the compact row. The panel re-renders on the
+		// starred-changed event, so no in-place reflect is needed here.
 		const hasId = Boolean(c.id);
-		const starred = hasId && this.plugin.isStarred(c);
-		if (starred) starBtn.addClass("is-starred");
-		if (!hasId) starBtn.addClass("is-disabled");
-		starBtn.setAttribute("aria-label", starred ? "Unstar" : "Star");
-		starBtn.addEventListener("click", e => {
-			e.stopPropagation();
-			if (!hasId) return;
-			void this.plugin.toggleStarred(c);
+		renderStarButton(compact, {
+			cls: "annoteca-row-star",
+			hasId,
+			starred: hasId && this.plugin.isStarred(c),
+			onToggle: () => { void this.plugin.toggleStarred(c); },
 		});
 
-		const excerpt = c.body.length > 100 ? c.body.slice(0, 100) + "…" : c.body;
-		compact.createDiv({ cls: "annoteca-reviewer-excerpt", text: excerpt });
+		compact.createDiv({ cls: "annoteca-reviewer-excerpt", text: truncate(c.body, 100) });
 		if (c.replies.length > 0) {
 			compact.createSpan({
 				cls: "annoteca-reviewer-replies-badge",

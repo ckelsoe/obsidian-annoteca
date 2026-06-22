@@ -14,6 +14,7 @@ import {
 import type { AnnotecaSettings, Comment, Reply, ScopeShape, ScopeState, StatusFilter } from "./types";
 import { CommentIndex } from "./index";
 import { DEFAULT_SETTINGS, AnnotecaSettingTab, resolveSettingsCategories } from "./settings";
+import { getCategoryOrFallback } from "./categories";
 import {
 	buildSkillMarkdown,
 	skillTargetPaths,
@@ -70,6 +71,7 @@ export default class AnnotecaPlugin extends Plugin {
 				const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 				if (view) this.openModalForSelection(view.editor);
 			},
+			categoryFor: (id) => getCategoryOrFallback(id, resolveSettingsCategories(this.settings)),
 			toggleResolution: (m) => { void this.toggleResolutionFromPopup(m); },
 			resolveAndRemove: (m) => { void this.resolveAndRemoveFromPopup(m); },
 			acceptAddressed: (m) => { void this.acceptAddressedFromPopup(m); },

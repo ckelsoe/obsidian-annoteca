@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Comments and replies now record the time of day, not just the date. New comments, replies, resolutions, and addressed marks are stamped `YYYY-MM-DDTHH:MM:SS`, and the panel and hover popups show the time alongside the date. Threads stable-sort by timestamp on read, so a fast back-and-forth reads in order even if its marker was rewritten out of sequence; replies sharing a timestamp keep their order. Existing date-only comments still load and display exactly as before.
 
+### Fixed
+- The marker hover preview now shows the category's display name (for example "Source needed") instead of its internal id ("source-needed"), matching the side panel.
+
 ## [1.8.0] - 2026-06-21
 
 ### Added

@@ -2,13 +2,12 @@
 // comment whose ID is in settings.starredComments. Most-recently-starred
 // first. Click a card to navigate to the comment.
 
-import { setIcon } from "obsidian";
-
 import type AnnotecaPlugin from "./main";
 import type { Comment } from "./types";
 import { getCategoryOrFallback } from "./categories";
 import { resolveSettingsCategories } from "./settings";
-import { formatStamp } from "./view-utils";
+import { formatStamp, truncate } from "./view-utils";
+import { renderCategoryBadge, renderStarButton } from "./ui-helpers";
 
 export class StarredTabRenderer {
 	constructor(private readonly plugin: AnnotecaPlugin) {}
@@ -53,30 +52,25 @@ export class StarredTabRenderer {
 			const card = list.createDiv({ cls: "annoteca-starred-card" });
 
 			const head = card.createDiv({ cls: "annoteca-starred-head" });
-			const catBadge = head.createSpan({
-				cls: `annoteca-reviewer-category annoteca-cat-${def.id}`,
+			renderCategoryBadge(head, def, {
+				badge: "annoteca-reviewer-category",
+				icon: "annoteca-reviewer-category-icon",
 			});
-			if (def.icon) {
-				const iconEl = catBadge.createSpan({ cls: "annoteca-reviewer-category-icon" });
-				setIcon(iconEl, def.icon);
-			}
-			catBadge.createSpan({ text: def.displayName });
 
-			const starBtn = head.createEl("button", {
-				cls: "annoteca-row-star is-starred",
-				text: "★",
-			});
-			starBtn.setAttribute("aria-label", "Unstar");
-			starBtn.addEventListener("click", e => {
-				e.stopPropagation();
-				void this.plugin.toggleStarred(c);
+			// Every card here is starred (it is the starred list), so hasId/starred
+			// are always true; clicking unstars and the starred-changed event
+			// re-renders the list.
+			renderStarButton(head, {
+				cls: "annoteca-row-star",
+				hasId: true,
+				starred: true,
+				onToggle: () => { void this.plugin.toggleStarred(c); },
 			});
 
 			const fileLine = card.createDiv({ cls: "annoteca-starred-file" });
 			fileLine.createSpan({ text: entry.path });
 
-			const body = c.body.length > 160 ? c.body.slice(0, 160) + "…" : c.body;
-			card.createDiv({ cls: "annoteca-starred-body", text: body });
+			card.createDiv({ cls: "annoteca-starred-body", text: truncate(c.body, 160) });
 
 			if (c.date || c.author || c.resolution) {
 				const meta = card.createDiv({ cls: "annoteca-starred-meta" });

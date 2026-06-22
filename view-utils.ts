@@ -20,6 +20,14 @@ export function formatStamp(iso: string): string {
 	return iso.replace("T", " ");
 }
 
+// Truncate text to `max` characters, appending a single ellipsis when cut. The
+// limit is contextual (a compact list row shows less than a card), so callers
+// pass their own; this just removes the three-copy `length > n ? slice : text`
+// idiom that drifted to different limits across the panels.
+export function truncate(text: string, max: number): string {
+	return text.length > max ? text.slice(0, max) + "…" : text;
+}
+
 // Build the author picker options for the reply composer (F-274). Combines, in
 // order and deduped: the configured global author tag, the configured
 // collaborator/author-style tags, and the authors already present in the thread
