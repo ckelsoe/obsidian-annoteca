@@ -361,10 +361,11 @@ function hoverTooltipExtension(ctx: DecorationContext, field: StateField<Comment
 			create: () => {
 				const dom = view.dom.ownerDocument.createElement("div");
 				dom.addClass("annoteca-hover-preview");
-				// Tag the outer .cm-tooltip wrapper so styles.css can scope to it.
+				// Tag the outer .cm-tooltip ancestor (closest, not parentElement,
+				// which can miss it) so styles.css strips the default frame.
 				queueMicrotask(() => {
-					const wrapper = dom.parentElement;
-					if (wrapper) wrapper.addClass("annoteca-hover-tooltip");
+					const tip = dom.closest(".cm-tooltip");
+					if (tip instanceof HTMLElement) tip.addClass("annoteca-hover-tooltip");
 				});
 
 				const header = dom.createDiv({ cls: "annoteca-hover-header" });
@@ -583,8 +584,8 @@ function buildReplyComposerDom(view: EditorView, ctx: DecorationContext, m: Comm
 	const dom = view.dom.ownerDocument.createElement("div");
 	dom.addClass("annoteca-reply-composer");
 	queueMicrotask(() => {
-		const wrapper = dom.parentElement;
-		if (wrapper) wrapper.addClass("annoteca-reply-composer-tooltip");
+		const tip = dom.closest(".cm-tooltip");
+		if (tip instanceof HTMLElement) tip.addClass("annoteca-reply-composer-tooltip");
 	});
 
 	const head = dom.createDiv({ cls: "annoteca-reply-composer-head" });
@@ -820,12 +821,18 @@ function buildSelectionPopupDom(ctx: DecorationContext): { dom: HTMLElement } {
 	const dom = activeDocument.createElement("div");
 	dom.addClass("annoteca-selection-popup");
 	queueMicrotask(() => {
-		const wrapper = dom.parentElement;
-		if (wrapper) wrapper.addClass("annoteca-selection-popup-tooltip");
+		// The .cm-tooltip frame is an ancestor, not necessarily our direct
+		// parent, so closest() targets it reliably; parentElement missed it and
+		// left the default white tooltip box showing.
+		const tip = dom.closest(".cm-tooltip");
+		if (tip instanceof HTMLElement) tip.addClass("annoteca-selection-popup-tooltip");
 	});
 
 	const btn = dom.createEl("button", {
-		cls: "annoteca-selection-popup-button",
+		// mod-cta is Obsidian's own accent-button class (same as the Send
+		// button); using it gets the accent fill natively instead of fighting
+		// the tooltip button cascade for background-color.
+		cls: "annoteca-selection-popup-button mod-cta",
 		attr: { type: "button", "aria-label": "Add comment for selection" },
 	});
 	const icon = btn.createSpan({ cls: "annoteca-selection-popup-icon" });

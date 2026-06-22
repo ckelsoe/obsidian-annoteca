@@ -216,8 +216,8 @@ settings:
    for engines without :has(). */
 .cm-tooltip.annoteca-hover-tooltip,
 .cm-tooltip.annoteca-reply-composer-tooltip,
-.cm-tooltip:has(> .annoteca-hover-preview),
-.cm-tooltip:has(> .annoteca-reply-composer) {
+.cm-tooltip:has(.annoteca-hover-preview),
+.cm-tooltip:has(.annoteca-reply-composer) {
 	background: transparent;
 	border: none;
 	box-shadow: none;
@@ -227,7 +227,7 @@ settings:
 }
 
 .cm-tooltip.annoteca-selection-popup-tooltip,
-.cm-tooltip:has(> .annoteca-selection-popup) {
+.cm-tooltip:has(.annoteca-selection-popup) {
 	background: transparent;
 	border: none;
 	box-shadow: none;
@@ -235,7 +235,10 @@ settings:
 	max-width: none;
 }
 
-.annoteca-selection-popup-button {
+/* Scoped under .cm-tooltip so this beats Obsidian's own .cm-tooltip button
+   styling on specificity; a bare .annoteca-selection-popup-button class loses
+   to it and the button falls back to the default bordered look. */
+.cm-tooltip .annoteca-selection-popup-button {
 	display: inline-flex;
 	align-items: center;
 	gap: 5px;
@@ -252,7 +255,7 @@ settings:
 	transition: background-color 0.1s ease, transform 0.1s ease;
 }
 
-.annoteca-selection-popup-button:hover {
+.cm-tooltip .annoteca-selection-popup-button:hover {
 	background-color: var(--interactive-accent-hover);
 	transform: translateY(-1px);
 }
