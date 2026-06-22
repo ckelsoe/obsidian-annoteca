@@ -29,6 +29,9 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 	indicatorStyle: "both",
 	defaultVisibility: "show",
 
+	hoverPreview: true,
+	hoverDelay: "default",
+
 	anchorStyle: "wavy",
 	anchorThickness: "medium",
 	resolvedBrightness: "normal",
@@ -151,6 +154,20 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 							type: "dropdown",
 							key: "indicatorSize",
 							options: { small: "Small", medium: "Medium", large: "Large" },
+						},
+					},
+					{
+						name: "Marker hover preview",
+						desc: "Show a preview of the comment and its thread when you hover a marker or its underline in the editor. Turn off to rely on clicking the marker to open the side panel.",
+						control: { type: "toggle", key: "hoverPreview" },
+					},
+					{
+						name: "Hover preview delay",
+						desc: "How long to hover before the preview appears. Takes effect after reloading the plugin.",
+						control: {
+							type: "dropdown",
+							key: "hoverDelay",
+							options: { instant: "Instant", short: "Short", default: "Default", relaxed: "Relaxed" },
 						},
 					},
 					{
@@ -400,6 +417,12 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		this.addDropdownRow(containerEl, "Indicator size",
 			"Visual size of the marker icon in the editor.",
 			"indicatorSize", { small: "Small", medium: "Medium", large: "Large" });
+		this.addToggleRow(containerEl, "Marker hover preview",
+			"Show a preview of the comment and its thread when you hover a marker or its underline in the editor. Turn off to rely on clicking the marker to open the side panel.",
+			"hoverPreview");
+		this.addDropdownRow(containerEl, "Hover preview delay",
+			"How long to hover before the preview appears. Takes effect after reloading the plugin.",
+			"hoverDelay", { instant: "Instant", short: "Short", default: "Default", relaxed: "Relaxed" });
 		this.addDropdownRow(containerEl, "Anchor underline style",
 			"Visual character of the underline drawn over commented text. Applies to every category.",
 			"anchorStyle", { wavy: "Wavy", solid: "Solid", dotted: "Dotted", dashed: "Dashed" });

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Reorder categories by dragging. Each category row in settings now has a drag handle (the grip on the left); drag a row onto another to move it to that position. The category order is what the comment composer's dropdown and the sidebar grouping follow, so this lets you put your most-used categories first. Drag is a desktop affordance (pointer-only).
 - Selection comment button (off by default, under Composer). When on, selecting text in the editor shows a floating Comment button next to the selection; click it to open the composer for that range, without the right-click menu. The existing "Add comment here" and "Add comment for selection" commands can also be bound to a hotkey for a keyboard path.
+- Marker hover preview controls (under Editor indicators). A "Marker hover preview" toggle turns the on-hover comment preview off if you prefer to open comments by clicking, and a "Hover preview delay" dropdown (instant / short / default / relaxed) tunes the dwell before it appears.
 
 ### Changed
 - Comments and replies now record the time of day, not just the date. New comments, replies, resolutions, and addressed marks are stamped `YYYY-MM-DDTHH:MM:SS`, and the panel and hover popups show the time alongside the date. Threads stable-sort by timestamp on read, so a fast back-and-forth reads in order even if its marker was rewritten out of sequence; replies sharing a timestamp keep their order. Existing date-only comments still load and display exactly as before.

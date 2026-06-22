@@ -300,10 +300,21 @@ function renderReplyRow(
 	row.createDiv({ cls: "annoteca-hover-reply-body", text: reply.body });
 }
 
+// Hover dwell presets (ms) keyed by the hoverDelay setting, mirroring the
+// indicatorSize size map. Read once when the extension is built; changing the
+// setting takes effect on the next plugin reload.
+const HOVER_DELAY_MS: Record<AnnotecaSettings["hoverDelay"], number> = {
+	instant: 0,
+	short: 150,
+	default: 300,
+	relaxed: 600,
+};
+
 function hoverTooltipExtension(ctx: DecorationContext, field: StateField<Comment[]>): Extension {
 	return hoverTooltip((view, pos): Tooltip | null => {
 		if (hideAllFlag.value) return null;
 		const settings = ctx.getSettings();
+		if (!settings.hoverPreview) return null;
 		if (settings.indicatorStyle === "none") return null;
 		const markers = view.state.field(field);
 
@@ -534,7 +545,7 @@ function hoverTooltipExtension(ctx: DecorationContext, field: StateField<Comment
 				return { dom };
 			},
 		};
-	});
+	}, { hoverTime: HOVER_DELAY_MS[ctx.getSettings().hoverDelay] });
 }
 
 // --------------------------------------------------------------------------

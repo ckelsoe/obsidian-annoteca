@@ -95,6 +95,13 @@ export interface AnnotecaSettings {
 	indicatorStyle: "icon" | "underline" | "both" | "none";
 	defaultVisibility: "show" | "hide" | "last";
 
+	// Marker hover preview: show the comment/thread preview popup when hovering a
+	// marker or its anchor underline in the editor. On by default. The toggle is
+	// live; hoverDelay (the dwell before the popup appears) is read when the
+	// editor extension is built, so a change to it takes effect on next reload.
+	hoverPreview: boolean;
+	hoverDelay: "instant" | "short" | "default" | "relaxed";
+
 	// Visual character of the anchor underline. Applies to every category;
 	// per-category urgency comes from the tier on each CategoryDefinition.
 	anchorStyle: "solid" | "wavy" | "dotted" | "dashed";
