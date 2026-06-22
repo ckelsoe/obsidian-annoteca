@@ -21,6 +21,8 @@ import {
 
 import { setIcon } from "obsidian";
 
+import { renderReplyRow as renderSharedReplyRow } from "./ui-helpers";
+
 import type { Comment } from "./types";
 import type { AnnotecaSettings } from "./types";
 import { parseAll } from "./parser";
@@ -287,17 +289,24 @@ function applyAuthorColor(el: HTMLElement, tag: string, ctx: DecorationContext):
 	el.style.setProperty("--annoteca-author-color", color);
 }
 
+// Hover-popup class names for the shared reply-row renderer (ui-helpers). The
+// Thread tab passes its own; both go through one implementation.
+const HOVER_REPLY_CLASSES = {
+	row: "annoteca-hover-reply",
+	meta: "annoteca-hover-reply-head",
+	author: "annoteca-hover-reply-author",
+	date: "annoteca-hover-reply-date",
+	body: "annoteca-hover-reply-body",
+};
+
 function renderReplyRow(
 	reply: { author: string; date: string; body: string },
 	parent: HTMLElement,
 	ctx: DecorationContext,
 ): void {
-	const row = parent.createDiv({ cls: "annoteca-hover-reply" });
-	const head = row.createDiv({ cls: "annoteca-hover-reply-head" });
-	const authorEl = head.createSpan({ cls: "annoteca-hover-reply-author", text: reply.author });
-	applyAuthorColor(authorEl, reply.author, ctx);
-	head.createSpan({ cls: "annoteca-hover-reply-date", text: formatStamp(reply.date) });
-	row.createDiv({ cls: "annoteca-hover-reply-body", text: reply.body });
+	renderSharedReplyRow(parent, reply, HOVER_REPLY_CLASSES, (el, tag) =>
+		applyAuthorColor(el, tag, ctx),
+	);
 }
 
 // Hover dwell presets (ms) keyed by the hoverDelay setting, mirroring the

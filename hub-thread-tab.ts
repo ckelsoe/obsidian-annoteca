@@ -13,6 +13,16 @@ import { getCategoryOrFallback } from "./categories";
 import { resolveSettingsCategories } from "./settings";
 import { nowISO } from "./parser";
 import { authorColorFor, authorPickerOptions, formatStamp } from "./view-utils";
+import { renderReplyRow } from "./ui-helpers";
+
+// Thread-tab class names for the shared reply-row renderer (ui-helpers). Author
+// and date spans stay unclassed here, matching the prior inline markup; tinting
+// comes from the author-color callback.
+const THREAD_REPLY_CLASSES = {
+	row: "annoteca-reply",
+	meta: "annoteca-reply-meta",
+	body: "annoteca-reply-body",
+};
 
 export class ThreadTabRenderer {
 	activePath: string | undefined;
@@ -360,11 +370,9 @@ export class ThreadTabRenderer {
 			const thread = expandedSection.createDiv({ cls: "annoteca-reviewer-thread" });
 			thread.createEl("h5", { text: "Replies" });
 			for (const r of c.replies) {
-				const item = thread.createDiv({ cls: "annoteca-reply" });
-				const meta = item.createDiv({ cls: "annoteca-reply-meta" });
-				this.applyAuthorColor(meta.createSpan({ text: r.author }), r.author);
-				meta.createSpan({ text: formatStamp(r.date) });
-				item.createDiv({ cls: "annoteca-reply-body", text: r.body });
+				renderReplyRow(thread, r, THREAD_REPLY_CLASSES, (el, tag) =>
+					this.applyAuthorColor(el, tag),
+				);
 			}
 		}
 

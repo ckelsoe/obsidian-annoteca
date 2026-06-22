@@ -6,6 +6,42 @@
 
 import { App, Modal, setIcon, getIconIds } from "obsidian";
 
+import { formatStamp } from "./view-utils";
+
+// Class names for one reply row. Each surface (hover popup, Thread tab) passes
+// its own so the shared renderer below reproduces that surface's existing DOM
+// and CSS exactly. `author` / `date` are optional: the Thread tab leaves those
+// spans unclassed (tinting comes from the author-color callback), the hover
+// popup classes them.
+export interface ReplyRowClasses {
+	row: string;
+	meta: string;
+	body: string;
+	author?: string;
+	date?: string;
+}
+
+// Render one reply row: author tag, timestamp (via the shared formatStamp), and
+// body. Previously duplicated in decorations.ts (hover popup) and
+// hub-thread-tab.ts (Thread tab); this is the single implementation both call.
+// `colorAuthor` applies per-author tinting from each surface's own settings.
+export function renderReplyRow(
+	parent: HTMLElement,
+	reply: { author: string; date: string; body: string },
+	classes: ReplyRowClasses,
+	colorAuthor: (el: HTMLElement, author: string) => void,
+): void {
+	const row = parent.createDiv({ cls: classes.row });
+	const meta = row.createDiv({ cls: classes.meta });
+	const authorEl = classes.author
+		? meta.createSpan({ cls: classes.author, text: reply.author })
+		: meta.createSpan({ text: reply.author });
+	colorAuthor(authorEl, reply.author);
+	if (classes.date) meta.createSpan({ cls: classes.date, text: formatStamp(reply.date) });
+	else meta.createSpan({ text: formatStamp(reply.date) });
+	row.createDiv({ cls: classes.body, text: reply.body });
+}
+
 export interface StackedRowOpts {
 	name: string;
 	description?: string;
