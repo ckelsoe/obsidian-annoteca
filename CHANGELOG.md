@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-06-22
+
+### Fixed
+- Removed a CSS `:has()` selector flagged by the developer-dashboard scan for selector-invalidation cost. The editor popups (hover preview, reply composer, selection button) drop CodeMirror's default frame the same way as before, via a class on the tooltip element; no visible change.
+
 ## [1.9.0] - 2026-06-22
 
 ### Added
