@@ -230,20 +230,23 @@ settings:
 .annoteca-selection-popup-button {
 	display: inline-flex;
 	align-items: center;
-	gap: 6px;
-	padding: 4px 10px;
+	gap: 5px;
+	padding: 3px 10px 3px 8px;
 	background-color: var(--interactive-accent);
 	color: var(--text-on-accent);
 	border: none;
-	border-radius: var(--radius-m, 6px);
-	box-shadow: var(--shadow-s);
+	border-radius: 999px;
+	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.28);
 	cursor: pointer;
-	font-size: var(--font-ui-small);
-	line-height: 1.2;
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-medium);
+	line-height: 1.4;
+	transition: background-color 0.1s ease, transform 0.1s ease;
 }
 
 .annoteca-selection-popup-button:hover {
 	background-color: var(--interactive-accent-hover);
+	transform: translateY(-1px);
 }
 
 .annoteca-selection-popup-icon {
@@ -252,8 +255,8 @@ settings:
 }
 
 .annoteca-selection-popup-icon svg {
-	width: 16px;
-	height: 16px;
+	width: 14px;
+	height: 14px;
 }
 
 .annoteca-hover-preview {
