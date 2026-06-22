@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Reorder categories by dragging. Each category row in settings now has a drag handle (the grip on the left); drag a row onto another to move it to that position. The category order is what the comment composer's dropdown and the sidebar grouping follow, so this lets you put your most-used categories first. Drag is a desktop affordance (pointer-only).
+- Selection comment button (off by default, under Composer). When on, selecting text in the editor shows a floating Comment button next to the selection; click it to open the composer for that range, without the right-click menu. The existing "Add comment here" and "Add comment for selection" commands can also be bound to a hotkey for a keyboard path.
 
 ## [1.8.0] - 2026-06-21
 

@@ -37,6 +37,7 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 	deleteOnResolve: false,
 
 	composerLocation: "panel",
+	selectionPopup: false,
 	submitCommentOnEnter: true,
 	centerCommentOnNavigate: false,
 
@@ -227,6 +228,11 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 						name: "Send comment on Enter",
 						desc: "When on, Enter sends the comment and Shift+Enter starts a new line. When off, send with Cmd or Ctrl plus Enter, and Enter starts a new line. Applies to the comment box and the reply box.",
 						control: { type: "toggle", key: "submitCommentOnEnter" },
+					},
+					{
+						name: "Selection comment button",
+						desc: "Show a floating Comment button next to text you select in the editor, so you can start a comment with one click instead of the right-click menu. The Add comment here and Add comment for selection commands can also be bound to a hotkey.",
+						control: { type: "toggle", key: "selectionPopup" },
 					},
 				],
 			},
@@ -422,6 +428,9 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		this.addToggleRow(containerEl, "Send comment on Enter",
 			"When on, Enter sends the comment and Shift+Enter starts a new line. When off, send with Cmd or Ctrl plus Enter, and Enter starts a new line. Applies to the comment box and the reply box.",
 			"submitCommentOnEnter");
+		this.addToggleRow(containerEl, "Selection comment button",
+			"Show a floating Comment button next to text you select in the editor, so you can start a comment with one click instead of the right-click menu. The Add comment here and Add comment for selection commands can also be bound to a hotkey.",
+			"selectionPopup");
 
 		this.heading(containerEl, "Reading view");
 		this.addDropdownRow(containerEl, "Reading view indicator",

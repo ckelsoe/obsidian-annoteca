@@ -219,6 +219,43 @@ settings:
 	color: var(--text-normal);
 }
 
+.cm-tooltip.annoteca-selection-popup-tooltip {
+	background: transparent;
+	border: none;
+	box-shadow: none;
+	padding: 0;
+	max-width: none;
+}
+
+.annoteca-selection-popup-button {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 10px;
+	background-color: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border: none;
+	border-radius: var(--radius-m, 6px);
+	box-shadow: var(--shadow-s);
+	cursor: pointer;
+	font-size: var(--font-ui-small);
+	line-height: 1.2;
+}
+
+.annoteca-selection-popup-button:hover {
+	background-color: var(--interactive-accent-hover);
+}
+
+.annoteca-selection-popup-icon {
+	display: inline-flex;
+	align-items: center;
+}
+
+.annoteca-selection-popup-icon svg {
+	width: 16px;
+	height: 16px;
+}
+
 .annoteca-hover-preview {
 	min-width: 300px;
 	max-width: 420px;

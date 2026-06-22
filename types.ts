@@ -129,6 +129,12 @@ export interface AnnotecaSettings {
 
 	composerLocation: "modal" | "panel";
 
+	// When true, selecting text in the editor shows a small floating "Comment"
+	// button next to the selection that opens the composer for that range. Off
+	// by default: a popup on every selection is intrusive for readers who select
+	// text for other reasons. Opt-in for reviewers who annotate by mouse.
+	selectionPopup: boolean;
+
 	// When true (default), Enter submits a comment/reply and Shift+Enter inserts
 	// a newline. When false, Cmd/Ctrl+Enter submits and Enter inserts a newline.
 	// Applies to both the new-comment composer and the reply composer.

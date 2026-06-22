@@ -66,6 +66,10 @@ export default class AnnotecaPlugin extends Plugin {
 			getSettings: () => this.settings,
 			onMarkerClick: (m) => this.openReviewerOnComment(m),
 			openInReviewer: (m) => this.openReviewerOnComment(m),
+			addCommentForSelection: () => {
+				const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+				if (view) this.openModalForSelection(view.editor);
+			},
 			toggleResolution: (m) => { void this.toggleResolutionFromPopup(m); },
 			resolveAndRemove: (m) => { void this.resolveAndRemoveFromPopup(m); },
 			acceptAddressed: (m) => { void this.acceptAddressedFromPopup(m); },

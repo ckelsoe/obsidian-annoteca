@@ -19,6 +19,8 @@ import {
 	type Tooltip,
 } from "@codemirror/view";
 
+import { setIcon } from "obsidian";
+
 import type { Comment } from "./types";
 import type { AnnotecaSettings } from "./types";
 import { parseAll } from "./parser";
@@ -33,6 +35,7 @@ export interface DecorationContext {
 	getSettings(): AnnotecaSettings;
 	onMarkerClick(marker: Comment): void;
 	openInReviewer(marker: Comment): void;
+	addCommentForSelection(): void;
 	toggleResolution(marker: Comment): void;
 	resolveAndRemove(marker: Comment): void;
 	acceptAddressed(marker: Comment): void;
@@ -788,6 +791,50 @@ function clickHandlerExtension(ctx: DecorationContext, field: StateField<Comment
 	});
 }
 
+// Selection popup: a small floating "Comment" button anchored at the end of a
+// non-empty selection. Opt-in via settings.selectionPopup. Derived purely from
+// selection state (no effect/field), so it appears and follows the selection as
+// the user drags, and disappears when the selection collapses. Gives a one-
+// click path to the composer without the right-click menu.
+function selectionPopupExtension(ctx: DecorationContext): Extension {
+	return showTooltip.compute(["selection"], state => {
+		if (!ctx.getSettings().selectionPopup) return null;
+		const sel = state.selection.main;
+		if (sel.empty) return null;
+		return {
+			pos: sel.to,
+			above: true,
+			strictSide: false,
+			create: () => buildSelectionPopupDom(ctx),
+		};
+	});
+}
+
+function buildSelectionPopupDom(ctx: DecorationContext): { dom: HTMLElement } {
+	const dom = activeDocument.createElement("div");
+	dom.addClass("annoteca-selection-popup");
+	queueMicrotask(() => {
+		const wrapper = dom.parentElement;
+		if (wrapper) wrapper.addClass("annoteca-selection-popup-tooltip");
+	});
+
+	const btn = dom.createEl("button", {
+		cls: "annoteca-selection-popup-button",
+		attr: { type: "button", "aria-label": "Add comment for selection" },
+	});
+	const icon = btn.createSpan({ cls: "annoteca-selection-popup-icon" });
+	setIcon(icon, "message-square-plus");
+	btn.createSpan({ cls: "annoteca-selection-popup-label", text: "Comment" });
+
+	// preventDefault on mousedown keeps the editor selection intact: without it,
+	// pressing the button moves focus and collapses the selection before the
+	// composer can read it.
+	btn.addEventListener("mousedown", e => e.preventDefault());
+	btn.addEventListener("click", () => ctx.addCommentForSelection());
+
+	return { dom };
+}
+
 export function buildAnnotecaExtension(ctx: DecorationContext): Extension {
 	const field = markerStateField(ctx);
 	const replyField = replyComposerField(ctx, field);
@@ -805,6 +852,7 @@ export function buildAnnotecaExtension(ctx: DecorationContext): Extension {
 		// shrinks the tooltip to fit available leaf width.
 		tooltips({ parent: activeDocument.body }),
 		decorationsCompute(ctx, field),
+		selectionPopupExtension(ctx),
 		hoverTooltipExtension(ctx, field),
 		clickHandlerExtension(ctx, field),
 		dismissReplyOnOutsideClick(),
