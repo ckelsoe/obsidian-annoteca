@@ -30,7 +30,13 @@ import {
 	isHideAllComments,
 	setActiveComment,
 } from "./decorations";
-import { decideScrollAction, authorColorFor, authorPickerOptions } from "./view-utils";
+import { decideScrollAction, authorColorFor, authorPickerOptions, type ScrollAction } from "./view-utils";
+import { EditorView } from "@codemirror/view";
+
+// Top margin (px) left above the marker when anchoring it near the top of the
+// editor pane (markerScrollAlign === "top"). A little breathing room reads
+// better than flush against the very first visible line.
+const TOP_SCROLL_MARGIN_PX = 60;
 import {
 	VAULT_UNRESOLVED_VIEW_TYPE,
 	VaultUnresolvedView,
@@ -193,6 +199,16 @@ export default class AnnotecaPlugin extends Plugin {
 
 		if (!this.settings.categories || this.settings.categories.length === 0) {
 			this.settings.categories = [...DEFAULT_SETTINGS.categories];
+		}
+
+		// Migrate the legacy centerCommentOnNavigate boolean to markerScrollAlign
+		// (F-289). Only an explicit opt-in to centering (true) carries over as
+		// "center"; everyone else adopts the new "top" default, which is the
+		// improved reading anchor. "Minimal" (the old don't-yank behavior) stays
+		// available in the dropdown for anyone who wants it back.
+		const legacyCenter = (loaded as { centerCommentOnNavigate?: unknown } | null)?.centerCommentOnNavigate;
+		if (loaded && !("markerScrollAlign" in loaded) && legacyCenter === true) {
+			this.settings.markerScrollAlign = "center";
 		}
 	}
 
@@ -878,7 +894,10 @@ export default class AnnotecaPlugin extends Plugin {
 		if (comment) this.openReviewerOnComment(comment, path);
 	}
 
-	async navigateToOffset(path: string, offset: number): Promise<void> {
+	// `force` bypasses the "already visible -> don't move" short-circuit so the
+	// per-card sync button (F-291) can always re-anchor the document, even when
+	// the marker is on screen and the alignment is "minimal".
+	async navigateToOffset(path: string, offset: number, force = false): Promise<void> {
 		const file = this.app.vault.getAbstractFileByPath(path);
 		if (!(file instanceof TFile)) {
 			new Notice("File not found.");
@@ -908,19 +927,33 @@ export default class AnnotecaPlugin extends Plugin {
 		const pos = view.editor.offsetToPos(offset);
 		view.editor.setCursor(pos);
 
-		// F-276: do not force-center. Center only when the user opted in; else
-		// scroll the minimum needed, and not at all when the comment is already
-		// in view, so navigating does not yank the reader's position.
+		// F-276/F-289: anchor the marker per the user's alignment preference.
+		// "minimal" preserves the don't-yank behavior; "top"/"center" always
+		// scroll so the reading position is predictable.
 		const action = decideScrollAction(
-			this.settings.centerCommentOnNavigate,
+			this.settings.markerScrollAlign,
 			this.isOffsetVisible(view, offset),
+			force,
 		);
-		if (action === "center") {
-			view.editor.scrollIntoView({ from: pos, to: pos }, true);
-		} else if (action === "minimal") {
-			view.editor.scrollIntoView({ from: pos, to: pos }, false);
-		}
+		this.applyScrollAction(view, offset, action);
 		this.app.workspace.setActiveLeaf(targetLeaf, { focus: true });
+	}
+
+	// Execute a resolved scroll action against the editor. "top" anchors the
+	// marker near the top of the pane via the CodeMirror view (Obsidian's
+	// editor.scrollIntoView only centers or does the minimum); it degrades to a
+	// minimal scroll when the CM view is unavailable.
+	private applyScrollAction(view: MarkdownView, offset: number, action: ScrollAction): void {
+		if (action === "none") return;
+		const cm = view.editor.cm;
+		if (action === "top" && cm) {
+			cm.dispatch({
+				effects: EditorView.scrollIntoView(offset, { y: "start", yMargin: TOP_SCROLL_MARGIN_PX }),
+			});
+			return;
+		}
+		const pos = view.editor.offsetToPos(offset);
+		view.editor.scrollIntoView({ from: pos, to: pos }, action === "center");
 	}
 
 	// True when the given document offset is inside the editor's current

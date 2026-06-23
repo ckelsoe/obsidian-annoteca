@@ -792,7 +792,6 @@ settings:
 .annoteca-reviewer-card.is-active {
 	background-color: var(--background-primary-alt);
 	border-color: var(--interactive-accent);
-	cursor: default;
 }
 
 .annoteca-reviewer-compact {
@@ -800,6 +799,36 @@ settings:
 	flex-wrap: wrap;
 	gap: 6px;
 	align-items: center;
+}
+
+/* Per-card chevron (expand/collapse) and sync (scroll document to marker). */
+.annoteca-reviewer-chevron,
+.annoteca-reviewer-sync {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0;
+	background: none;
+	border: none;
+	color: var(--text-faint);
+	cursor: pointer;
+	flex-shrink: 0;
+}
+
+/* Pushes the sync + star cluster to the right edge of the compact row. */
+.annoteca-reviewer-sync {
+	margin-left: auto;
+}
+
+.annoteca-reviewer-chevron:hover,
+.annoteca-reviewer-sync:hover {
+	color: var(--text-normal);
+}
+
+.annoteca-reviewer-chevron svg,
+.annoteca-reviewer-sync svg {
+	width: 14px;
+	height: 14px;
 }
 
 .annoteca-reviewer-excerpt {

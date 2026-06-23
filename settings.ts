@@ -42,7 +42,7 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 	composerLocation: "panel",
 	selectionPopup: false,
 	submitCommentOnEnter: true,
-	centerCommentOnNavigate: false,
+	markerScrollAlign: "top",
 
 	enableAuthorTag: false,
 	authorTag: "",
@@ -283,9 +283,13 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 						control: { type: "toggle", key: "autoCollapseInactiveFiles" },
 					},
 					{
-						name: "Center comment when navigating",
-						desc: "When on, jumping to a comment centers it in the editor. When off, the editor scrolls the minimum needed and stays put if the comment is already visible, so opening the panel does not move your place.",
-						control: { type: "toggle", key: "centerCommentOnNavigate" },
+						name: "Marker position when navigating",
+						desc: "Where a comment's marker lands in the editor when you jump to it. Top anchors it near the top of the pane for a predictable reading spot. Center puts it in the middle. Minimal scrolls the least needed and stays put if the marker is already visible, so opening the panel does not move your place.",
+						control: {
+							type: "dropdown",
+							key: "markerScrollAlign",
+							options: { top: "Top of pane", center: "Center", minimal: "Minimal (don't move if visible)" },
+						},
 					},
 				],
 			},
@@ -465,9 +469,10 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		this.addToggleRow(containerEl, "Auto-collapse other files in scope",
 			"When the thread panel shows comments from multiple files, collapse files other than the one you are editing. Click a file header to expand it manually.",
 			"autoCollapseInactiveFiles");
-		this.addToggleRow(containerEl, "Center comment when navigating",
-			"When on, jumping to a comment centers it in the editor. When off, the editor scrolls the minimum needed and stays put if the comment is already visible, so opening the panel does not move your place.",
-			"centerCommentOnNavigate");
+		this.addDropdownRow(containerEl, "Marker position when navigating",
+			"Where a comment's marker lands in the editor when you jump to it. Top anchors it near the top of the pane for a predictable reading spot. Center puts it in the middle. Minimal scrolls the least needed and stays put if the marker is already visible, so opening the panel does not move your place.",
+			"markerScrollAlign",
+			{ top: "Top of pane", center: "Center", minimal: "Minimal (don't move if visible)" });
 
 		// Authors
 		this.heading(containerEl, "Authors");

@@ -31,6 +31,17 @@ export class ThreadTabRenderer {
 	// Reset when the active file changes and autoCollapseInactiveFiles is on.
 	private collapsedFilePaths = new Set<string>();
 	private lastActiveFileForCollapse: string | undefined;
+	// Per-session expand overrides for individual cards, keyed by path+start
+	// (F-290). Absent key means the default applies: the active card auto-expands
+	// and the rest stay compact. An explicit true/false is the user's chevron
+	// choice; it persists across selection changes so several cards can stay open
+	// at once on small screens.
+	private cardExpandOverrides = new Map<string, boolean>();
+	// The active card element from the latest render plus the selection key it was
+	// last scrolled into view for, so reverse-sync (F-292) only scrolls the panel
+	// when the selection actually changed, not on every refresh.
+	private activeCardEl: HTMLElement | undefined;
+	private lastScrolledActiveKey: string | undefined;
 
 	constructor(
 		private readonly plugin: AnnotecaPlugin,
@@ -58,6 +69,7 @@ export class ThreadTabRenderer {
 		const showGroups = groups.length > 1;
 		this.applyAutoCollapsePolicy(groups, showGroups);
 
+		this.activeCardEl = undefined;
 		const list = container.createDiv({ cls: "annoteca-reviewer-list" });
 		for (const group of groups) {
 			if (showGroups) {
@@ -73,6 +85,33 @@ export class ThreadTabRenderer {
 				}
 			}
 		}
+
+		this.scrollActiveCardIntoView();
+	}
+
+	// Reverse sync (F-292): when the selection changes (e.g. a marker clicked in
+	// the document), bring the now-active card into the panel viewport. Keyed on
+	// the selection so ordinary refreshes (reply edits, star toggles) do not move
+	// the panel. `block: "nearest"` leaves an already-visible card untouched.
+	private scrollActiveCardIntoView(): void {
+		const activeKey = this.activePath !== undefined && this.activeStart !== undefined
+			? this.cardKey(this.activePath, this.activeStart)
+			: undefined;
+		if (activeKey && activeKey !== this.lastScrolledActiveKey && this.activeCardEl) {
+			const el = this.activeCardEl;
+			window.requestAnimationFrame(() => el.scrollIntoView({ block: "nearest" }));
+		}
+		this.lastScrolledActiveKey = activeKey;
+	}
+
+	private cardKey(path: string, start: number): string {
+		return `${path}\0${start}`;
+	}
+
+	// Effective expand state for a card: the user's explicit chevron override if
+	// set, otherwise the default where only the active card is expanded (F-290).
+	private isCardExpanded(path: string, start: number, isActive: boolean): boolean {
+		return this.cardExpandOverrides.get(this.cardKey(path, start)) ?? isActive;
 	}
 
 	private buildScopedGroups(scopeFiles: Set<string>): { path: string; comments: Comment[] }[] {
@@ -284,33 +323,47 @@ export class ThreadTabRenderer {
 		}
 	}
 
-	private renderCommentCard(card: HTMLElement, c: Comment, path: string, expanded: boolean): void {
-		const compact = this.renderCompactRow(card, c);
+	private renderCommentCard(card: HTMLElement, c: Comment, path: string, isActive: boolean): void {
+		if (isActive) this.activeCardEl = card;
+		const expanded = this.isCardExpanded(path, c.marker.start, isActive);
+		const compact = this.renderCompactRow(card, c, path, expanded);
 
-		if (!expanded) {
-			compact.addEventListener("click", () => {
-				this.activePath = path;
-				this.activeStart = c.marker.start;
-				// Ensure the file is expanded so the newly-active card is visible.
-				this.collapsedFilePaths.delete(path);
-				this.refresh();
-				// Also navigate the editor to the marker. Same-file: just
-				// scrolls. Cross-file: opens the file and scrolls. Cursor
-				// at marker.start no longer triggers raw-text mode after the
-				// selectionTouches fix.
-				void this.plugin.navigateToOffset(path, c.marker.start);
-			});
-			return;
-		}
+		// Card-body click selects the card and navigates the editor to the marker
+		// (Option 2). Same-file just scrolls; cross-file opens the file then
+		// scrolls. The chevron, sync, and star buttons stopPropagation so they do
+		// not also trigger this navigation.
+		compact.addEventListener("click", () => {
+			this.activePath = path;
+			this.activeStart = c.marker.start;
+			// Ensure the file group is expanded so the newly-active card is visible.
+			this.collapsedFilePaths.delete(path);
+			this.refresh();
+			void this.plugin.navigateToOffset(path, c.marker.start);
+		});
 
-		this.renderExpandedSection(card, c, path);
+		if (expanded) this.renderExpandedSection(card, c, path);
 	}
 
-	private renderCompactRow(card: HTMLElement, c: Comment): HTMLElement {
+	private renderCompactRow(card: HTMLElement, c: Comment, path: string, expanded: boolean): HTMLElement {
 		const enabled = resolveSettingsCategories(this.plugin.settings);
 		const def = getCategoryOrFallback(c.category, enabled);
 
 		const compact = card.createDiv({ cls: "annoteca-reviewer-compact" });
+
+		// Chevron toggles this card's expand state independent of selection (F-290),
+		// so a reader on a small screen can collapse a tall active card or keep
+		// several cards open at once.
+		const chevron = compact.createEl("button", {
+			cls: "annoteca-reviewer-chevron",
+			attr: { "aria-label": expanded ? "Collapse comment" : "Expand comment" },
+		});
+		setIcon(chevron, expanded ? "chevron-down" : "chevron-right");
+		chevron.addEventListener("click", (e) => {
+			e.stopPropagation();
+			this.cardExpandOverrides.set(this.cardKey(path, c.marker.start), !expanded);
+			this.refresh();
+		});
+
 		renderCategoryBadge(compact, def, {
 			badge: "annoteca-reviewer-category",
 			icon: "annoteca-reviewer-category-icon",
@@ -321,6 +374,22 @@ export class ThreadTabRenderer {
 			const authorEl = compact.createSpan({ cls: "annoteca-reviewer-meta", text: c.author });
 			this.applyAuthorColor(authorEl, c.author);
 		}
+
+		// Sync button (F-291): re-anchor the document to this marker, always, even
+		// when it is already on screen. Forces the scroll past the don't-yank
+		// short-circuit so the user can pull the document back to the annotation.
+		const syncBtn = compact.createEl("button", {
+			cls: "annoteca-reviewer-sync",
+			attr: { "aria-label": "Scroll document to this comment" },
+		});
+		setIcon(syncBtn, "refresh-cw");
+		syncBtn.addEventListener("click", (e) => {
+			e.stopPropagation();
+			this.activePath = path;
+			this.activeStart = c.marker.start;
+			this.refresh();
+			void this.plugin.navigateToOffset(path, c.marker.start, true);
+		});
 
 		// Star toggle at the right of the compact row. The panel re-renders on the
 		// starred-changed event, so no in-place reflect is needed here.

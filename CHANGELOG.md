@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-06-22
+
+### Added
+- Collapse and expand individual thread cards. Each comment card has a chevron on the left that toggles whether it is expanded, independent of which card is selected. The selected card still expands by default, but you can now collapse a tall one or keep several open at once, which keeps the right panel manageable on small screens.
+- Sync button on each thread card. Click it to scroll the document to that comment's marker, even when the marker is already on screen, so you can pull the document back to the annotation on demand.
+
+### Changed
+- New "Marker position when navigating" setting (under Panel and navigation) replaces the old "Center comment when navigating" toggle. Choose where a comment's marker lands when you jump to it: Top of pane (new default, a predictable reading spot), Center, or Minimal (scrolls the least needed and stays put if the marker is already visible). If you had centering turned on, you are migrated to Center; otherwise you get the new Top default.
+- Clicking a card in the thread panel now scrolls the document to its marker using your chosen marker position, and selecting a marker in the document scrolls the matching card into view in the panel, so the panel and the document stay in step.
+
 ## [1.9.1] - 2026-06-22
 
 ### Fixed

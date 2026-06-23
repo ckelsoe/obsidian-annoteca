@@ -147,11 +147,16 @@ export interface AnnotecaSettings {
 	// Applies to both the new-comment composer and the reply composer.
 	submitCommentOnEnter: boolean;
 
-	// When true, navigating to a comment centers it in the editor. When false
-	// (default), the editor scrolls the minimum needed and does not move at all
-	// when the comment is already visible (F-276). Keeps the reading position
-	// stable when clicking a comment in the side panel.
-	centerCommentOnNavigate: boolean;
+	// How the editor scrolls when navigating to a comment.
+	//   "top"     — anchor the marker near the top of the editor pane, always
+	//               (default). Gives a predictable reading position on small
+	//               screens.
+	//   "center"  — center the marker in the editor, always.
+	//   "minimal" — scroll the minimum needed, and not at all when the marker is
+	//               already visible (the F-276 don't-yank behavior).
+	// Migrated from the legacy centerCommentOnNavigate boolean (true -> "center",
+	// false/absent -> "top").
+	markerScrollAlign: "top" | "center" | "minimal";
 
 	debugMode: boolean;
 	debugLogTarget: "console" | "vault";

@@ -63,21 +63,25 @@ export function shouldSubmitOnKeydown(
 	return submitOnEnter ? !e.shiftKey : (e.ctrlKey || e.metaKey);
 }
 
-export type ScrollAction = "center" | "minimal" | "none";
+export type MarkerScrollAlign = "top" | "center" | "minimal";
+export type ScrollAction = "top" | "center" | "minimal" | "none";
 
-// Decide how to scroll the editor when navigating to a comment (F-276).
+// Decide how to scroll the editor when navigating to a comment (F-276, F-289).
 //
-// When the user opts into centering, always center. Otherwise scroll the
-// minimum needed to bring the target into view, and do nothing at all when the
-// target is already visible. The "none" case is the whole point: clicking a
-// comment in the side panel, or selecting a marker whose text is already on
-// screen, must not yank the document under the reader.
+// "top" and "center" are explicit anchors: they always scroll so the marker
+// lands at a predictable place, even when it is already on screen, because the
+// point is a consistent reading position. "minimal" preserves the original
+// don't-yank behavior: scroll the least needed, and not at all when the target
+// is already visible. `force` overrides that one short-circuit so the sync
+// button can always re-anchor even in minimal mode.
 export function decideScrollAction(
-	centerOnNavigate: boolean,
+	align: MarkerScrollAlign,
 	targetVisible: boolean,
+	force = false,
 ): ScrollAction {
-	if (centerOnNavigate) return "center";
-	return targetVisible ? "none" : "minimal";
+	if (align === "center") return "center";
+	if (align === "top") return "top";
+	return targetVisible && !force ? "none" : "minimal";
 }
 
 // Window size searched on each side of a marker for its anchor text. Bounds the

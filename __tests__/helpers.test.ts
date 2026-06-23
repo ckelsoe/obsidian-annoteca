@@ -166,18 +166,27 @@ describe("shouldSubmitOnKeydown", () => {
 	});
 });
 
-describe("decideScrollAction (F-276)", () => {
-	it("centers when the user opted into centering, even if already visible", () => {
-		expect(decideScrollAction(true, true)).toBe("center");
-		expect(decideScrollAction(true, false)).toBe("center");
+describe("decideScrollAction (F-276, F-289)", () => {
+	it("centers when alignment is center, regardless of visibility", () => {
+		expect(decideScrollAction("center", true)).toBe("center");
+		expect(decideScrollAction("center", false)).toBe("center");
 	});
 
-	it("does not scroll when the target is already in the viewport", () => {
-		expect(decideScrollAction(false, true)).toBe("none");
+	it("anchors to the top when alignment is top, regardless of visibility", () => {
+		expect(decideScrollAction("top", true)).toBe("top");
+		expect(decideScrollAction("top", false)).toBe("top");
 	});
 
-	it("scrolls minimally when the target is off-screen", () => {
-		expect(decideScrollAction(false, false)).toBe("minimal");
+	it("does not scroll in minimal mode when the target is already in the viewport", () => {
+		expect(decideScrollAction("minimal", true)).toBe("none");
+	});
+
+	it("scrolls minimally in minimal mode when the target is off-screen", () => {
+		expect(decideScrollAction("minimal", false)).toBe("minimal");
+	});
+
+	it("forces a minimal scroll even when visible, for the sync button", () => {
+		expect(decideScrollAction("minimal", true, true)).toBe("minimal");
 	});
 });
 
