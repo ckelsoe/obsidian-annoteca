@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.1] - 2026-06-22
+
+### Fixed
+- The exported AI skill now teaches assistants to stamp comments, replies, addressed marks, and resolutions with the full `YYYY-MM-DDTHH:MM:SS` timestamp instead of a date alone. The thread panel sorts by these stamps on read (added in 1.9.0), and a date-only stamp sorts to the very start of its day, so an AI reply written in the afternoon could jump ahead of a human reply made that morning. The skill schema version is bumped, so any previously exported skill shows as out of date in settings with a prompt to re-export. Re-export the skill (Settings, AI integration) so your assistant picks up the new guidance.
+
 ## [1.10.0] - 2026-06-22
 
 ### Added

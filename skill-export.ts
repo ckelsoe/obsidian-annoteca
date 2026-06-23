@@ -12,8 +12,10 @@ export type SkillExportTarget = "claude" | "agent" | "both";
 // assistant-facing guidance materially changes, so users are prompted to
 // re-export when the content is genuinely different rather than on every plugin
 // release. 1 = the original skill; 2 = the AI-revision-flow skill
-// (begin-placement, addressed flow, forbid marker deletion / unprompted resolve).
-export const SKILL_SCHEMA_VERSION = 2;
+// (begin-placement, addressed flow, forbid marker deletion / unprompted resolve);
+// 3 = full-timestamp stamps (YYYY-MM-DDTHH:MM:SS) so AI-written lines sort in
+// read order alongside the plugin's own timestamped writes (F-280).
+export const SKILL_SCHEMA_VERSION = 3;
 
 const SKILL_VERSION_RE = /^annoteca-skill-version:\s*(\d+)\s*$/m;
 
@@ -93,12 +95,12 @@ Multi-line comment with metadata, a thread, and a resolution:
 The Q3 forecast assumes a hiring freeze through December.
 <!-- annoteca/tone: too blunt for the board deck
 [id=a3b9c2x7]
-[date=2026-05-23]
+[date=2026-05-23T09:12:00]
 [author=reviewer]
 [anchor=assumes a hiring freeze through December]
-[reply ai 2026-05-23]: Consider "reflects current headcount planning through December."
-[reply reviewer 2026-05-24]: Better. Softening it.
-[resolved reviewer 2026-05-25]: reworded the assumption
+[reply ai 2026-05-23T09:15:30]: Consider "reflects current headcount planning through December."
+[reply reviewer 2026-05-24T08:40:00]: Better. Softening it.
+[resolved reviewer 2026-05-25T16:20:00]: reworded the assumption
 -->
 \`\`\`
 
@@ -108,20 +110,20 @@ Field rules (match these exactly; the plugin's parser enforces them):
 
 - Category: lowercase letters, digits, single dashes; starts with a letter; never \`reply\`, \`resolved\`, \`id\`, \`date\`, or \`author\`.
 - Author: one token, max 32 chars, no spaces and none of \`]\` \`<\` \`>\`. ${reviewerLine}
-- Date: \`YYYY-MM-DD\`.
+- Date/timestamp: \`YYYY-MM-DDTHH:MM:SS\` (the current local date and time; seconds optional). **Always stamp the current time, not a date alone.** The panel sorts a thread by these stamps on read, and a date-only stamp sorts to the very start of its day, so a date-only reply jumps ahead of every timestamped reply made earlier the same day. Date-only stamps still parse (older markers), but new lines you write must carry the time so a fast human/AI back-and-forth stays in order.
 - id: 8 lowercase base36 chars (\`a3b9c2x7\`), unique in the vault. Generate one for comments you create.
 - Anchor: single line, max 80 chars, no \`]\` or newlines. Quote of the text the comment refers to. Optional.
-- Reply: \`[reply <author> <date>]: <inline markdown>\`.
-- Addressed: \`[addressed <author> <date>]: <note>\`, at most one, after the replies and before any \`[resolved ...]\` line. It means "I applied an edit; the reviewer still needs to accept, revise, or reject." When the edit *replaced* prose, store the verbatim old text in a fenced \`annoteca-original\` block on the lines directly after the \`[addressed ...]\` line so the reviewer can reject and auto-revert.
-- Resolved: \`[resolved <author> <date>]: <optional note>\`.
+- Reply: \`[reply <author> <timestamp>]: <inline markdown>\`.
+- Addressed: \`[addressed <author> <timestamp>]: <note>\`, at most one, after the replies and before any \`[resolved ...]\` line. It means "I applied an edit; the reviewer still needs to accept, revise, or reject." When the edit *replaced* prose, store the verbatim old text in a fenced \`annoteca-original\` block on the lines directly after the \`[addressed ...]\` line so the reviewer can reject and auto-revert.
+- Resolved: \`[resolved <author> <timestamp>]: <optional note>\`.
 
 ## What to do
 
-- **Reply to a comment**: append a \`[reply <you> <today>]: ...\` line as the last line before \`-->\` (after existing replies, before any \`[addressed ...]\` or \`[resolved ...]\` line). Never rewrite the original body or others' replies.
+- **Reply to a comment**: append a \`[reply <you> <now>]: ...\` line as the last line before \`-->\` (after existing replies, before any \`[addressed ...]\` or \`[resolved ...]\` line), where \`<now>\` is the current \`YYYY-MM-DDTHH:MM:SS\` timestamp. Never rewrite the original body or others' replies.
 - **Address a comment with a small in-place tweak**: edit the passage the comment points at (use the \`[anchor=]\` quote to locate it), then reply in the thread saying what you changed and why. Leave the rest of the document byte-for-byte untouched.
-- **Address a comment by replacing the passage**: this is the lossless flow. (1) Replace the anchored passage with your new text. (2) Leave the marker at the **head** of the new text (markers lead the text they concern). (3) Inside the marker, add an \`[addressed <you> <today>]: <what you changed and why>\` line; on the line directly after it open a fenced block tagged \`annoteca-original\`, put the verbatim text you replaced on its own line(s), then close the fence. Keep the original \`[anchor=]\` line as-is; it is the historical record of what was commented on. Do not mark the comment resolved; the reviewer decides accept / revise / reject. See the worked example below.
-- **Create a comment**: insert a marker at the **start** of the passage it concerns (the prose it is about follows the marker), with your category choice, an id, today's date, and your author tag.
-- **Resolve a comment**: ONLY when the user explicitly asks. Append one \`[resolved <you> <today>]: <note>\` line. **Never resolve a comment unprompted** (rationale: resolution is the reviewer's decision; resolving feedback the reviewer has not signed off on destroys the review loop this format exists to protect).
+- **Address a comment by replacing the passage**: this is the lossless flow. (1) Replace the anchored passage with your new text. (2) Leave the marker at the **head** of the new text (markers lead the text they concern). (3) Inside the marker, add an \`[addressed <you> <now>]: <what you changed and why>\` line (\`<now>\` = the current timestamp); on the line directly after it open a fenced block tagged \`annoteca-original\`, put the verbatim text you replaced on its own line(s), then close the fence. Keep the original \`[anchor=]\` line as-is; it is the historical record of what was commented on. Do not mark the comment resolved; the reviewer decides accept / revise / reject. See the worked example below.
+- **Create a comment**: insert a marker at the **start** of the passage it concerns (the prose it is about follows the marker), with your category choice, an id, the current \`YYYY-MM-DDTHH:MM:SS\` timestamp, and your author tag.
+- **Resolve a comment**: ONLY when the user explicitly asks. Append one \`[resolved <you> <now>]: <note>\` line (\`<now>\` = the current timestamp). **Never resolve a comment unprompted** (rationale: resolution is the reviewer's decision; resolving feedback the reviewer has not signed off on destroys the review loop this format exists to protect).
 - **Never delete a marker.** Do not remove a marker to "clean up", and never resolve by rewriting the file so the markers disappear (rationale: the markers are the audit trail; deleting them silently discards the conversation and the reviewer's pending decisions). Removal happens only when the user explicitly asks to delete a specific comment.
 
 ### Addressing by replacement: worked example
@@ -131,9 +133,9 @@ After replacing the passage, the marker leads the new prose and the verbatim old
 \`\`\`\`markdown
 <!-- annoteca/clarify: hedging
 [id=6raa4103]
-[date=2026-06-20]
+[date=2026-06-20T11:30:00]
 [anchor=it landed as a shock]
-[addressed claude 2026-06-20]: removed the hedging
+[addressed claude 2026-06-20T11:32:10]: removed the hedging
 \`\`\`annoteca-original
 It landed as a shock.
 \`\`\`

@@ -55,7 +55,7 @@ describe("buildSkillMarkdown", () => {
 		expect(example).toBeDefined();
 		if (!example) return;
 		expect(example.id).toBe("a3b9c2x7");
-		expect(example.date).toBe("2026-05-23");
+		expect(example.date).toBe("2026-05-23T09:12:00");
 		expect(example.author).toBe("reviewer");
 		expect(example.anchor?.text).toBe("assumes a hiring freeze through December");
 		expect(example.replies).toHaveLength(2);
@@ -89,6 +89,13 @@ describe("buildSkillMarkdown", () => {
 	it("stamps the current skill schema version in the frontmatter", () => {
 		expect(skill).toContain(`annoteca-skill-version: ${SKILL_SCHEMA_VERSION}`);
 		expect(parseSkillVersion(skill)).toBe(SKILL_SCHEMA_VERSION);
+	});
+
+	it("teaches the full timestamp and warns against date-only stamps (F-280)", () => {
+		expect(skill).toContain("YYYY-MM-DDTHH:MM:SS");
+		expect(skill).toContain("Always stamp the current time, not a date alone");
+		// The example replies carry a time component, not just a date.
+		expect(skill).toContain("[reply ai 2026-05-23T09:15:30]");
 	});
 
 	it("names the reviewer's author tag when one is configured", () => {
