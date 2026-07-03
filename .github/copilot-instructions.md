@@ -193,7 +193,7 @@ Releases are triggered by pushing a version tag. The release workflow:
 ## Common pitfalls
 
 - **Marker format changes must be reflected in `parser.ts`** (the source of truth). Updating the format in one place and not the other will cause silent data loss or parse failures.
-- **Category ID rules are strict.** An invalid category name silently fails to match the parser regex and markers with that category will not be indexed.
+- **Category name rules are strict.** An invalid category name silently fails to match the parser regex and markers with that category will not be indexed.
 - **`-->` inside an `annoteca-original` fence closes the HTML comment.** The caller must ensure the captured prose does not contain `-->`. Check `comment-service.ts` for how existing code handles this.
 - **Stale marker positions.** Operations triggered from the side panel should re-resolve the marker by its `id` against current file content before editing, not use a cached `marker.start/end`. See `comment-service.ts` for the pattern.
 - **`npm run lint` runs `scripts/check-submission.mjs`** in addition to ESLint. That script checks manifest description constraints, `!important` in CSS, and ESLint directive hygiene. Read it before adding new lint suppressions.
