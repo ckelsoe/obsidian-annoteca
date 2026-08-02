@@ -119,6 +119,10 @@ BRAT lets power users install pre-release builds before they reach the marketpla
 
 Annoteca reads and writes only your vault. No network requests, no telemetry, no data leaves your machine. See [PRIVACY.md](./PRIVACY.md).
 
+## Community
+
+Questions, ideas, and general discussion happen on [Discord](https://discord.gg/gd6tKJDPj4). For anything that needs tracking, a GitHub issue is still the better home.
+
 ## Contributing
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, quality gates, and conventions.

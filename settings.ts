@@ -26,6 +26,12 @@ import {
 } from './ui-helpers';
 import { supportsDragAndDrop } from './platform';
 
+// Community discussion for this plugin. This must stay a never-expiring
+// discord.gg invite. A discord.com/channels/... deep link only resolves for
+// accounts already in the server, so it cannot get anyone in, and a default
+// invite expires after 7 days and would rot in a shipped release.
+const DISCORD_URL = 'https://discord.gg/gd6tKJDPj4';
+
 export const DEFAULT_SETTINGS: AnnotecaSettings = {
 	categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })),
 	defaultCategory: 'clarify',
@@ -829,18 +835,34 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 	// plugin renders (shell-path-copy settings-tab renderFooter).
 	private renderFooter(host: HTMLElement): void {
 		host.addClass('annoteca-settings-footer');
-		host.createSpan({ text: `Version ${this.plugin.manifest.version} | ` });
+		// One inner flex container, and the separators are a gap rather than
+		// whitespace in text nodes. The row is a flex row, and a flex item drops
+		// the whitespace at its own edges, so the old ' | ' spans could render as
+		// "GitHub|Report issues". Same fix as the reference plugin's footer.
+		const inner = host.createDiv({ cls: 'annoteca-settings-footer-inner' });
+		inner.createSpan({ text: `Version ${this.plugin.manifest.version}` });
+		// Each separator is grouped with the link that follows it into a single
+		// nowrap flex item. The inner row wraps, and a bare separator span would
+		// be its own wrap opportunity, so a narrow settings pane could produce a
+		// line ending or starting with a stray "|".
 		const link = (text: string, url: string) => {
-			host.createEl('a', {
+			const item = inner.createSpan({
+				cls: 'annoteca-settings-footer-link',
+			});
+			item.createSpan({
+				cls: 'annoteca-settings-footer-separator',
+				text: '|',
+			});
+			item.createEl('a', {
 				text,
 				href: url,
 				attr: { target: '_blank', rel: 'noopener' },
 			});
 		};
 		link('GitHub', 'https://github.com/ckelsoe/obsidian-annoteca');
-		host.createSpan({ text: ' | ' });
+		link('Discord', DISCORD_URL);
 		link(
-			'Report Issues',
+			'Report issues',
 			'https://github.com/ckelsoe/obsidian-annoteca/issues',
 		);
 	}
