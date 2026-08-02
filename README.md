@@ -121,7 +121,7 @@ Annoteca reads and writes only your vault. No network requests, no telemetry, no
 
 ## Community
 
-Questions, ideas, and general discussion happen on [Discord](https://discord.gg/gd6tKJDPj4). For anything that needs tracking, a GitHub issue is still the better home.
+Questions, ideas, and general discussion happen on [Discord](https://discord.gg/gd6tKJDPj4). For anything that needs tracking, a [GitHub issue](https://github.com/ckelsoe/obsidian-annoteca/issues) is still the better home.
 
 ## Contributing
 
