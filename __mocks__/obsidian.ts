@@ -33,6 +33,17 @@ export class Events {
 	}
 }
 
+// Mirrors the shape of Obsidian's `Platform` that this plugin reads. Mutable
+// on purpose: tests that cover per-platform behaviour flip these and restore
+// them afterwards, which is why `platform.ts` reads the object per call instead
+// of capturing a boolean at import time.
+export const Platform = {
+	isMobile: false,
+	isPhone: false,
+	isTablet: false,
+	isDesktop: true,
+};
+
 export function setIcon(_el: HTMLElement, _icon: string): void {
 	// no-op
 }

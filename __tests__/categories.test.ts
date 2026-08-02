@@ -6,6 +6,7 @@ import {
 	resolveEnabledCategories,
 	getCategoryOrFallback,
 	reorderCategories,
+	moveCategory,
 } from '../categories';
 import type { CategoryDefinition } from '../types';
 
@@ -152,5 +153,91 @@ describe('categories: reorderCategories', () => {
 	it('does not mutate the input array', () => {
 		reorderCategories(base, 'a', 'd');
 		expect(ids(base)).toEqual(['a', 'b', 'c', 'd']);
+	});
+});
+
+describe('categories: moveCategory', () => {
+	const cat = (id: string): CategoryDefinition => ({ id, displayName: id });
+	const ids = (list: readonly CategoryDefinition[]) => list.map((c) => c.id);
+	const base = [cat('a'), cat('b'), cat('c'), cat('d')];
+
+	it('moves a middle entry up one slot, swapping with its neighbour', () => {
+		expect(ids(moveCategory(base, 'c', 'up'))).toEqual([
+			'a',
+			'c',
+			'b',
+			'd',
+		]);
+	});
+
+	it('moves a middle entry down one slot, swapping with its neighbour', () => {
+		expect(ids(moveCategory(base, 'b', 'down'))).toEqual([
+			'a',
+			'c',
+			'b',
+			'd',
+		]);
+	});
+
+	it('moves the last entry up, reaching every slot by repetition', () => {
+		let list: readonly CategoryDefinition[] = base;
+		list = moveCategory(list, 'd', 'up');
+		expect(ids(list)).toEqual(['a', 'b', 'd', 'c']);
+		list = moveCategory(list, 'd', 'up');
+		expect(ids(list)).toEqual(['a', 'd', 'b', 'c']);
+		list = moveCategory(list, 'd', 'up');
+		expect(ids(list)).toEqual(['d', 'a', 'b', 'c']);
+	});
+
+	// The settings UI disables the buttons at the ends, but the function is the
+	// contract and must not corrupt the list if that guard is ever missed.
+	it('returns an unchanged copy when moving the first entry up', () => {
+		const result = moveCategory(base, 'a', 'up');
+		expect(ids(result)).toEqual(['a', 'b', 'c', 'd']);
+		expect(result).not.toBe(base);
+	});
+
+	it('returns an unchanged copy when moving the last entry down', () => {
+		const result = moveCategory(base, 'd', 'down');
+		expect(ids(result)).toEqual(['a', 'b', 'c', 'd']);
+		expect(result).not.toBe(base);
+	});
+
+	it('returns an unchanged copy when the id is missing', () => {
+		expect(ids(moveCategory(base, 'ghost', 'up'))).toEqual([
+			'a',
+			'b',
+			'c',
+			'd',
+		]);
+		expect(ids(moveCategory(base, 'ghost', 'down'))).toEqual([
+			'a',
+			'b',
+			'c',
+			'd',
+		]);
+	});
+
+	it('handles a single-entry list in both directions', () => {
+		const one = [cat('solo')];
+		expect(ids(moveCategory(one, 'solo', 'up'))).toEqual(['solo']);
+		expect(ids(moveCategory(one, 'solo', 'down'))).toEqual(['solo']);
+	});
+
+	it('does not mutate the input array', () => {
+		moveCategory(base, 'a', 'down');
+		expect(ids(base)).toEqual(['a', 'b', 'c', 'd']);
+	});
+
+	// Up then down must land back where it started, or repeated tapping in the
+	// settings UI would drift the list.
+	it('round-trips: up then down restores the original order', () => {
+		const moved = moveCategory(base, 'c', 'up');
+		expect(ids(moveCategory(moved, 'c', 'down'))).toEqual([
+			'a',
+			'b',
+			'c',
+			'd',
+		]);
 	});
 });

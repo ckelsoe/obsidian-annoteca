@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Move up and move down buttons on every category row in settings. Category order drives the composer dropdown and the sidebar grouping, but the only way to change it was dragging, and HTML5 drag events never fire on touch, so reordering was impossible on a phone or tablet. The buttons are on every platform rather than being a mobile fallback, because drag-and-drop is equally unusable by keyboard. Focus stays on the row you moved, so you can press the same button repeatedly to walk a category up the list. The drag handle is unchanged on desktop and is now hidden where dragging cannot work, instead of showing a grip that does nothing.
+- The expanded category panel now shows the category's identifier. This is the token that appears in the marker itself (`<!-- annoteca/<identifier>: ... -->`), so it is what you need when hand-writing a comment or briefing an AI assistant. Previously it appeared only in the collapsed row, where it is the first thing to run out of room on a narrow screen. It is read-only; changing an identifier would orphan every existing marker using it.
+
+### Fixed
+- The icon picker no longer overflows the screen on a phone. It had a hard 480px minimum width, which is wider than most phone viewports (roughly 390 to 430px), so the modal ran off the edge and scrolled sideways. It now shrinks to fit while keeping the same width on desktop.
+- On short screens, typically a phone in landscape, the icon picker's grid no longer pushes its own search field out of view.
+- Long category names in settings truncate with an ellipsis instead of wrapping and making the row taller.
+
 ## [1.10.1] - 2026-06-22
 
 ### Fixed

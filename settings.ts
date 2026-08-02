@@ -17,12 +17,14 @@ import {
 	isValidCategoryName,
 	resolveEnabledCategories,
 	reorderCategories,
+	moveCategory,
 } from './categories';
 import {
 	createStackedRow,
 	createColorPicker,
 	createIconPicker,
 } from './ui-helpers';
+import { supportsDragAndDrop } from './platform';
 
 export const DEFAULT_SETTINGS: AnnotecaSettings = {
 	categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })),
@@ -1149,42 +1151,157 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 
 		const row = list.createDiv({
 			cls: `annoteca-category-row${isExpanded ? ' is-expanded' : ''}`,
+			// Lets the move handlers find this row again after the list is
+			// repainted, so keyboard focus can be put back where the user left it.
+			attr: { 'data-annoteca-category': cat.id },
 		});
 
 		// --- Summary row ------------------------------------------------
-		const summary = row.createEl('button', {
+		// The reorder controls are siblings of the summary button, not children
+		// of it. The summary is a <button>, and nesting interactive elements
+		// inside a button is invalid HTML that assistive tech resolves
+		// inconsistently. A flex header holds the two side by side instead.
+		const header = row.createDiv({ cls: 'annoteca-category-header' });
+
+		const reorder = header.createDiv({
+			cls: 'annoteca-category-reorder',
+		});
+
+		// Drag handle for reordering, offered in addition to the move buttons
+		// below. Rendered only where HTML5 DnD actually fires: on touch it never
+		// does, so showing a grip there would be an affordance that silently
+		// does nothing. The buttons are the path that always works.
+		if (supportsDragAndDrop()) {
+			const handle = reorder.createSpan({
+				cls: 'annoteca-category-drag-handle',
+				attr: { draggable: 'true', 'aria-label': 'Drag to reorder' },
+			});
+			setIcon(handle, 'grip-vertical');
+			handle.addEventListener('dragstart', (e: DragEvent) => {
+				this.draggedCategoryId = cat.id;
+				row.addClass('is-dragging');
+				if (e.dataTransfer) {
+					e.dataTransfer.effectAllowed = 'move';
+					e.dataTransfer.setData('text/plain', cat.id);
+				}
+			});
+			handle.addEventListener('dragend', () => {
+				this.draggedCategoryId = null;
+				row.removeClass('is-dragging');
+				for (const r of list.findAll('.annoteca-category-row')) {
+					r.removeClass('is-drag-over');
+				}
+			});
+		}
+
+		const index = this.plugin.settings.categories.findIndex(
+			(c) => c.id === cat.id,
+		);
+		const isFirst = index <= 0;
+		const isLast = index === this.plugin.settings.categories.length - 1;
+
+		// Repainting the list destroys the button that was just clicked, which
+		// drops focus to the document and forces a keyboard user to tab back in
+		// for every single step of a move. Put focus on the equivalent button in
+		// the row's new position instead. When the row has landed at an end, the
+		// button just used is now disabled, so hand focus to the opposite one
+		// rather than to something inert.
+		//
+		// Which element is live depends on the Obsidian version, because the two
+		// rerender() paths differ. On 1.13+ update() leaves this custom block
+		// alone, so `list` is still the real element. On older builds rerender()
+		// empties containerEl and rebuilds the whole tree, so `list` is detached
+		// and the live row is a different node. Checking isConnected picks the
+		// right one either way; focus() on a detached node is a silent no-op, so
+		// getting this wrong would look like the feature simply not working.
+		const refocusAfterMove = (direction: 'up' | 'down'): void => {
+			let moved: HTMLElement | undefined;
+			for (const root of [list, this.containerEl]) {
+				const found = root
+					.findAll('.annoteca-category-row')
+					.find((r) => r.dataset.annotecaCategory === cat.id);
+				if (found?.isConnected) {
+					moved = found;
+					break;
+				}
+			}
+			if (!moved) return;
+			const button = (d: 'up' | 'down') =>
+				moved?.querySelector<HTMLButtonElement>(
+					`.annoteca-category-move[data-annoteca-move="${d}"]`,
+				);
+			const same = button(direction);
+			const target =
+				same && !same.disabled
+					? same
+					: button(direction === 'up' ? 'down' : 'up');
+			target?.focus();
+		};
+
+		// Names the category, because a screen reader announcing a bare "Move up"
+		// in a list of them says nothing useful. Single source for the string so
+		// the initial render and the rename sync below cannot drift apart.
+		const moveLabel = (d: 'up' | 'down', displayName: string): string =>
+			`${d === 'up' ? 'Move up' : 'Move down'}: ${displayName}`;
+
+		// Renaming a category updates the summary text in place rather than
+		// rebuilding the row, so every other place the display name is baked in
+		// has to be refreshed alongside it. Without this the buttons keep
+		// announcing the old name until something else repaints the list, which
+		// points a screen-reader user at the wrong category.
+		const syncMoveLabels = (displayName: string): void => {
+			for (const btn of reorder.findAll('.annoteca-category-move')) {
+				const d = btn.dataset.annotecaMove;
+				if (d !== 'up' && d !== 'down') continue;
+				btn.setAttribute('aria-label', moveLabel(d, displayName));
+			}
+		};
+
+		// Pointer-free reordering. These are the primary path, not a mobile
+		// fallback: HTML5 drag-and-drop is equally unusable by keyboard and
+		// screen-reader users, so the buttons ship on every platform.
+		const moveButton = (
+			direction: 'up' | 'down',
+			icon: string,
+			disabled: boolean,
+		): void => {
+			const btn = reorder.createEl('button', {
+				cls: 'annoteca-category-move',
+				attr: {
+					type: 'button',
+					'data-annoteca-move': direction,
+					'aria-label': moveLabel(direction, cat.displayName),
+					...(disabled ? { disabled: 'true' } : {}),
+				},
+			});
+			setIcon(btn, icon);
+			if (disabled) return;
+			btn.addEventListener('click', (e) => {
+				e.stopPropagation();
+				this.plugin.settings.categories = moveCategory(
+					this.plugin.settings.categories,
+					cat.id,
+					direction,
+				);
+				void this.plugin.saveSettings();
+				// Same repaint pair the drop handler uses: the custom block does
+				// not refresh via update(), and rerender() reconciles the
+				// default-category dropdown against the new order.
+				this.refreshCategoryList(list);
+				this.rerender();
+				refocusAfterMove(direction);
+			});
+		};
+
+		moveButton('up', 'chevron-up', isFirst);
+		moveButton('down', 'chevron-down', isLast);
+
+		const summary = header.createEl('button', {
 			cls: 'annoteca-category-summary',
 			attr: {
 				type: 'button',
 				'aria-expanded': isExpanded ? 'true' : 'false',
 			},
-		});
-
-		// Drag handle for reordering. Lives inside the summary button but stops
-		// click propagation so grabbing it never toggles the accordion. Only the
-		// handle is draggable; the rest of the summary stays a plain expand
-		// button. Drag is pointer-only (HTML5 DnD), so reordering is a desktop
-		// affordance; mobile users add categories in the order they want them.
-		const handle = summary.createSpan({
-			cls: 'annoteca-category-drag-handle',
-			attr: { draggable: 'true', 'aria-label': 'Drag to reorder' },
-		});
-		setIcon(handle, 'grip-vertical');
-		handle.addEventListener('click', (e) => e.stopPropagation());
-		handle.addEventListener('dragstart', (e: DragEvent) => {
-			this.draggedCategoryId = cat.id;
-			row.addClass('is-dragging');
-			if (e.dataTransfer) {
-				e.dataTransfer.effectAllowed = 'move';
-				e.dataTransfer.setData('text/plain', cat.id);
-			}
-		});
-		handle.addEventListener('dragend', () => {
-			this.draggedCategoryId = null;
-			row.removeClass('is-dragging');
-			for (const r of list.findAll('.annoteca-category-row')) {
-				r.removeClass('is-drag-over');
-			}
 		});
 
 		const summaryIcon = summary.createSpan({
@@ -1272,6 +1389,25 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			cls: 'annoteca-category-controls',
 		});
 
+		// Identifier, read-only. This is the token that appears in the marker
+		// itself (`<!-- annoteca/<id>: ... -->`), so it is the one field a user
+		// needs when hand-writing a comment or briefing an AI assistant, and it
+		// is not editable because changing it would orphan every existing marker
+		// using it. Until now it appeared only in the collapsed summary chip;
+		// the narrow-viewport breakpoint hides that chip to make room, so the
+		// detail panel is where it has to be reachable from.
+		const idWrap = controls.createDiv({
+			cls: 'annoteca-category-control',
+		});
+		idWrap.createDiv({
+			cls: 'annoteca-category-control-label',
+			text: 'Identifier',
+		});
+		idWrap.createDiv({
+			cls: 'annoteca-category-identifier',
+			text: cat.id,
+		});
+
 		// Display name editing.
 		const nameWrap = controls.createDiv({
 			cls: 'annoteca-category-control',
@@ -1293,6 +1429,9 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 				'.annoteca-category-summary-name',
 			);
 			if (summaryName) summaryName.setText(v);
+			// The reorder buttons name the category too, and they are not
+			// rebuilt here either.
+			syncMoveLabels(v);
 			void this.plugin.saveSettings();
 		});
 

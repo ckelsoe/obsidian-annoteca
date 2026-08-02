@@ -1387,9 +1387,13 @@ settings:
 
 /* Icon picker modal ------------------------------------------------------- */
 
+/* `min-width` alone overflowed any viewport narrower than 480px, which is every
+   phone (roughly 390-430 CSS px). `min()` keeps the comfortable desktop width
+   while letting the modal shrink to fit, the same escape `.annoteca-reply-composer`
+   already uses. */
 .annoteca-icon-picker-modal {
-	min-width: 480px;
-	max-width: 720px;
+	min-width: min(480px, 92vw);
+	max-width: min(720px, 92vw);
 }
 
 .annoteca-icon-picker-header {
@@ -1468,11 +1472,65 @@ settings:
 	border-bottom: 1px solid var(--background-modifier-border);
 }
 
+/* Holds the reorder controls beside the summary. They are siblings rather than
+   children because the summary is a <button>, and a button may not contain
+   other interactive elements. */
+.annoteca-category-header {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.annoteca-category-reorder {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	flex: 0 0 auto;
+}
+
+.annoteca-category-move {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	/* 24px is below the 44px touch-target guideline, but these sit inside
+	   Obsidian's own settings list where every control is this size; matching
+	   the host beats being locally correct and visually wrong. The breakpoint
+	   below enlarges them where it actually matters. */
+	width: 24px;
+	height: 24px;
+	padding: 0;
+	background: none;
+	border: none;
+	border-radius: 4px;
+	box-shadow: none;
+	color: var(--text-faint);
+	cursor: pointer;
+	flex: 0 0 auto;
+}
+
+.annoteca-category-move:hover:not(:disabled) {
+	background-color: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.annoteca-category-move:disabled {
+	opacity: 0.3;
+	cursor: default;
+}
+
+.annoteca-category-move svg {
+	width: 15px;
+	height: 15px;
+}
+
 .annoteca-category-summary {
 	display: flex;
 	gap: 10px;
 	align-items: center;
-	width: 100%;
+	flex: 1 1 auto;
+	/* Without this a long display name refuses to shrink and pushes the reorder
+	   controls off the edge, because flex items floor at their content width. */
+	min-width: 0;
 	padding: 8px 4px;
 	background: none;
 	border: none;
@@ -1535,6 +1593,13 @@ settings:
 
 .annoteca-category-summary-name {
 	flex: 1 1 auto;
+	/* The summary is now a shrinkable flex item next to the reorder controls,
+	   so the name is what must give. Without these it wraps to a second line and
+	   the row height jumps as soon as a name is long. */
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 	font-weight: var(--font-semibold);
 }
 
@@ -1599,6 +1664,17 @@ settings:
 	font-size: var(--font-smaller);
 	color: var(--text-muted);
 	font-weight: var(--font-semibold);
+}
+
+/* Read-only, so it is deliberately not styled as a form field: monospace like
+   the summary chip it mirrors, but flat, so it does not read as editable. */
+.annoteca-category-identifier {
+	padding: 2px 0;
+	font-family: var(--font-monospace, monospace);
+	font-size: var(--font-smaller);
+	color: var(--text-muted);
+	user-select: text;
+	overflow-wrap: anywhere;
 }
 
 .annoteca-category-name {
@@ -1867,4 +1943,50 @@ settings:
 }
 .annoteca-skill-status.is-missing {
 	color: var(--text-muted);
+}
+
+/* Narrow-viewport adaptations ---------------------------------------------
+
+   Before this block the stylesheet had zero @media rules, so nothing could
+   adapt to a small screen even though the manifest declares
+   `isDesktopOnly: false`. These are deliberately few: most of the plugin
+   already sizes fluidly, and the aim is a working mechanism plus the
+   adaptations that are actually needed, not a speculative responsive layer.
+
+   The breakpoint is on width, not on platform. A narrow desktop sidebar has
+   the same problem a phone does, and Platform checks in TypeScript are
+   reserved for decisions that genuinely differ by input method (see
+   platform.ts). */
+
+@media (max-width: 480px) {
+	/* Reorder controls become the primary way to reorder here, because the
+	   drag handle is not rendered without drag-and-drop support. Give them a
+	   target that a thumb can actually hit. */
+	.annoteca-category-move {
+		width: 32px;
+		height: 32px;
+	}
+
+	.annoteca-category-move svg {
+		width: 18px;
+		height: 18px;
+	}
+
+	/* The identifier is monospace and never shrinks (`flex: 0 0 auto`), so on a
+	   phone it competes with the display name for the little width there is.
+	   The name is the more useful label at a glance. Hiding this chip is only
+	   acceptable because the detail panel now carries an Identifier row, so the
+	   value stays reachable one tap away rather than disappearing. */
+	.annoteca-category-summary-id {
+		display: none;
+	}
+}
+
+/* Short viewports, which in practice means a phone in landscape. The icon
+   picker's grid is capped at 480px tall, which on a ~390px-tall viewport
+   pushes its own search field off-screen and leaves no way to filter. */
+@media (max-height: 600px) {
+	.annoteca-icon-picker-grid {
+		max-height: 50vh;
+	}
 }

@@ -36,6 +36,7 @@ All TypeScript source files are in the **root** of the repository (not in a `src
 | `scripture.ts` | Scripture reference formatting |
 | `templates.ts` | Template helpers |
 | `ui-helpers.ts` / `view-utils.ts` | Shared UI utilities |
+| `platform.ts` | The only place that reads Obsidian's `Platform`; per-platform decisions go through it |
 | `globals.d.ts` | Obsidian API type augmentations (`editor.cm`, `manifest.version`) |
 | `styles.css` | All plugin CSS |
 | `__tests__/` | Jest unit tests |
@@ -151,6 +152,13 @@ These are enforced by CI and the Obsidian marketplace review — violating them 
 ### Mobile compatibility
 
 `isDesktopOnly` is `false` in `manifest.json`. Every feature must degrade gracefully on iOS and Android. Pointer-only affordances (drag handles, right-click menus) are fine as long as the core workflow remains accessible without them.
+
+Two seams exist for this, and they are not interchangeable:
+
+- **`styles.css` `@media` queries** for anything that is purely about available width. Prefer these. A narrow desktop sidebar has the same problem a phone does, so a width breakpoint is usually the correct tool and a `Platform` check is usually not.
+- **`platform.ts`** for decisions that genuinely differ by input method, not by size. It is the single point of contact with Obsidian's `Platform`; do not import `Platform` directly elsewhere. Its functions read the object per call rather than caching a boolean at module load, because a tablet can be re-docked.
+
+Worked example: category reordering. Move up / move down buttons render everywhere, because drag-and-drop is unusable by keyboard as well as by touch. The drag handle is rendered only when `supportsDragAndDrop()` is true, so touch users do not get a grip that silently does nothing. Reordering logic itself stays in `categories.ts` as a pure function, so both routes share one implementation.
 
 ### Settings UI headings
 
