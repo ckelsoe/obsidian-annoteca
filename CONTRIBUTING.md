@@ -43,7 +43,7 @@ it locally.
 - TypeScript strict mode is on. Never use `as any` casting. If types are missing, add declarations to `globals.d.ts`.
 - Follow [Obsidian's plugin guidelines](https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines).
 - Prefer `containerEl.createDiv()` / `createSpan()` over generic `createEl('div'|'span')`.
-- Do not import Node built-ins (`path`, `fs`, etc.) at the top of `main.ts`. Use a `Platform.isDesktop`-guarded `require()` instead.
+- Do not import Node built-ins (`path`, `fs`, etc.) at the top of `main.ts`. Use a `require()` guarded by `canRequireNode()` from `platform.ts` instead, not `Platform.isDesktop` (that flag is UI mode, not the Node runtime). `platform.ts` is the only file that imports Obsidian's `Platform`.
 - No inline `style` attributes. Move styles to `styles.css`.
 - Settings tab headings must avoid the words "settings", "options", "general", and the plugin name.
 - All UI strings (commands, menu titles, setting names, notifications) use sentence case. Brands recognized by `eslint-plugin-obsidianmd` (Markdown, macOS, iOS, Windows, Linux, etc.) keep their official casing.

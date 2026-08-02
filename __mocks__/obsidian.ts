@@ -41,7 +41,12 @@ export const Platform = {
 	isMobile: false,
 	isPhone: false,
 	isTablet: false,
+	// `isDesktop` is UI mode and `isDesktopApp` is the Electron runtime. They are
+	// separate fields here rather than one flag precisely so a test can set them
+	// apart and catch code that confuses the two.
 	isDesktop: true,
+	isDesktopApp: true,
+	isMobileApp: false,
 };
 
 export function setIcon(_el: HTMLElement, _icon: string): void {

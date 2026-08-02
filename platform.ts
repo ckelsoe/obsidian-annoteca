@@ -28,6 +28,25 @@ export function isPhone(): boolean {
 	return Platform.isPhone;
 }
 
+// Whether Node built-ins are reachable. The repo rule is that `path`, `fs` and
+// friends are never imported at the top of a module; they go behind a guarded
+// `require()`, and this is that guard.
+//
+// Named for the capability rather than the platform on purpose. Obsidian
+// exposes two flags that read alike and are not the same thing:
+//
+//   Platform.isDesktop    - "the UI is in desktop mode"
+//   Platform.isDesktopApp - "we're running the electron-based desktop app"
+//
+// Only the second one implies a Node runtime. `isDesktop` is a layout signal
+// and can be true where `require` does not exist, so gating a `require()` on it
+// crashes the plugin at load in exactly the environment the guard was meant to
+// protect. A function called `isDesktop()` invites that mistake; one called
+// `canRequireNode()` does not.
+export function canRequireNode(): boolean {
+	return Platform.isDesktopApp;
+}
+
 // Whether HTML5 drag-and-drop can be expected to work. Touch devices never fire
 // dragstart/dragover/drop, so any UI whose only reorder path is DnD is dead on
 // mobile. Callers should offer a pointer-free alternative regardless, and use

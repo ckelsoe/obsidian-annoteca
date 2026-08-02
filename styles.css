@@ -1953,10 +1953,17 @@ settings:
    already sizes fluidly, and the aim is a working mechanism plus the
    adaptations that are actually needed, not a speculative responsive layer.
 
-   The breakpoint is on width, not on platform. A narrow desktop sidebar has
-   the same problem a phone does, and Platform checks in TypeScript are
-   reserved for decisions that genuinely differ by input method (see
-   platform.ts). */
+   The breakpoint is on width rather than on platform, because these rules are
+   about how much room there is, not about touch. Platform checks in TypeScript
+   are reserved for decisions that genuinely differ by input method (see
+   platform.ts).
+
+   Note what `@media` actually measures: the VIEWPORT, not the element. That is
+   the right unit here only because everything below lives in the settings
+   modal, which is effectively full-screen on a phone and comfortably wide on a
+   desktop, so viewport width and available width agree. It would be the wrong
+   unit for anything in a sidebar leaf, whose width the user drags
+   independently of the window; that needs a container query. */
 
 @media (max-width: 480px) {
 	/* Reorder controls become the primary way to reorder here, because the

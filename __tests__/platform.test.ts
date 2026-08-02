@@ -1,5 +1,10 @@
 import { Platform } from 'obsidian';
-import { isMobile, isPhone, supportsDragAndDrop } from '../platform';
+import {
+	isMobile,
+	isPhone,
+	canRequireNode,
+	supportsDragAndDrop,
+} from '../platform';
 
 jest.mock('obsidian');
 
@@ -18,7 +23,29 @@ describe('platform', () => {
 	it('reports desktop by default', () => {
 		expect(isMobile()).toBe(false);
 		expect(isPhone()).toBe(false);
+		expect(canRequireNode()).toBe(true);
 		expect(supportsDragAndDrop()).toBe(true);
+	});
+
+	// This is the guard the repo's "no top-level Node built-ins" rule depends
+	// on. If it ever reported true without a Node runtime, a require('fs') would
+	// run where no such module exists and take the plugin down at load.
+	it('denies Node access on mobile', () => {
+		Platform.isMobile = true;
+		Platform.isDesktop = false;
+		Platform.isDesktopApp = false;
+		expect(canRequireNode()).toBe(false);
+	});
+
+	// The trap this helper exists to prevent. `Platform.isDesktop` only means
+	// "the UI is in desktop mode"; `isDesktopApp` means "running under
+	// Electron", and only the second implies Node. Desktop UI mode without the
+	// Electron runtime must NOT be treated as Node-capable, so this pins the two
+	// flags apart. Gating on isDesktop here would return true and crash.
+	it('denies Node access in desktop UI mode that is not the Electron app', () => {
+		Platform.isDesktop = true;
+		Platform.isDesktopApp = false;
+		expect(canRequireNode()).toBe(false);
 	});
 
 	it('follows isMobile changing after import', () => {

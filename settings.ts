@@ -1125,6 +1125,19 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		this.refreshCategoryList(list);
 	}
 
+	// Persist a mutation to `settings.categories` and bring the UI back in step.
+	// The two repaints are not interchangeable and both are needed: the custom
+	// block does not refresh via update(), so the rows are repainted directly,
+	// and rerender() then reconciles the bound default-category dropdown against
+	// the new list. Reorder, remove, and move-button all need exactly this, so it
+	// lives here rather than being written out at each call site where the two
+	// steps could drift apart.
+	private commitCategoryChange(list: HTMLElement): void {
+		void this.plugin.saveSettings();
+		this.refreshCategoryList(list);
+		this.rerender();
+	}
+
 	// Repaint the category rows into their existing list element. Used after a
 	// reorder or remove. We refresh the list directly instead of calling
 	// rerender(): on the 1.13 declarative path, update() reconciles bound
@@ -1283,12 +1296,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 					cat.id,
 					direction,
 				);
-				void this.plugin.saveSettings();
-				// Same repaint pair the drop handler uses: the custom block does
-				// not refresh via update(), and rerender() reconciles the
-				// default-category dropdown against the new order.
-				this.refreshCategoryList(list);
-				this.rerender();
+				this.commitCategoryChange(list);
 				refocusAfterMove(direction);
 			});
 		};
@@ -1378,11 +1386,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 				dragId,
 				cat.id,
 			);
-			void this.plugin.saveSettings();
-			// Repaint the list directly (the custom block does not refresh via
-			// update()); rerender() then reconciles the default-category dropdown.
-			this.refreshCategoryList(list);
-			this.rerender();
+			this.commitCategoryChange(list);
 		});
 
 		const controls = detail.createDiv({
@@ -1539,9 +1543,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 						(c) => c.id !== cat.id,
 					);
 				this.expandedCategoryIds.delete(cat.id);
-				void this.plugin.saveSettings();
-				this.refreshCategoryList(list);
-				this.rerender();
+				this.commitCategoryChange(list);
 			});
 		}
 	}
