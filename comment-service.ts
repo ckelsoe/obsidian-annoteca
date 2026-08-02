@@ -170,44 +170,49 @@ export class CommentService {
 		if (!(file instanceof TFile)) return;
 		const content = await this.readCurrentContent(file, path);
 
-		// Re-resolve offsets by id against current content, for the same reason
-		// replaceMarker does: a cached comment from the Hub panel can carry
-		// stale offsets if the document changed since the card was rendered.
-		// This method splices directly rather than going through replaceMarker,
-		// so it has to do its own re-resolution or it will overwrite whatever
-		// now sits at the old positions. That is a content-destroying bug, not a
-		// display one, and it became reachable when Reject was surfaced in the
-		// panel: the hover popup always passes a marker straight from the live
-		// editor, which is why it never showed up before.
-		const { start: markerStart, end: markerEnd } = this.freshOffsets(
-			content,
-			comment,
-		);
-
-		// freshOffsets can only re-resolve a comment that HAS an id; for an
-		// id-less one it hands back the cached offsets unchanged. Every other
-		// action degrades acceptably in that case because it rewrites the
-		// marker and nothing else. This one is different: it also replaces a
-		// span of prose, so acting on a stale offset destroys the user's text
-		// rather than mangling a marker.
+		// This method splices directly instead of going through replaceMarker,
+		// so it has to re-resolve the marker itself. A cached comment from the
+		// Hub panel can carry stale offsets if the document changed since the
+		// card was rendered, and unlike every other action this one replaces a
+		// span of PROSE as well as the marker, so acting on a stale offset
+		// destroys the user's text rather than mangling a marker.
 		//
-		// So verify the marker really is where we are about to splice, and
-		// refuse rather than guess. Reject is recoverable by re-running it once
-		// the index catches up; overwritten prose is not.
+		// Identify by id, not by position. Checking merely that some marker sits
+		// at the cached offset is not enough: if this comment was deleted and a
+		// different one now occupies that spot, that check passes and the revert
+		// overwrites the wrong marker and the wrong line.
 		//
-		// Ask the parser rather than string-matching the serializer's canonical
-		// `<!-- annoteca/` prefix: the parser also accepts `<!--annoteca/` and
-		// extra spaces, so a literal check would permanently refuse markers
-		// that are perfectly valid and hand-written.
-		const markerHere = parseAll(content).some(
-			(c) => c.marker.start === markerStart,
-		);
-		if (!markerHere) {
+		// An id-less comment has no stable identity to re-resolve, so there is
+		// no way to tell "still here" from "something else is here now". Refuse
+		// rather than guess. Reject is repeatable once the note catches up;
+		// overwritten prose is not.
+		//
+		// Id-less markers are a supported part of the format, so refusing them
+		// outright would break Reject for them permanently, including from the
+		// live editor where the offsets are perfectly fresh, and reopening the
+		// note cannot conjure an id. For those, fall back to a fingerprint:
+		// require the marker to still be at exactly the cached range AND to
+		// still carry the same category and body. That cannot silently hit a
+		// different comment, because a different comment would have to be
+		// byte-identical and at the same offset, which makes it the same marker
+		// for this purpose.
+		const parsed = parseAll(content);
+		const current = comment.id
+			? parsed.find((c) => c.id === comment.id)
+			: parsed.find(
+					(c) =>
+						c.marker.start === comment.marker.start &&
+						c.marker.end === comment.marker.end &&
+						c.category === comment.category &&
+						c.body === comment.body,
+				);
+		if (!current) {
 			new Notice(
 				'This comment has moved since it was loaded. Reopen the note and try again.',
 			);
 			return;
 		}
+		const { start: markerStart, end: markerEnd } = current.marker;
 		// Skip the single begin-placement space between the marker and the new
 		// prose, if present.
 		const proseStart =
