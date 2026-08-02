@@ -265,9 +265,13 @@ settings:
 	height: 14px;
 }
 
+/* Also the tap-anchored popover, not just hover. That makes it the primary
+   comment surface on a phone, where a hard 300px minimum sits uncomfortably
+   close to a 390px viewport once the tooltip is inset. `min()` lets it shrink
+   rather than overflow, and the max keeps the desktop width unchanged. */
 .annoteca-hover-preview {
-	min-width: 300px;
-	max-width: 420px;
+	min-width: min(300px, 88vw);
+	max-width: min(420px, 92vw);
 	padding: 10px 12px;
 	background-color: var(--background-primary);
 	border: 1px solid var(--background-modifier-border);
@@ -918,6 +922,47 @@ settings:
 
 .annoteca-reviewer-resolution-note {
 	margin-top: 4px;
+}
+
+/* F-270 addressed state in the panel. Orange rather than the resolution green,
+   matching the marker's addressed outline, because this is a pending decision
+   and not a finished one. */
+.annoteca-reviewer-state-addressed {
+	color: var(--color-orange);
+	font-style: normal;
+	font-weight: var(--font-semibold);
+}
+
+.annoteca-reviewer-addressed {
+	padding: 8px 10px;
+	background-color: var(--background-modifier-border);
+	border-left: 3px solid var(--color-orange);
+	border-radius: 4px;
+	margin-bottom: 12px;
+	font-size: var(--font-smaller);
+}
+
+.annoteca-reviewer-addressed-note {
+	margin-top: 4px;
+}
+
+.annoteca-reviewer-addressed-original-label {
+	margin-top: 8px;
+	color: var(--text-muted);
+	font-weight: var(--font-semibold);
+}
+
+/* The verbatim pre-edit prose. Monospace and pre-wrap so what Reject would
+   restore is shown exactly, including its line breaks, rather than reflowed
+   into something that only looks like the original. */
+.annoteca-reviewer-addressed-original {
+	margin-top: 2px;
+	padding: 6px 8px;
+	background-color: var(--background-primary);
+	border-radius: 4px;
+	font-family: var(--font-monospace, monospace);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
 }
 
 .annoteca-reviewer-thread {

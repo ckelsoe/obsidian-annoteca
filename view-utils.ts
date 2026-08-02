@@ -303,3 +303,22 @@ export function bucketCommentsByHeading(
 	}
 	return buckets;
 }
+
+// Decide what a marker click does, given whatever is in the saved settings and
+// whether this is a touch platform. Pure so the per-platform default is
+// testable without an Obsidian host.
+//
+// The default is resolved here rather than in DEFAULT_SETTINGS because that
+// object is built at module load, and reading Obsidian's `Platform` at import
+// time is unreliable. It also has to be a resolve-once-on-load decision rather
+// than a live read: if it were re-evaluated continuously, a user who
+// deliberately chose "panel" on their phone would have the choice silently
+// overwritten. So anything already stored wins, and the platform only decides
+// when nothing is stored, meaning first run.
+export function resolveMarkerClickAction(
+	stored: unknown,
+	isMobilePlatform: boolean,
+): 'panel' | 'popover' {
+	if (stored === 'panel' || stored === 'popover') return stored;
+	return isMobilePlatform ? 'popover' : 'panel';
+}

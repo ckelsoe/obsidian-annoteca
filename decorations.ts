@@ -13,6 +13,7 @@ import {
 	Decoration,
 	EditorView,
 	WidgetType,
+	ViewPlugin,
 	hoverTooltip,
 	showTooltip,
 	tooltips,
@@ -71,6 +72,22 @@ export const setHideAllCommentsEffect = StateEffect.define<boolean>();
 // at a specific marker. `null` means no composer is open.
 const setReplyComposerEffect = StateEffect.define<number | null>();
 
+// Tap-popover state. Carries the marker start of the comment whose popover is
+// pinned open by a click, or `null` for none. Separate from the hover tooltip
+// because that one is driven entirely by CodeMirror's pointer tracking and
+// vanishes on mouse-out, which is exactly the behaviour a touch user cannot
+// use.
+const setTapPopoverEffect = StateEffect.define<number | null>();
+
+// Dismiss the pinned popover. Used by the popover's own actions that navigate
+// away from it: the outside-click handler deliberately exempts clicks inside
+// the popover, so without this the popover survives its own Open button and
+// hangs over the panel it just opened, which on a phone means it covers the
+// sidebar that was the whole point of pressing it.
+function closeTapPopover(view: EditorView): void {
+	view.dispatch({ effects: setTapPopoverEffect.of(null) });
+}
+
 // Active-comment state (F-276). Carries the marker start of the comment whose
 // thread is currently open in the side panel, or `null` when nothing is
 // selected. The plugin dispatches this when the panel focuses a comment and
@@ -120,7 +137,10 @@ class MarkerIconWidget extends WidgetType {
 	constructor(
 		private readonly marker: Comment,
 		private readonly hidden: boolean,
-		private readonly onClick: (marker: Comment) => void,
+		// Takes the view because the click may need to dispatch an effect into
+		// it (pinning the tap popover) rather than only calling out to the
+		// plugin. toDOM receives the view, so it is available at bind time.
+		private readonly onClick: (marker: Comment, view: EditorView) => void,
 	) {
 		super();
 	}
@@ -176,7 +196,7 @@ class MarkerIconWidget extends WidgetType {
 		el.addEventListener('click', (e) => {
 			e.preventDefault();
 			e.stopPropagation();
-			this.onClick(this.marker);
+			this.onClick(this.marker, view);
 		});
 		return el;
 	}
@@ -313,8 +333,8 @@ function decorationsCompute(
 			// raw HTML doesn't leak) but renders display: none.
 			decorations.push(
 				Decoration.replace({
-					widget: new MarkerIconWidget(m, isHidden, (marker) =>
-						ctx.onMarkerClick(marker),
+					widget: new MarkerIconWidget(m, isHidden, (marker, view) =>
+						activateMarker(ctx, view, marker),
 					),
 					inclusive: false,
 				}).range(m.marker.start, m.marker.end),
@@ -374,6 +394,255 @@ const HOVER_DELAY_MS: Record<AnnotecaSettings['hoverDelay'], number> = {
 	relaxed: 600,
 };
 
+// Builds the comment popover DOM. Extracted from the hover tooltip so the
+// tap-anchored popover renders the identical surface instead of a second,
+// drifting copy: every action here (accept, revise, reject, star, reply,
+// resolve, copy id, open) has to behave the same whichever way it was opened.
+//
+// Takes `view` rather than a document because it needs the editor window for
+// element creation and dispatches the reply-composer effect back into it.
+function buildCommentPopover(
+	ctx: DecorationContext,
+	view: EditorView,
+	m: Comment,
+): HTMLElement {
+	const dom = view.dom.ownerDocument.win.createDiv();
+	dom.addClass('annoteca-hover-preview');
+	// Tag the outer .cm-tooltip ancestor (closest, not parentElement,
+	// which can miss it) so styles.css strips the default frame.
+	queueMicrotask(() => {
+		const tip = dom.closest('.cm-tooltip');
+		if (tip instanceof HTMLElement) tip.addClass('annoteca-hover-tooltip');
+	});
+
+	const header = dom.createDiv({
+		cls: 'annoteca-hover-header',
+	});
+	renderCategoryBadge(header, ctx.categoryFor(m.category), {
+		badge: 'annoteca-hover-category',
+	});
+	if (m.resolution) {
+		header.createSpan({
+			cls: 'annoteca-hover-state',
+			text: 'resolved',
+		});
+	} else if (m.addressed) {
+		header.createSpan({
+			cls: 'annoteca-hover-state annoteca-hover-state-addressed',
+			text: 'addressed',
+		});
+	}
+	if (m.date) {
+		header.createSpan({
+			cls: 'annoteca-hover-date',
+			text: formatStamp(m.date),
+		});
+	}
+	if (m.author) {
+		const authorEl = header.createSpan({
+			cls: 'annoteca-hover-author',
+			text: m.author,
+		});
+		applyAuthorColor(authorEl, m.author, ctx);
+	}
+
+	// Star toggle pinned to the far right via margin-left: auto in CSS.
+	// reflectInPlace: the hover popup is ephemeral, so it flips the
+	// star itself rather than waiting for a panel re-render.
+	renderStarButton(header, {
+		cls: 'annoteca-hover-star',
+		hasId: Boolean(m.id),
+		starred: Boolean(m.id) && ctx.isStarred(m),
+		onToggle: () => ctx.toggleStarred(m),
+		reflectInPlace: true,
+	});
+
+	dom.createDiv({ cls: 'annoteca-hover-body', text: m.body });
+
+	const repliesCount = m.replies.length;
+	if (repliesCount > 0) {
+		const repliesBlock = dom.createDiv({
+			cls: 'annoteca-hover-replies-list',
+		});
+		const shown = m.replies.slice(-MAX_REPLIES_IN_POPUP);
+		const earlier = repliesCount - shown.length;
+		if (earlier > 0) {
+			const more = repliesBlock.createEl('button', {
+				cls: 'annoteca-hover-more-link',
+				text: `+${earlier} earlier ${earlier === 1 ? 'reply' : 'replies'} — open in side panel`,
+			});
+			more.addEventListener('click', (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				closeTapPopover(view);
+				ctx.openInReviewer(m);
+			});
+		}
+		for (const r of shown) renderReplyRow(r, repliesBlock, ctx);
+	}
+
+	// F-270/F-271/F-272: the addressed note, plus the verbatim original
+	// when the edit replaced prose. The original is labeled "original
+	// (replaced)" when the stored anchor no longer matches the document
+	// (the expected post-replace state), and "original" otherwise.
+	if (m.addressed) {
+		const block = dom.createDiv({
+			cls: 'annoteca-hover-addressed',
+		});
+		const head = block.createDiv({
+			cls: 'annoteca-hover-resolution-head',
+		});
+		head.createSpan({
+			cls: 'annoteca-hover-reply-author',
+			text: m.addressed.author,
+		});
+		head.createSpan({
+			cls: 'annoteca-hover-reply-date',
+			text: formatStamp(m.addressed.date),
+		});
+		if (m.addressed.note) {
+			block.createDiv({
+				cls: 'annoteca-hover-reply-body',
+				text: m.addressed.note,
+			});
+		}
+		if (m.addressed.original !== undefined) {
+			const anchorResolves = findAnchorRange(view.state.doc, m) !== null;
+			const label = anchorResolves ? 'original' : 'original (replaced)';
+			const orig = block.createDiv({
+				cls: 'annoteca-hover-original',
+			});
+			orig.createDiv({
+				cls: 'annoteca-hover-original-label',
+				text: label,
+			});
+			orig.createDiv({
+				cls: 'annoteca-hover-original-body',
+				text: m.addressed.original,
+			});
+		}
+	}
+
+	if (m.resolution && m.resolution.note) {
+		const block = dom.createDiv({
+			cls: 'annoteca-hover-resolution',
+		});
+		const head = block.createDiv({
+			cls: 'annoteca-hover-resolution-head',
+		});
+		head.createSpan({
+			cls: 'annoteca-hover-reply-author',
+			text: m.resolution.author,
+		});
+		head.createSpan({
+			cls: 'annoteca-hover-reply-date',
+			text: formatStamp(m.resolution.date),
+		});
+		block.createDiv({
+			cls: 'annoteca-hover-reply-body',
+			text: m.resolution.note,
+		});
+	}
+
+	const actions = dom.createDiv({
+		cls: 'annoteca-hover-actions',
+	});
+
+	// F-270: an addressed comment gets accept / revise / reject in
+	// place of the plain resolve actions. Accept resolves it, revise
+	// returns it to open for further editing, reject reverts the prose.
+	if (m.addressed) {
+		const acceptBtn = actions.createEl('button', {
+			cls: 'annoteca-hover-action mod-cta',
+			text: 'Accept',
+		});
+		acceptBtn.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			ctx.acceptAddressed(m);
+		});
+		const reviseBtn = actions.createEl('button', {
+			cls: 'annoteca-hover-action',
+			text: 'Revise',
+		});
+		reviseBtn.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			ctx.reviseAddressed(m);
+		});
+		const rejectBtn = actions.createEl('button', {
+			cls: 'annoteca-hover-action',
+			text: 'Reject',
+		});
+		rejectBtn.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			ctx.rejectAddressed(m);
+		});
+	}
+
+	const openBtn = actions.createEl('button', {
+		cls: 'annoteca-hover-action',
+		text: 'Open in side panel',
+	});
+	openBtn.addEventListener('click', (e) => {
+		e.preventDefault();
+		e.stopPropagation();
+		closeTapPopover(view);
+		ctx.openInReviewer(m);
+	});
+
+	const replyBtn = actions.createEl('button', {
+		cls: 'annoteca-hover-action',
+		text: 'Reply',
+	});
+	replyBtn.addEventListener('click', (e) => {
+		e.preventDefault();
+		e.stopPropagation();
+		view.dispatch({
+			effects: setReplyComposerEffect.of(m.marker.start),
+		});
+	});
+
+	if (!m.addressed) {
+		const resolveBtn = actions.createEl('button', {
+			cls: 'annoteca-hover-action',
+			text: m.resolution ? 'Reopen' : 'Resolve',
+		});
+		resolveBtn.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			ctx.toggleResolution(m);
+		});
+
+		if (!m.resolution) {
+			const resolveRemoveBtn = actions.createEl('button', {
+				cls: 'annoteca-hover-action',
+				text: 'Resolve and remove',
+			});
+			resolveRemoveBtn.addEventListener('click', (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				ctx.resolveAndRemove(m);
+			});
+		}
+	}
+
+	if (m.id) {
+		const copyBtn = actions.createEl('button', {
+			cls: 'annoteca-hover-action',
+			text: 'Copy ID',
+		});
+		copyBtn.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			ctx.copyPermalink(m);
+		});
+	}
+
+	return dom;
+}
+
 function hoverTooltipExtension(
 	ctx: DecorationContext,
 	field: StateField<Comment[]>,
@@ -381,7 +650,20 @@ function hoverTooltipExtension(
 	return hoverTooltip(
 		(view, pos): Tooltip | null => {
 			if (hideAllFlag.value) return null;
+			// In popover mode the hover preview is off, and not merely
+			// suppressed while one is pinned. The two render the identical
+			// surface, so on a pointer device a dwell followed by a click
+			// stacks two copies on the same marker. Guarding only on "a popover
+			// is currently pinned" does not fix that: CodeMirror owns the hover
+			// tooltip's lifetime and does not re-consult this source for an
+			// unrelated effect, so an already-open hover tooltip would survive
+			// the click and sit behind the pinned one until mouse-out.
+			//
+			// Turning hover off outright is also the coherent reading of the
+			// setting. Choosing "Show popover" says the click is how comments
+			// get opened, and the popover is exactly the hover preview, pinned.
 			const settings = ctx.getSettings();
+			if (settings.markerClickAction === 'popover') return null;
 			if (!settings.hoverPreview) return null;
 			if (settings.indicatorStyle === 'none') return null;
 			const markers = view.state.field(field);
@@ -423,249 +705,9 @@ function hoverTooltipExtension(
 				pos: hoverRange.from,
 				end: hoverRange.to,
 				above: true,
-				create: () => {
-					const dom = view.dom.ownerDocument.win.createDiv();
-					dom.addClass('annoteca-hover-preview');
-					// Tag the outer .cm-tooltip ancestor (closest, not parentElement,
-					// which can miss it) so styles.css strips the default frame.
-					queueMicrotask(() => {
-						const tip = dom.closest('.cm-tooltip');
-						if (tip instanceof HTMLElement)
-							tip.addClass('annoteca-hover-tooltip');
-					});
-
-					const header = dom.createDiv({
-						cls: 'annoteca-hover-header',
-					});
-					renderCategoryBadge(header, ctx.categoryFor(m.category), {
-						badge: 'annoteca-hover-category',
-					});
-					if (m.resolution) {
-						header.createSpan({
-							cls: 'annoteca-hover-state',
-							text: 'resolved',
-						});
-					} else if (m.addressed) {
-						header.createSpan({
-							cls: 'annoteca-hover-state annoteca-hover-state-addressed',
-							text: 'addressed',
-						});
-					}
-					if (m.date) {
-						header.createSpan({
-							cls: 'annoteca-hover-date',
-							text: formatStamp(m.date),
-						});
-					}
-					if (m.author) {
-						const authorEl = header.createSpan({
-							cls: 'annoteca-hover-author',
-							text: m.author,
-						});
-						applyAuthorColor(authorEl, m.author, ctx);
-					}
-
-					// Star toggle pinned to the far right via margin-left: auto in CSS.
-					// reflectInPlace: the hover popup is ephemeral, so it flips the
-					// star itself rather than waiting for a panel re-render.
-					renderStarButton(header, {
-						cls: 'annoteca-hover-star',
-						hasId: Boolean(m.id),
-						starred: Boolean(m.id) && ctx.isStarred(m),
-						onToggle: () => ctx.toggleStarred(m),
-						reflectInPlace: true,
-					});
-
-					dom.createDiv({ cls: 'annoteca-hover-body', text: m.body });
-
-					const repliesCount = m.replies.length;
-					if (repliesCount > 0) {
-						const repliesBlock = dom.createDiv({
-							cls: 'annoteca-hover-replies-list',
-						});
-						const shown = m.replies.slice(-MAX_REPLIES_IN_POPUP);
-						const earlier = repliesCount - shown.length;
-						if (earlier > 0) {
-							const more = repliesBlock.createEl('button', {
-								cls: 'annoteca-hover-more-link',
-								text: `+${earlier} earlier ${earlier === 1 ? 'reply' : 'replies'} — open in side panel`,
-							});
-							more.addEventListener('click', (e) => {
-								e.preventDefault();
-								e.stopPropagation();
-								ctx.openInReviewer(m);
-							});
-						}
-						for (const r of shown)
-							renderReplyRow(r, repliesBlock, ctx);
-					}
-
-					// F-270/F-271/F-272: the addressed note, plus the verbatim original
-					// when the edit replaced prose. The original is labeled "original
-					// (replaced)" when the stored anchor no longer matches the document
-					// (the expected post-replace state), and "original" otherwise.
-					if (m.addressed) {
-						const block = dom.createDiv({
-							cls: 'annoteca-hover-addressed',
-						});
-						const head = block.createDiv({
-							cls: 'annoteca-hover-resolution-head',
-						});
-						head.createSpan({
-							cls: 'annoteca-hover-reply-author',
-							text: m.addressed.author,
-						});
-						head.createSpan({
-							cls: 'annoteca-hover-reply-date',
-							text: formatStamp(m.addressed.date),
-						});
-						if (m.addressed.note) {
-							block.createDiv({
-								cls: 'annoteca-hover-reply-body',
-								text: m.addressed.note,
-							});
-						}
-						if (m.addressed.original !== undefined) {
-							const anchorResolves =
-								findAnchorRange(view.state.doc, m) !== null;
-							const label = anchorResolves
-								? 'original'
-								: 'original (replaced)';
-							const orig = block.createDiv({
-								cls: 'annoteca-hover-original',
-							});
-							orig.createDiv({
-								cls: 'annoteca-hover-original-label',
-								text: label,
-							});
-							orig.createDiv({
-								cls: 'annoteca-hover-original-body',
-								text: m.addressed.original,
-							});
-						}
-					}
-
-					if (m.resolution && m.resolution.note) {
-						const block = dom.createDiv({
-							cls: 'annoteca-hover-resolution',
-						});
-						const head = block.createDiv({
-							cls: 'annoteca-hover-resolution-head',
-						});
-						head.createSpan({
-							cls: 'annoteca-hover-reply-author',
-							text: m.resolution.author,
-						});
-						head.createSpan({
-							cls: 'annoteca-hover-reply-date',
-							text: formatStamp(m.resolution.date),
-						});
-						block.createDiv({
-							cls: 'annoteca-hover-reply-body',
-							text: m.resolution.note,
-						});
-					}
-
-					const actions = dom.createDiv({
-						cls: 'annoteca-hover-actions',
-					});
-
-					// F-270: an addressed comment gets accept / revise / reject in
-					// place of the plain resolve actions. Accept resolves it, revise
-					// returns it to open for further editing, reject reverts the prose.
-					if (m.addressed) {
-						const acceptBtn = actions.createEl('button', {
-							cls: 'annoteca-hover-action mod-cta',
-							text: 'Accept',
-						});
-						acceptBtn.addEventListener('click', (e) => {
-							e.preventDefault();
-							e.stopPropagation();
-							ctx.acceptAddressed(m);
-						});
-						const reviseBtn = actions.createEl('button', {
-							cls: 'annoteca-hover-action',
-							text: 'Revise',
-						});
-						reviseBtn.addEventListener('click', (e) => {
-							e.preventDefault();
-							e.stopPropagation();
-							ctx.reviseAddressed(m);
-						});
-						const rejectBtn = actions.createEl('button', {
-							cls: 'annoteca-hover-action',
-							text: 'Reject',
-						});
-						rejectBtn.addEventListener('click', (e) => {
-							e.preventDefault();
-							e.stopPropagation();
-							ctx.rejectAddressed(m);
-						});
-					}
-
-					const openBtn = actions.createEl('button', {
-						cls: 'annoteca-hover-action',
-						text: 'Open in side panel',
-					});
-					openBtn.addEventListener('click', (e) => {
-						e.preventDefault();
-						e.stopPropagation();
-						ctx.openInReviewer(m);
-					});
-
-					const replyBtn = actions.createEl('button', {
-						cls: 'annoteca-hover-action',
-						text: 'Reply',
-					});
-					replyBtn.addEventListener('click', (e) => {
-						e.preventDefault();
-						e.stopPropagation();
-						view.dispatch({
-							effects: setReplyComposerEffect.of(m.marker.start),
-						});
-					});
-
-					if (!m.addressed) {
-						const resolveBtn = actions.createEl('button', {
-							cls: 'annoteca-hover-action',
-							text: m.resolution ? 'Reopen' : 'Resolve',
-						});
-						resolveBtn.addEventListener('click', (e) => {
-							e.preventDefault();
-							e.stopPropagation();
-							ctx.toggleResolution(m);
-						});
-
-						if (!m.resolution) {
-							const resolveRemoveBtn = actions.createEl(
-								'button',
-								{
-									cls: 'annoteca-hover-action',
-									text: 'Resolve and remove',
-								},
-							);
-							resolveRemoveBtn.addEventListener('click', (e) => {
-								e.preventDefault();
-								e.stopPropagation();
-								ctx.resolveAndRemove(m);
-							});
-						}
-					}
-
-					if (m.id) {
-						const copyBtn = actions.createEl('button', {
-							cls: 'annoteca-hover-action',
-							text: 'Copy ID',
-						});
-						copyBtn.addEventListener('click', (e) => {
-							e.preventDefault();
-							e.stopPropagation();
-							ctx.copyPermalink(m);
-						});
-					}
-
-					return { dom };
-				},
+				create: () => ({
+					dom: buildCommentPopover(ctx, view, m),
+				}),
 			};
 		},
 		{ hoverTime: HOVER_DELAY_MS[ctx.getSettings().hoverDelay] },
@@ -880,6 +922,134 @@ function dismissReplyOnOutsideClick(): Extension {
 const replyComposerStateRef: { field?: StateField<number | null> } = {};
 
 // --------------------------------------------------------------------------
+// Tap-anchored popover: the click/tap counterpart to the hover preview.
+// --------------------------------------------------------------------------
+
+// Decides what activating a marker does. Both entry points route through here,
+// the inline icon widget (which handles its own click because it returns true
+// from ignoreEvent) and the click handler that covers the anchor underline, so
+// the two can never disagree about what a click means.
+function activateMarker(
+	ctx: DecorationContext,
+	view: EditorView,
+	m: Comment,
+): void {
+	if (ctx.getSettings().markerClickAction === 'popover') {
+		view.dispatch({
+			effects: setTapPopoverEffect.of(m.marker.start),
+		});
+		return;
+	}
+	ctx.onMarkerClick(m);
+}
+
+function tapPopoverField(
+	ctx: DecorationContext,
+	markersField: StateField<Comment[]>,
+): StateField<number | null> {
+	return StateField.define<number | null>({
+		create: () => null,
+		update(value, tr) {
+			for (const e of tr.effects) {
+				if (e.is(setTapPopoverEffect)) return e.value;
+				// Opening the reply composer supersedes the popover. The
+				// composer is launched FROM the popover's Reply button, and
+				// leaving both pinned stacks two tooltips on the same marker.
+				if (e.is(setReplyComposerEffect) && e.value !== null)
+					return null;
+			}
+			// Drop the popover if its marker no longer exists, matching the
+			// reply composer. Without this, resolving or deleting from inside
+			// the popover leaves it pinned to a range that has gone.
+			if (tr.docChanged && value !== null) {
+				const markers = tr.state.field(markersField);
+				if (!markers.some((m) => m.marker.start === value)) return null;
+			}
+			return value;
+		},
+		provide: (f) =>
+			showTooltip.compute([f, markersField], (state) => {
+				const markerStart = state.field(f);
+				if (markerStart === null) return null;
+				const markers = state.field(markersField);
+				const m = markers.find((c) => c.marker.start === markerStart);
+				if (!m) return null;
+				return {
+					pos: m.marker.start,
+					end: m.marker.end,
+					above: true,
+					strictSide: false,
+					// The same builder the hover tooltip uses, so the two
+					// surfaces cannot drift apart.
+					create: (view) => ({
+						dom: buildCommentPopover(ctx, view, m),
+					}),
+				};
+			}),
+	});
+}
+
+const tapPopoverStateRef: { field?: StateField<number | null> } = {};
+
+// Whether a click at `target` should leave THIS view's pinned popover alone.
+function clickKeepsTapPopover(view: EditorView, target: HTMLElement): boolean {
+	// The popover and the reply composer render into document.body rather than
+	// into any editor, so containment cannot scope them; they are exempt
+	// wherever they sit.
+	if (target.closest('.annoteca-hover-preview')) return true;
+	if (target.closest('.annoteca-reply-composer')) return true;
+	// A marker click is handled by activateMarker, which re-points this view's
+	// popover, so dismissing first would only make it flicker. But the
+	// exemption has to be scoped to THIS view: with a split, a marker in
+	// another pane is an outside click here, and treating it as exempt would
+	// let every pane accumulate its own pinned popover.
+	const marker = target.closest(
+		'.annoteca-marker, .annoteca-icon, .annoteca-anchor',
+	);
+	if (marker && view.dom.contains(marker)) return true;
+	return false;
+}
+
+// Dismissal is registered on the DOCUMENT, not through
+// EditorView.domEventHandlers. An editor-scoped handler only sees events that
+// originate inside that editor, so clicking the sidebar, the ribbon, or another
+// pane would leave the popover pinned indefinitely while looking like an
+// outside click to the user. The tooltip is also rendered into document.body
+// (see the `tooltips` override), so it is genuinely outside the editor's DOM.
+//
+// Capture phase, so a handler that stops propagation cannot strand the popover.
+// The listener is torn down in destroy(); a per-editor global listener that
+// outlived its view would fire against a detached state.
+function dismissTapPopoverOnOutsideClick(): Extension {
+	return ViewPlugin.fromClass(
+		class {
+			private readonly doc: Document;
+			private readonly onDown: (event: MouseEvent) => void;
+
+			constructor(view: EditorView) {
+				this.doc = view.dom.ownerDocument;
+				this.onDown = (event: MouseEvent) => {
+					const target = event.target as HTMLElement | null;
+					if (!target) return;
+					if (clickKeepsTapPopover(view, target)) return;
+					const field = tapPopoverStateRef.field;
+					if (!field) return;
+					// `false` guards against the field being absent from this
+					// view's state, which happens while extensions reconfigure.
+					if (view.state.field(field, false) == null) return;
+					view.dispatch({ effects: setTapPopoverEffect.of(null) });
+				};
+				this.doc.addEventListener('mousedown', this.onDown, true);
+			}
+
+			destroy(): void {
+				this.doc.removeEventListener('mousedown', this.onDown, true);
+			}
+		},
+	);
+}
+
+// --------------------------------------------------------------------------
 // Active-comment highlight (F-276): a background mark over the comment whose
 // thread is open in the side panel, so selecting a comment keeps it visually
 // anchored in the editor.
@@ -966,7 +1136,7 @@ function clickHandlerExtension(
 			const markers = view.state.field(field);
 			const m = markers.find((c) => c.marker.start === start);
 			if (!m) return false;
-			ctx.onMarkerClick(m);
+			activateMarker(ctx, view, m);
 			event.preventDefault();
 			event.stopPropagation();
 			return true;
@@ -1030,9 +1200,12 @@ export function buildAnnotecaExtension(ctx: DecorationContext): Extension {
 	const replyField = replyComposerField(ctx, field);
 	replyComposerStateRef.field = replyField;
 	const activeField = activeCommentField(field);
+	const tapField = tapPopoverField(ctx, field);
+	tapPopoverStateRef.field = tapField;
 	return [
 		field,
 		replyField,
+		tapField,
 		activeField,
 		activeCommentDecorations(field, activeField),
 		// Render tooltips into document.body instead of the editor's DOM so
@@ -1046,6 +1219,7 @@ export function buildAnnotecaExtension(ctx: DecorationContext): Extension {
 		hoverTooltipExtension(ctx, field),
 		clickHandlerExtension(ctx, field),
 		dismissReplyOnOutsideClick(),
+		dismissTapPopoverOnOutsideClick(),
 	];
 }
 

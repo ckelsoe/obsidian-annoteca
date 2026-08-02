@@ -473,6 +473,15 @@ export class ThreadTabRenderer {
 				cls: 'annoteca-reviewer-state',
 				text: 'resolved',
 			});
+		// F-270. Until now the panel never rendered addressed state at all, so a
+		// comment awaiting accept/revise/reject was indistinguishable from an
+		// untouched one unless you hovered its marker. Mirrors the hover popup's
+		// precedence: a resolved comment is resolved, whatever came before.
+		else if (c.addressed)
+			compact.createSpan({
+				cls: 'annoteca-reviewer-state annoteca-reviewer-state-addressed',
+				text: 'addressed',
+			});
 		if (c.date)
 			compact.createSpan({
 				cls: 'annoteca-reviewer-meta',
@@ -552,6 +561,34 @@ export class ThreadTabRenderer {
 				res.createDiv({
 					cls: 'annoteca-reviewer-resolution-note',
 					text: c.resolution.note,
+				});
+			}
+		}
+
+		// F-270/F-271. The addressed note and, when the edit stored one, the
+		// verbatim pre-edit prose. The original is what makes Reject meaningful,
+		// so it has to be readable before deciding, not only from the hover popup.
+		if (c.addressed) {
+			const addr = expandedSection.createDiv({
+				cls: 'annoteca-reviewer-addressed',
+			});
+			addr.createSpan({
+				text: `Addressed ${formatStamp(c.addressed.date)} by ${c.addressed.author}`,
+			});
+			if (c.addressed.note) {
+				addr.createDiv({
+					cls: 'annoteca-reviewer-addressed-note',
+					text: c.addressed.note,
+				});
+			}
+			if (c.addressed.original !== undefined) {
+				addr.createDiv({
+					cls: 'annoteca-reviewer-addressed-original-label',
+					text: 'Original text',
+				});
+				addr.createDiv({
+					cls: 'annoteca-reviewer-addressed-original',
+					text: c.addressed.original,
 				});
 			}
 		}
@@ -657,6 +694,21 @@ export class ThreadTabRenderer {
 		if (c.resolution) {
 			this.createActionButton(actions, 'Reopen', 'rotate-ccw', () => {
 				void this.plugin.reopenComment(path, c);
+			});
+		} else if (c.addressed) {
+			// F-270: an addressed comment gets accept / revise / reject in place
+			// of the plain resolve actions, matching the hover popup exactly.
+			// Accept resolves it, revise reopens it, reject reverts the prose.
+			// These existed only behind hover before, which left the whole loop
+			// unreachable on touch and invisible to anyone working panel-first.
+			this.createActionButton(actions, 'Accept', 'check', () => {
+				void this.plugin.acceptAddressedFromPanel(path, c);
+			});
+			this.createActionButton(actions, 'Revise', 'rotate-ccw', () => {
+				void this.plugin.reviseAddressedFromPanel(path, c);
+			});
+			this.createActionButton(actions, 'Reject', 'undo-2', () => {
+				void this.plugin.rejectAddressedFromPanel(path, c);
 			});
 		} else {
 			this.createActionButton(actions, 'Resolve', 'check', () => {
