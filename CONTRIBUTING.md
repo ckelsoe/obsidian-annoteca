@@ -26,12 +26,17 @@ Thanks for your interest in improving Annoteca. This guide explains how to get a
 Before opening a pull request, run:
 
 ```bash
-npm run lint       # ESLint with eslint-plugin-obsidianmd recommended, zero warnings allowed
+npm run lint       # ESLint (zero warnings allowed) + Prettier format check + submission pre-check
 npm run build      # TypeScript strict type-check + esbuild production bundle
 npm test           # Jest unit tests
 ```
 
 All three must pass. Pull requests that break CI will not be reviewed until green.
+
+Formatting is enforced, not advisory: `npm run lint` fails on any `.ts` file
+Prettier would reformat. Run `npx prettier --write "**/*.ts"` to fix, or turn on
+format-on-save in your editor. The config is `.prettierrc.json`; do not override
+it locally.
 
 ## Coding conventions
 

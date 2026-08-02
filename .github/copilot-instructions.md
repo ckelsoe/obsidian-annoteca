@@ -53,7 +53,7 @@ All TypeScript source files are in the **root** of the repository (not in a `src
 npm install          # install all dependencies
 npm run dev          # dev build with file watching (auto-copies to obs-test-vault if present)
 npm run build        # TypeScript type-check (noEmit) + esbuild production bundle → main.js
-npm run lint         # ESLint (zero warnings allowed) + scripts/check-submission.mjs
+npm run lint         # ESLint (zero warnings allowed) + prettier --check "**/*.ts" + scripts/check-submission.mjs
 npm test             # Jest unit tests
 ```
 
@@ -197,4 +197,5 @@ Releases are triggered by pushing a version tag. The release workflow:
 - **`-->` inside an `annoteca-original` fence closes the HTML comment.** The caller must ensure the captured prose does not contain `-->`. Check `comment-service.ts` for how existing code handles this.
 - **Stale marker positions.** Operations triggered from the side panel should re-resolve the marker by its `id` against current file content before editing, not use a cached `marker.start/end`. See `comment-service.ts` for the pattern.
 - **`npm run lint` runs `scripts/check-submission.mjs`** in addition to ESLint. That script checks manifest description constraints, `!important` in CSS, and ESLint directive hygiene. Read it before adding new lint suppressions.
+- **`npm run lint` also runs `prettier --check "**/*.ts"`.** Formatting is a hard gate, so hand-formatted or scripted edits that Prettier would rewrite fail CI. Fix with `npx prettier --write`, never by editing `.prettierrc.json`. The scope is TypeScript only; `styles.css`, `manifest.json`, and the `.mjs` scripts are deliberately outside it.
 - **The test vault auto-copy** in `esbuild.config.mjs` looks for `../../obs-test-vault`. It silently skips if absent — this is expected on CI and in most dev environments.
