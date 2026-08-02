@@ -33,6 +33,22 @@ export class Events {
 	}
 }
 
+// Mirrors the shape of Obsidian's `Platform` that this plugin reads. Mutable
+// on purpose: tests that cover per-platform behaviour flip these and restore
+// them afterwards, which is why `platform.ts` reads the object per call instead
+// of capturing a boolean at import time.
+export const Platform = {
+	isMobile: false,
+	isPhone: false,
+	isTablet: false,
+	// `isDesktop` is UI mode and `isDesktopApp` is the Electron runtime. They are
+	// separate fields here rather than one flag precisely so a test can set them
+	// apart and catch code that confuses the two.
+	isDesktop: true,
+	isDesktopApp: true,
+	isMobileApp: false,
+};
+
 export function setIcon(_el: HTMLElement, _icon: string): void {
 	// no-op
 }

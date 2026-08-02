@@ -36,6 +36,7 @@ All TypeScript source files are in the **root** of the repository (not in a `src
 | `scripture.ts` | Scripture reference formatting |
 | `templates.ts` | Template helpers |
 | `ui-helpers.ts` / `view-utils.ts` | Shared UI utilities |
+| `platform.ts` | The only place that reads Obsidian's `Platform`; per-platform decisions go through it |
 | `globals.d.ts` | Obsidian API type augmentations (`editor.cm`, `manifest.version`) |
 | `styles.css` | All plugin CSS |
 | `__tests__/` | Jest unit tests |
@@ -121,7 +122,7 @@ These are enforced by CI and the Obsidian marketplace review — violating them 
 
 - **TypeScript strict mode is on.** Never use `as any`. If the Obsidian types are missing, add a proper declaration to `globals.d.ts`.
 - `types.ts`, `parser.ts`, `categories.ts`, and `skill-export.ts` have **no Obsidian import** and must stay that way. They are unit-tested under Node without the Obsidian host.
-- Do not import Node built-ins (`path`, `fs`, etc.) at the top of `main.ts`. Wrap them in a `Platform.isDesktop`-guarded `require()`.
+- Do not import Node built-ins (`path`, `fs`, etc.) at the top of `main.ts`. Wrap them in a `require()` guarded by `canRequireNode()` from `platform.ts`. **Not `Platform.isDesktop`**: that flag only means the UI is in desktop mode and can be true where Node does not exist, so guarding on it crashes the plugin at load in the exact environment the guard was for. `canRequireNode()` reads `Platform.isDesktopApp`, the Electron-runtime flag.
 
 ### Obsidian API
 
@@ -151,6 +152,13 @@ These are enforced by CI and the Obsidian marketplace review — violating them 
 ### Mobile compatibility
 
 `isDesktopOnly` is `false` in `manifest.json`. Every feature must degrade gracefully on iOS and Android. Pointer-only affordances (drag handles, right-click menus) are fine as long as the core workflow remains accessible without them.
+
+Two seams exist for this, and they are not interchangeable:
+
+- **`styles.css` `@media` queries** for anything about available width. Prefer these over a `Platform` check, which is usually the wrong tool for a layout problem. But be precise about what `@media` measures: **the viewport, not the element.** That makes it correct for the settings modal, which is full-screen on a phone and wide on a desktop, so viewport width and available width agree. It is *incorrect* for anything rendered inside a sidebar leaf (the Hub panel), because the user drags that width independently of the window — a viewport breakpoint will simply never fire at the right moment there. Use a container query for leaf content.
+- **`platform.ts`** for decisions that genuinely differ by input method or runtime, not by size. It is the single point of contact with Obsidian's `Platform`; do not import `Platform` directly elsewhere, including for the Node `require()` guard. Its functions read the object per call rather than caching a boolean at module load, because a tablet can be re-docked. Its helpers are named after the capability they gate (`supportsDragAndDrop`, `canRequireNode`) rather than after a platform, because `Platform` exposes near-identical flags that mean different things — `isDesktop` is UI mode, `isDesktopApp` is the Electron runtime — and a capability name makes picking the wrong one much harder.
+
+Worked example: category reordering. Move up / move down buttons render everywhere, because drag-and-drop is unusable by keyboard as well as by touch. The drag handle is rendered only when `supportsDragAndDrop()` is true, so touch users do not get a grip that silently does nothing. Reordering logic itself stays in `categories.ts` as a pure function, so both routes share one implementation.
 
 ### Settings UI headings
 

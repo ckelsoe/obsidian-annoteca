@@ -305,6 +305,30 @@ export function reorderCategories(
 	return next;
 }
 
+// Move one category up or down a single slot. This is the pointer-free
+// counterpart to the drag-and-drop reorder path: HTML5 drag events never fire
+// on touch, so the settings UI also offers move buttons, and both routes funnel
+// into `reorderCategories` rather than growing a second ordering implementation.
+//
+// Moving off either end is a no-op that returns a copy, matching
+// `reorderCategories`' contract so callers can assign the result
+// unconditionally without first checking whether the move was legal.
+export function moveCategory(
+	categories: readonly CategoryDefinition[],
+	id: string,
+	direction: 'up' | 'down',
+): CategoryDefinition[] {
+	const from = categories.findIndex((c) => c.id === id);
+	if (from === -1) return categories.slice();
+	const to = direction === 'up' ? from - 1 : from + 1;
+	if (to < 0 || to >= categories.length) return categories.slice();
+	const target = categories[to];
+	// `to` is bounds-checked above, so this only satisfies
+	// noUncheckedIndexedAccess.
+	if (!target) return categories.slice();
+	return reorderCategories(categories, id, target.id);
+}
+
 // Look up a category definition by id, falling back to a stand-in when the id
 // is not in the active set. Views and decorations need a non-null result so
 // they can render even when a comment uses a category the user has since
