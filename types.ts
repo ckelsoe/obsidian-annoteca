@@ -102,6 +102,16 @@ export interface AnnotecaSettings {
 	hoverPreview: boolean;
 	hoverDelay: 'instant' | 'short' | 'default' | 'relaxed';
 
+	// What clicking or tapping a marker does.
+	//   "panel"   → open the comment in the Hub side panel (the long-standing
+	//               behaviour, and the default on desktop)
+	//   "popover" → show the comment popover anchored at the marker, without
+	//               opening the sidebar over the document
+	// Defaulted per platform at first run rather than to a fixed value: on touch
+	// there is no hover, so "panel" would make the quick-peek posture impossible
+	// and every glance would cost a sidebar. See resolveMarkerClickAction.
+	markerClickAction: 'panel' | 'popover';
+
 	// Visual character of the anchor underline. Applies to every category;
 	// per-category urgency comes from the tier on each CategoryDefinition.
 	anchorStyle: 'solid' | 'wavy' | 'dotted' | 'dashed';

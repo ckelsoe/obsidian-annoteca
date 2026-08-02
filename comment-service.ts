@@ -170,8 +170,44 @@ export class CommentService {
 		if (!(file instanceof TFile)) return;
 		const content = await this.readCurrentContent(file, path);
 
-		const markerStart = comment.marker.start;
-		const markerEnd = comment.marker.end;
+		// Re-resolve offsets by id against current content, for the same reason
+		// replaceMarker does: a cached comment from the Hub panel can carry
+		// stale offsets if the document changed since the card was rendered.
+		// This method splices directly rather than going through replaceMarker,
+		// so it has to do its own re-resolution or it will overwrite whatever
+		// now sits at the old positions. That is a content-destroying bug, not a
+		// display one, and it became reachable when Reject was surfaced in the
+		// panel: the hover popup always passes a marker straight from the live
+		// editor, which is why it never showed up before.
+		const { start: markerStart, end: markerEnd } = this.freshOffsets(
+			content,
+			comment,
+		);
+
+		// freshOffsets can only re-resolve a comment that HAS an id; for an
+		// id-less one it hands back the cached offsets unchanged. Every other
+		// action degrades acceptably in that case because it rewrites the
+		// marker and nothing else. This one is different: it also replaces a
+		// span of prose, so acting on a stale offset destroys the user's text
+		// rather than mangling a marker.
+		//
+		// So verify the marker really is where we are about to splice, and
+		// refuse rather than guess. Reject is recoverable by re-running it once
+		// the index catches up; overwritten prose is not.
+		//
+		// Ask the parser rather than string-matching the serializer's canonical
+		// `<!-- annoteca/` prefix: the parser also accepts `<!--annoteca/` and
+		// extra spaces, so a literal check would permanently refuse markers
+		// that are perfectly valid and hand-written.
+		const markerHere = parseAll(content).some(
+			(c) => c.marker.start === markerStart,
+		);
+		if (!markerHere) {
+			new Notice(
+				'This comment has moved since it was loaded. Reopen the note and try again.',
+			);
+			return;
+		}
 		// Skip the single begin-placement space between the marker and the new
 		// prose, if present.
 		const proseStart =

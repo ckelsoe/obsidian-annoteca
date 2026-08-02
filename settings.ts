@@ -37,6 +37,11 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 
 	hoverPreview: true,
 	hoverDelay: 'default',
+	// Placeholder only. The real first-run value is decided per platform in
+	// loadSettings via resolveMarkerClickAction, because reading Platform at
+	// module load is unreliable. 'panel' is the historical behaviour, so it is
+	// the safe literal to sit here.
+	markerClickAction: 'panel',
 
 	anchorStyle: 'wavy',
 	anchorThickness: 'medium',
@@ -194,6 +199,18 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 								short: 'Short',
 								default: 'Default',
 								relaxed: 'Relaxed',
+							},
+						},
+					},
+					{
+						name: 'Clicking a marker',
+						desc: 'What happens when you click or tap a marker in the editor. Open in side panel shows the full thread; Show popover keeps the document in view. Defaults to the popover on phones and tablets, where there is no hover preview.',
+						control: {
+							type: 'dropdown',
+							key: 'markerClickAction',
+							options: {
+								panel: 'Open in side panel',
+								popover: 'Show popover',
 							},
 						},
 					},
@@ -521,6 +538,16 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 				short: 'Short',
 				default: 'Default',
 				relaxed: 'Relaxed',
+			},
+		);
+		this.addDropdownRow(
+			containerEl,
+			'Clicking a marker',
+			'What happens when you click or tap a marker in the editor. Open in side panel shows the full thread; Show popover keeps the document in view. Defaults to the popover on phones and tablets, where there is no hover preview.',
+			'markerClickAction',
+			{
+				panel: 'Open in side panel',
+				popover: 'Show popover',
 			},
 		);
 		this.addDropdownRow(

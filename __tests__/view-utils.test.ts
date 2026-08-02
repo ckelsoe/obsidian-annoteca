@@ -1,4 +1,4 @@
-import { formatStamp, truncate } from '../view-utils';
+import { formatStamp, truncate, resolveMarkerClickAction } from '../view-utils';
 
 describe('view-utils: formatStamp', () => {
 	it('renders a full timestamp as date and time, keeping seconds', () => {
@@ -25,5 +25,36 @@ describe('view-utils: truncate', () => {
 
 	it('cuts to the limit and appends a single ellipsis when over', () => {
 		expect(truncate('abcdefghij', 5)).toBe('abcde…');
+	});
+});
+
+describe('view-utils: resolveMarkerClickAction', () => {
+	it('honours a stored choice on desktop', () => {
+		expect(resolveMarkerClickAction('popover', false)).toBe('popover');
+		expect(resolveMarkerClickAction('panel', false)).toBe('panel');
+	});
+
+	// The important half. A user who deliberately picked "panel" on a phone
+	// must keep it; if the platform were allowed to win over a stored value the
+	// setting would silently revert every load and look broken.
+	it('honours a stored choice on mobile, platform does not override it', () => {
+		expect(resolveMarkerClickAction('panel', true)).toBe('panel');
+		expect(resolveMarkerClickAction('popover', true)).toBe('popover');
+	});
+
+	it('falls back per platform when nothing is stored', () => {
+		expect(resolveMarkerClickAction(undefined, false)).toBe('panel');
+		expect(resolveMarkerClickAction(undefined, true)).toBe('popover');
+	});
+
+	// Settings come off disk and are not trusted. A value from a future version,
+	// a hand-edited data.json, or null must not end up in the setting, because
+	// nothing downstream re-validates it.
+	it('treats an unrecognized stored value as absent', () => {
+		expect(resolveMarkerClickAction('sidebar', false)).toBe('panel');
+		expect(resolveMarkerClickAction('sidebar', true)).toBe('popover');
+		expect(resolveMarkerClickAction(null, true)).toBe('popover');
+		expect(resolveMarkerClickAction(42, false)).toBe('panel');
+		expect(resolveMarkerClickAction('', true)).toBe('popover');
 	});
 });

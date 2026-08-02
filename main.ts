@@ -45,8 +45,10 @@ import {
 	decideScrollAction,
 	authorColorFor,
 	authorPickerOptions,
+	resolveMarkerClickAction,
 	type ScrollAction,
 } from './view-utils';
+import { isMobile } from './platform';
 import { EditorView } from '@codemirror/view';
 
 // Top margin (px) left above the marker when anchoring it near the top of the
@@ -254,6 +256,15 @@ export default class AnnotecaPlugin extends Plugin {
 			...DEFAULT_SETTINGS,
 			...(loaded ?? {}),
 			indicatorStyle: DEFAULT_SETTINGS.indicatorStyle,
+			// Resolved from the RAW loaded value, not from the spread above, so
+			// that "absent" is distinguishable from "explicitly set to panel".
+			// The spread has already filled in the DEFAULT_SETTINGS placeholder
+			// by this point, which would make every existing desktop install
+			// look like a deliberate choice and every new mobile install too.
+			markerClickAction: resolveMarkerClickAction(
+				loaded?.markerClickAction,
+				isMobile(),
+			),
 		};
 
 		// Migrate legacy indicatorStyle values. Prior to the underline rewrite,
@@ -484,6 +495,36 @@ export default class AnnotecaPlugin extends Plugin {
 			editorCallback: (editor: Editor, view: MarkdownView) => {
 				this.withCommentAtCursor(editor, view, (path, c) => {
 					void this.resolveAndRemoveComment(path, c);
+				});
+			},
+		});
+		// F-270 addressed-state actions. The pointer-free counterpart to the
+		// hover popup and the panel buttons: a hotkey works with no pointer at
+		// all, which is the only route that exists on touch once hover is gone.
+		this.addCommand({
+			id: 'accept-addressed-at-cursor',
+			name: 'Accept addressed edit here',
+			editorCallback: (editor: Editor, view: MarkdownView) => {
+				this.withAddressedCommentAtCursor(editor, view, (path, c) => {
+					void this.acceptAddressedFromPanel(path, c);
+				});
+			},
+		});
+		this.addCommand({
+			id: 'revise-addressed-at-cursor',
+			name: 'Revise addressed edit here',
+			editorCallback: (editor: Editor, view: MarkdownView) => {
+				this.withAddressedCommentAtCursor(editor, view, (path, c) => {
+					void this.reviseAddressedFromPanel(path, c);
+				});
+			},
+		});
+		this.addCommand({
+			id: 'reject-addressed-at-cursor',
+			name: 'Reject addressed edit here',
+			editorCallback: (editor: Editor, view: MarkdownView) => {
+				this.withAddressedCommentAtCursor(editor, view, (path, c) => {
+					void this.rejectAddressedFromPanel(path, c);
 				});
 			},
 		});
@@ -915,6 +956,31 @@ export default class AnnotecaPlugin extends Plugin {
 	async rejectAddressedFromPopup(comment: Comment): Promise<void> {
 		const path = this.app.workspace.getActiveFile()?.path;
 		if (!path) return;
+		await this.comments.rejectAddressed(path, comment);
+	}
+
+	// F-270 addressed-state actions from the Hub panel and from commands. These
+	// take the path explicitly rather than reading the active file, because the
+	// panel can list comments from files that are not open: deriving the path
+	// from the workspace would apply the action to the wrong document.
+	async acceptAddressedFromPanel(
+		path: string,
+		comment: Comment,
+	): Promise<void> {
+		await this.comments.acceptAddressed(path, comment);
+	}
+
+	async reviseAddressedFromPanel(
+		path: string,
+		comment: Comment,
+	): Promise<void> {
+		await this.comments.reviseAddressed(path, comment);
+	}
+
+	async rejectAddressedFromPanel(
+		path: string,
+		comment: Comment,
+	): Promise<void> {
 		await this.comments.rejectAddressed(path, comment);
 	}
 
@@ -1602,6 +1668,26 @@ export default class AnnotecaPlugin extends Plugin {
 			return;
 		}
 		handler(file.path, found);
+	}
+
+	// Same lookup, but for the three addressed-state actions. Kept separate so a
+	// comment that is not addressed gets told so, instead of the command
+	// appearing to run and silently doing nothing: every one of
+	// acceptAddressed / reviseAddressed / rejectAddressed returns early when
+	// `addressed` is absent, which from a hotkey is indistinguishable from a
+	// broken binding.
+	private withAddressedCommentAtCursor(
+		editor: Editor,
+		view: MarkdownView,
+		handler: (path: string, c: Comment) => void,
+	): void {
+		this.withCommentAtCursor(editor, view, (path, c) => {
+			if (!c.addressed) {
+				new Notice('This comment has no addressed edit to act on.');
+				return;
+			}
+			handler(path, c);
+		});
 	}
 
 	private async activateView(
