@@ -7,11 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-08-02
+
 ### Added
 - A Discord link in the settings footer and the README. Questions, ideas, and general discussion now have somewhere to go that is not a GitHub issue. The invite never expires. A GitHub issue is still the better home for anything that needs tracking.
 
 ### Fixed
 - The links in the settings footer no longer run together. The separators between them depended on plain whitespace, which the layout dropped, so the row could read `GitHub|Report issues`. They are spaced by the layout now.
+- The settings footer no longer wraps a separator onto its own line. When the settings pane is narrow, which is normal in a sidebar you can drag, the row wraps, and each `|` could land at the end or the start of a line away from the link it belongs to. Each separator now travels with its link, so the row only ever breaks between whole entries.
 
 ## [1.11.0] - 2026-08-02
 
