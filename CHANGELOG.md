@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-08-02
+
 ### Added
 - Accept, Revise, and Reject are reachable without hovering. These three actions decide what happens to an edit an AI assistant has applied, and until now they existed in exactly one place: the popup that appears when you hover a marker. There is no hover on a phone or tablet, so the whole review loop was unreachable there, and anyone working from the side panel could not see or act on it either. They are now also buttons on the comment card in the Hub panel, and three commands ("Accept addressed edit here", "Revise addressed edit here", "Reject addressed edit here") that act on the comment at the cursor, so a hotkey works with no pointer at all.
 - The Hub panel shows addressed state. A comment waiting on accept/revise/reject is marked `addressed` on its card, and expanding the card shows who applied the edit and when, the note they left, and the verbatim original text that Reject would restore. The panel previously never displayed this at all, so an addressed comment was indistinguishable from an untouched one.
