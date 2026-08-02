@@ -3,16 +3,16 @@
 // stays focused on lifecycle and command wiring, and so the three marker
 // scans share one parameterized loop instead of three copies.
 
-import { Notice, TFile } from "obsidian";
+import { Notice, TFile } from 'obsidian';
 
-import type AnnotecaPlugin from "./main";
+import type AnnotecaPlugin from './main';
 import {
 	detectMarkerConflicts,
 	detectOrphans,
 	validateMarkers,
-} from "./diagnostics";
-import { detectDrift, type DriftFinding, type PositionSnapshot } from "./drift";
-import { todayISO } from "./parser";
+} from './diagnostics';
+import { detectDrift, type DriftFinding, type PositionSnapshot } from './drift';
+import { todayISO } from './parser';
 
 export class DiagnosticsService {
 	constructor(private readonly plugin: AnnotecaPlugin) {}
@@ -49,9 +49,10 @@ export class DiagnosticsService {
 
 	async runConflictCheck(): Promise<void> {
 		await this.runDetectorScan({
-			label: "Marker conflicts",
-			emptyMessage: "No marker conflicts detected.",
-			foundMessage: (n) => `Found ${n} potential conflict(s). See the diagnostics note in the vault.`,
+			label: 'Marker conflicts',
+			emptyMessage: 'No marker conflicts detected.',
+			foundMessage: (n) =>
+				`Found ${n} potential conflict(s). See the diagnostics note in the vault.`,
 			detect: detectMarkerConflicts,
 			scanIndexFirst: true,
 		});
@@ -59,9 +60,10 @@ export class DiagnosticsService {
 
 	async runOrphanCheck(): Promise<void> {
 		await this.runDetectorScan({
-			label: "Orphan comments",
-			emptyMessage: "No orphan comments detected.",
-			foundMessage: (n) => `Found ${n} orphan(s). See the diagnostics note in the vault.`,
+			label: 'Orphan comments',
+			emptyMessage: 'No orphan comments detected.',
+			foundMessage: (n) =>
+				`Found ${n} orphan(s). See the diagnostics note in the vault.`,
 			detect: detectOrphans,
 			scanIndexFirst: true,
 		});
@@ -69,9 +71,10 @@ export class DiagnosticsService {
 
 	async runMarkerValidation(): Promise<void> {
 		await this.runDetectorScan({
-			label: "Malformed markers",
-			emptyMessage: "All markers are valid.",
-			foundMessage: (n) => `Found ${n} malformed marker(s). See the diagnostics note in the vault.`,
+			label: 'Malformed markers',
+			emptyMessage: 'All markers are valid.',
+			foundMessage: (n) =>
+				`Found ${n} malformed marker(s). See the diagnostics note in the vault.`,
 			detect: validateMarkers,
 			scanIndexFirst: false,
 		});
@@ -91,13 +94,16 @@ export class DiagnosticsService {
 			authorTagEnabled: this.plugin.settings.enableAuthorTag,
 			debugMode: this.plugin.settings.debugMode,
 		};
-		await this.writeReport("Self-diagnostic", [summary]);
-		new Notice(`Plugin healthy. ${stats.commentCount} comment(s) indexed across ${stats.fileCount} file(s).`);
+		await this.writeReport('Self-diagnostic', [summary]);
+		new Notice(
+			`Plugin healthy. ${stats.commentCount} comment(s) indexed across ${stats.fileCount} file(s).`,
+		);
 	}
 
 	async runDriftCheck(): Promise<void> {
 		await this.plugin.scanVaultIfNeeded();
-		const prior: Record<string, PositionSnapshot> = this.plugin.settings.driftSnapshots ?? {};
+		const prior: Record<string, PositionSnapshot> =
+			this.plugin.settings.driftSnapshots ?? {};
 		const allFindings: DriftFinding[] = [];
 		let refreshed: Record<string, PositionSnapshot> = { ...prior };
 		const files = this.plugin.app.vault.getMarkdownFiles();
@@ -118,26 +124,31 @@ export class DiagnosticsService {
 		await this.plugin.saveSettings();
 
 		if (allFindings.length === 0) {
-			new Notice("No position drift detected. Snapshots refreshed.");
+			new Notice('No position drift detected. Snapshots refreshed.');
 			return;
 		}
-		await this.writeReport("Position drift", allFindings);
-		new Notice(`Found ${allFindings.length} drift finding(s). See the diagnostics note in the vault.`);
+		await this.writeReport('Position drift', allFindings);
+		new Notice(
+			`Found ${allFindings.length} drift finding(s). See the diagnostics note in the vault.`,
+		);
 	}
 
-	private async writeReport(label: string, findings: unknown[]): Promise<void> {
+	private async writeReport(
+		label: string,
+		findings: unknown[],
+	): Promise<void> {
 		// Write findings to a vault note so the user can read them without
 		// opening devtools. V2 adds debug-log routing per F-237.
 		const filename = `Annoteca diagnostics — ${label}.md`;
 		const lines: string[] = [];
 		lines.push(`# ${label}`);
-		lines.push("");
+		lines.push('');
 		lines.push(`Generated: ${todayISO()}`);
-		lines.push("");
-		lines.push("```json");
+		lines.push('');
+		lines.push('```json');
 		lines.push(JSON.stringify(findings, null, 2));
-		lines.push("```");
-		const body = lines.join("\n");
+		lines.push('```');
+		const body = lines.join('\n');
 
 		const existing = this.plugin.app.vault.getAbstractFileByPath(filename);
 		if (existing instanceof TFile) {

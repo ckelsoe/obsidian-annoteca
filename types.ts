@@ -26,22 +26,22 @@ export interface Addressed {
 
 export interface MarkerRange {
 	start: number; // byte offset of leading `<` of `<!--`
-	end: number;   // byte offset one past the trailing `>` of `-->`
+	end: number; // byte offset one past the trailing `>` of `-->`
 }
 
 export interface AnchorText {
-	text: string;       // the captured commented text; up to 80 chars
+	text: string; // the captured commented text; up to 80 chars
 	truncated: boolean; // true when the original selection was longer than 80 chars
 }
 
 export interface Comment {
-	id: string | undefined;          // 8-char base36 when present
-	category: string;                 // matches /^[a-z](-?[a-z0-9])*$/
-	body: string;                     // freeform inline markdown
-	date: string | undefined;         // ISO date or full timestamp (YYYY-MM-DDTHH:MM:SS)
-	author: string | undefined;       // short author tag
-	anchor: AnchorText | undefined;   // commented text captured at creation; undefined for cursor-position comments
-	replies: Reply[];                 // chronological, oldest first
+	id: string | undefined; // 8-char base36 when present
+	category: string; // matches /^[a-z](-?[a-z0-9])*$/
+	body: string; // freeform inline markdown
+	date: string | undefined; // ISO date or full timestamp (YYYY-MM-DDTHH:MM:SS)
+	author: string | undefined; // short author tag
+	anchor: AnchorText | undefined; // commented text captured at creation; undefined for cursor-position comments
+	replies: Reply[]; // chronological, oldest first
 	addressed: Addressed | undefined; // F-270: pending accept/revise/reject; absent when not addressed
 	resolution: Resolution | undefined;
 	marker: MarkerRange;
@@ -53,14 +53,14 @@ export interface LocatedComment {
 	comment: Comment;
 }
 
-export type AnchorTier = "subtle" | "normal" | "strong";
+export type AnchorTier = 'subtle' | 'normal' | 'strong';
 
 export interface CategoryDefinition {
-	id: string;             // dash-separated lowercase, matches parser rule
-	displayName: string;    // sentence case for UI
-	icon?: string;          // Obsidian icon name; falls back to category default
-	color?: string;         // CSS variable name or hex; falls back to theme variable
-	tier?: AnchorTier;      // anchor-underline urgency; undefined === "normal"
+	id: string; // dash-separated lowercase, matches parser rule
+	displayName: string; // sentence case for UI
+	icon?: string; // Obsidian icon name; falls back to category default
+	color?: string; // CSS variable name or hex; falls back to theme variable
+	tier?: AnchorTier; // anchor-underline urgency; undefined === "normal"
 }
 
 // Per-author / per-collaborator styling (F-274/F-275). `tag` is the author
@@ -76,7 +76,7 @@ export interface AuthorStyle {
 // categories.ts. Built-ins are read-only; user-saved ones can be loaded,
 // renamed, deleted.
 export interface UserPreset {
-	id: string;             // generated unique id
+	id: string; // generated unique id
 	displayName: string;
 	categories: CategoryDefinition[];
 }
@@ -92,33 +92,33 @@ export interface AnnotecaSettings {
 	//               were created with a selection)
 	// "both"      → glyph and underline together
 	// "none"      → no in-editor decorations (markers remain in the file)
-	indicatorStyle: "icon" | "underline" | "both" | "none";
-	defaultVisibility: "show" | "hide" | "last";
+	indicatorStyle: 'icon' | 'underline' | 'both' | 'none';
+	defaultVisibility: 'show' | 'hide' | 'last';
 
 	// Marker hover preview: show the comment/thread preview popup when hovering a
 	// marker or its anchor underline in the editor. On by default. The toggle is
 	// live; hoverDelay (the dwell before the popup appears) is read when the
 	// editor extension is built, so a change to it takes effect on next reload.
 	hoverPreview: boolean;
-	hoverDelay: "instant" | "short" | "default" | "relaxed";
+	hoverDelay: 'instant' | 'short' | 'default' | 'relaxed';
 
 	// Visual character of the anchor underline. Applies to every category;
 	// per-category urgency comes from the tier on each CategoryDefinition.
-	anchorStyle: "solid" | "wavy" | "dotted" | "dashed";
+	anchorStyle: 'solid' | 'wavy' | 'dotted' | 'dashed';
 
 	// Baseline thickness used by the "normal" tier. "subtle" tier always
 	// renders thin, "strong" tier always renders thick, regardless of this
 	// setting.
-	anchorThickness: "thin" | "medium" | "thick";
+	anchorThickness: 'thin' | 'medium' | 'thick';
 
 	// How visible resolved comments stay in the editor. "normal" dims to
 	// opacity 0.5, which can read as unreadable in dark themes where the
 	// base text is already darker. "bright" keeps resolved content legible
 	// (opacity 0.85) while still distinguishing it from open comments via
 	// the strikethrough on the icon and the muted underline color.
-	resolvedBrightness: "normal" | "bright";
+	resolvedBrightness: 'normal' | 'bright';
 
-	resolvedDisplay: "dim" | "hide";
+	resolvedDisplay: 'dim' | 'hide';
 
 	// When true, resolving a comment removes its marker from the file instead
 	// of appending a [resolved ...] line. Default false: keep-in-place history
@@ -134,7 +134,7 @@ export interface AnnotecaSettings {
 	// one-human-plus-AI case.
 	authorStyles: AuthorStyle[];
 
-	composerLocation: "modal" | "panel";
+	composerLocation: 'modal' | 'panel';
 
 	// When true, selecting text in the editor shows a small floating "Comment"
 	// button next to the selection that opens the composer for that range. Off
@@ -156,10 +156,10 @@ export interface AnnotecaSettings {
 	//               already visible (the F-276 don't-yank behavior).
 	// Migrated from the legacy centerCommentOnNavigate boolean (true -> "center",
 	// false/absent -> "top").
-	markerScrollAlign: "top" | "center" | "minimal";
+	markerScrollAlign: 'top' | 'center' | 'minimal';
 
 	debugMode: boolean;
-	debugLogTarget: "console" | "vault";
+	debugLogTarget: 'console' | 'vault';
 
 	settingsBackupPath: string | undefined;
 
@@ -173,7 +173,7 @@ export interface AnnotecaSettings {
 
 	// Last-active tab in the Annoteca hub panel. Restored on manual panel open.
 	// Marker clicks force the "thread" tab regardless.
-	lastHubTab: "thread" | "outline" | "starred";
+	lastHubTab: 'thread' | 'outline' | 'starred';
 
 	// Scope state for the Thread tab. Persists across restarts so users keep
 	// their working context. Re-evaluated against the active file on load.
@@ -193,11 +193,11 @@ export interface AnnotecaSettings {
 	customPresets: UserPreset[];
 
 	// Indicator size in the editor (inline icon + gutter dot).
-	indicatorSize: "small" | "medium" | "large";
+	indicatorSize: 'small' | 'medium' | 'large';
 
 	// Where "Export AI skill" writes its SKILL.md inside the vault:
 	// .claude/skills/ (Claude Code), .agent/skills/ (other assistants), or both.
-	skillExportTarget: "claude" | "agent" | "both";
+	skillExportTarget: 'claude' | 'agent' | 'both';
 
 	// Skill staleness tracking. exportedSkillVersion is the schema version
 	// stamped at the last export; skillStaleNoticeShownFor is the schema version
@@ -211,17 +211,17 @@ export interface AnnotecaSettings {
 	// "per-section" → a badge on each rendered section containing markers
 	// "both"        → banner and badges
 	// "off"         → nothing rendered
-	readingViewIndicator: "off" | "banner" | "per-section" | "both";
+	readingViewIndicator: 'off' | 'banner' | 'per-section' | 'both';
 }
 
 // Discriminated union for scope shapes. The shape determines what set of
 // files the panel includes; anchorPath disambiguates folder/file scopes.
 export type ScopeShape =
-	| { kind: "file" }
-	| { kind: "folder"; subfolders: boolean }
-	| { kind: "vault" }
-	| { kind: "property"; key: string; value: string }
-	| { kind: "tag"; tag: string };
+	| { kind: 'file' }
+	| { kind: 'folder'; subfolders: boolean }
+	| { kind: 'vault' }
+	| { kind: 'property'; key: string; value: string }
+	| { kind: 'tag'; tag: string };
 
 export interface ScopeState {
 	shape: ScopeShape;
@@ -229,4 +229,4 @@ export interface ScopeState {
 	pinned: boolean; // when true, scope does not auto-collapse when the active file moves out
 }
 
-export type StatusFilter = "open" | "resolved" | "all";
+export type StatusFilter = 'open' | 'resolved' | 'all';

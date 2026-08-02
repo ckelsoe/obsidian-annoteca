@@ -1,13 +1,16 @@
 // Pure helpers used by the hub panel views. No Obsidian dependency so
 // they can be unit-tested without mocking the runtime API.
 
-import type { AuthorStyle, Comment } from "./types";
+import type { AuthorStyle, Comment } from './types';
 
 // Per-author color lookup (F-275). Returns the configured color for an author
 // tag, or undefined when the author has no style. Case-sensitive: author tags
 // are stored verbatim (the parser preserves casing).
-export function authorColorFor(tag: string, styles: AuthorStyle[]): string | undefined {
-	return styles.find(s => s.tag === tag)?.color;
+export function authorColorFor(
+	tag: string,
+	styles: AuthorStyle[],
+): string | undefined {
+	return styles.find((s) => s.tag === tag)?.color;
 }
 
 // Format an Annoteca timestamp for display in the panel and hover popups. A
@@ -17,7 +20,7 @@ export function authorColorFor(tag: string, styles: AuthorStyle[]): string | und
 // stamp (YYYY-MM-DD) renders unchanged. Input is trusted parser output, so this
 // only swaps the separator rather than validating.
 export function formatStamp(iso: string): string {
-	return iso.replace("T", " ");
+	return iso.replace('T', ' ');
 }
 
 // Truncate text to `max` characters, appending a single ellipsis when cut. The
@@ -25,7 +28,7 @@ export function formatStamp(iso: string): string {
 // pass their own; this just removes the three-copy `length > n ? slice : text`
 // idiom that drifted to different limits across the panels.
 export function truncate(text: string, max: number): string {
-	return text.length > max ? text.slice(0, max) + "…" : text;
+	return text.length > max ? text.slice(0, max) + '…' : text;
 }
 
 // Build the author picker options for the reply composer (F-274). Combines, in
@@ -40,8 +43,8 @@ export function authorPickerOptions(
 	const out: string[] = [];
 	const seen = new Set<string>();
 	const add = (tag: string | undefined): void => {
-		const t = (tag ?? "").trim();
-		if (t === "" || seen.has(t)) return;
+		const t = (tag ?? '').trim();
+		if (t === '' || seen.has(t)) return;
 		seen.add(t);
 		out.push(t);
 	};
@@ -59,12 +62,12 @@ export function shouldSubmitOnKeydown(
 	e: { key: string; shiftKey: boolean; ctrlKey: boolean; metaKey: boolean },
 	submitOnEnter: boolean,
 ): boolean {
-	if (e.key !== "Enter") return false;
-	return submitOnEnter ? !e.shiftKey : (e.ctrlKey || e.metaKey);
+	if (e.key !== 'Enter') return false;
+	return submitOnEnter ? !e.shiftKey : e.ctrlKey || e.metaKey;
 }
 
-export type MarkerScrollAlign = "top" | "center" | "minimal";
-export type ScrollAction = "top" | "center" | "minimal" | "none";
+export type MarkerScrollAlign = 'top' | 'center' | 'minimal';
+export type ScrollAction = 'top' | 'center' | 'minimal' | 'none';
 
 // Decide how to scroll the editor when navigating to a comment (F-276, F-289).
 //
@@ -79,9 +82,9 @@ export function decideScrollAction(
 	targetVisible: boolean,
 	force = false,
 ): ScrollAction {
-	if (align === "center") return "center";
-	if (align === "top") return "top";
-	return targetVisible && !force ? "none" : "minimal";
+	if (align === 'center') return 'center';
+	if (align === 'top') return 'top';
+	return targetVisible && !force ? 'none' : 'minimal';
 }
 
 // Window size searched on each side of a marker for its anchor text. Bounds the
@@ -89,7 +92,10 @@ export function decideScrollAction(
 // historical 200-char look-back window.
 export const ANCHOR_WINDOW = 200;
 
-export interface AnchorMatch { from: number; to: number; }
+export interface AnchorMatch {
+	from: number;
+	to: number;
+}
 
 // Direction-agnostic anchor resolver (F-273). Locate the document range that
 // matches a comment's stored anchor text, searching BOTH the window before the
@@ -115,7 +121,7 @@ export function resolveAnchorRangeInWindows(
 	if (anchorText.length === 0) return null;
 	const back = precedingWindow;
 	const fwd = followingWindow;
-	const ellipsisIdx = anchorText.indexOf("…");
+	const ellipsisIdx = anchorText.indexOf('…');
 
 	if (ellipsisIdx === -1) {
 		// Non-truncated: the anchor sits flush against the marker, possibly with
@@ -123,14 +129,20 @@ export function resolveAnchorRangeInWindows(
 		if (back.endsWith(anchorText)) {
 			return { from: markerStart - anchorText.length, to: markerStart };
 		}
-		if (back.endsWith(anchorText + " ")) {
-			return { from: markerStart - anchorText.length - 1, to: markerStart - 1 };
+		if (back.endsWith(anchorText + ' ')) {
+			return {
+				from: markerStart - anchorText.length - 1,
+				to: markerStart - 1,
+			};
 		}
 		if (fwd.startsWith(anchorText)) {
 			return { from: markerEnd, to: markerEnd + anchorText.length };
 		}
-		if (fwd.startsWith(" " + anchorText)) {
-			return { from: markerEnd + 1, to: markerEnd + 1 + anchorText.length };
+		if (fwd.startsWith(' ' + anchorText)) {
+			return {
+				from: markerEnd + 1,
+				to: markerEnd + 1 + anchorText.length,
+			};
 		}
 		return null;
 	}
@@ -145,7 +157,7 @@ export function resolveAnchorRangeInWindows(
 	// Backward.
 	let tailEnd: number | null = null;
 	if (back.endsWith(tail)) tailEnd = markerStart;
-	else if (back.endsWith(tail + " ")) tailEnd = markerStart - 1;
+	else if (back.endsWith(tail + ' ')) tailEnd = markerStart - 1;
 	if (tailEnd !== null) {
 		const tailStart = tailEnd - tail.length;
 		const headHaystack = back.slice(0, tailStart - backStart);
@@ -158,9 +170,9 @@ export function resolveAnchorRangeInWindows(
 	// Forward.
 	let headStart: number | null = null;
 	if (fwd.startsWith(head)) headStart = markerEnd;
-	else if (fwd.startsWith(" " + head)) headStart = markerEnd + 1;
+	else if (fwd.startsWith(' ' + head)) headStart = markerEnd + 1;
 	if (headStart !== null) {
-		const afterHeadLocal = (headStart - markerEnd) + head.length;
+		const afterHeadLocal = headStart - markerEnd + head.length;
 		const tailHaystack = fwd.slice(afterHeadLocal);
 		const tailIdxLocal = tailHaystack.indexOf(tail);
 		if (tailIdxLocal !== -1) {
@@ -184,16 +196,30 @@ export function resolveAnchorRange(
 ): AnchorMatch | null {
 	const backStart = Math.max(0, markerStart - ANCHOR_WINDOW);
 	const preceding = doc.slice(backStart, markerStart);
-	const following = doc.slice(markerEnd, Math.min(doc.length, markerEnd + ANCHOR_WINDOW));
-	return resolveAnchorRangeInWindows(preceding, backStart, markerStart, following, markerEnd, anchorText);
+	const following = doc.slice(
+		markerEnd,
+		Math.min(doc.length, markerEnd + ANCHOR_WINDOW),
+	);
+	return resolveAnchorRangeInWindows(
+		preceding,
+		backStart,
+		markerStart,
+		following,
+		markerEnd,
+		anchorText,
+	);
 }
 
 // Decoration spec for the active-comment highlight (F-276). Pure data so the
 // planner can be unit-tested without a CodeMirror view.
-export interface ActiveDecoSpec { from: number; to: number; cls: string; }
+export interface ActiveDecoSpec {
+	from: number;
+	to: number;
+	cls: string;
+}
 
-export const ACTIVE_COMMENT_CLASS = "annoteca-active-comment";
-export const ACTIVE_COMMENT_MARKER_CLASS = "annoteca-active-comment-marker";
+export const ACTIVE_COMMENT_CLASS = 'annoteca-active-comment';
+export const ACTIVE_COMMENT_MARKER_CLASS = 'annoteca-active-comment-marker';
 
 // Pure planner for the active-comment decorations (F-276). Given the active
 // marker start, the parsed markers, the resolved anchor range (or null), and
@@ -208,18 +234,26 @@ export function planActiveCommentDecorations(
 	hideAll: boolean,
 ): ActiveDecoSpec[] {
 	if (hideAll || activeStart === null) return [];
-	const m = markers.find(c => c.marker.start === activeStart);
+	const m = markers.find((c) => c.marker.start === activeStart);
 	if (!m) return [];
 
 	const specs: ActiveDecoSpec[] = [];
 	// Highlight the anchored text when it resolves on either side of the marker.
 	// This is the reader-facing "this is the passage" cue.
 	if (anchorRange && anchorRange.from < anchorRange.to) {
-		specs.push({ from: anchorRange.from, to: anchorRange.to, cls: ACTIVE_COMMENT_CLASS });
+		specs.push({
+			from: anchorRange.from,
+			to: anchorRange.to,
+			cls: ACTIVE_COMMENT_CLASS,
+		});
 	}
 	// Always accent the marker itself so a comment with no anchor (or whose
 	// anchor no longer matches) still shows which marker is active.
-	specs.push({ from: m.marker.start, to: m.marker.end, cls: ACTIVE_COMMENT_MARKER_CLASS });
+	specs.push({
+		from: m.marker.start,
+		to: m.marker.end,
+		cls: ACTIVE_COMMENT_MARKER_CLASS,
+	});
 	// RangeSet requires monotonically increasing start offsets. The anchor can
 	// sit before or after the marker (direction-agnostic), so sort.
 	specs.sort((a, b) => a.from - b.from);
@@ -229,12 +263,15 @@ export function planActiveCommentDecorations(
 export function extractIndexTerm(body: string): string {
 	// The modal template emits `<term> > <subterm> — <body>` or `<term> — <body>`.
 	// Strip the post-em-dash body if present; return the term/subterm chain.
-	const dashIdx = body.indexOf(" — ");
+	const dashIdx = body.indexOf(' — ');
 	const head = dashIdx === -1 ? body : body.slice(0, dashIdx);
-	return head.trim() || "(unspecified)";
+	return head.trim() || '(unspecified)';
 }
 
-export interface HeadingBucket { open: number; resolved: number; }
+export interface HeadingBucket {
+	open: number;
+	resolved: number;
+}
 
 export interface HeadingShape {
 	heading: string;
@@ -246,7 +283,10 @@ export function bucketCommentsByHeading(
 	headings: HeadingShape[],
 	comments: Comment[],
 ): HeadingBucket[] {
-	const buckets: HeadingBucket[] = headings.map(() => ({ open: 0, resolved: 0 }));
+	const buckets: HeadingBucket[] = headings.map(() => ({
+		open: 0,
+		resolved: 0,
+	}));
 	for (const c of comments) {
 		let bucketIdx = -1;
 		for (let i = 0; i < headings.length; i++) {

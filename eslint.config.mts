@@ -1,6 +1,7 @@
 import tseslint from "typescript-eslint";
 import obsidianmd from "eslint-plugin-obsidianmd";
 import globals from "globals";
+import prettierConfig from "eslint-config-prettier";
 import { globalIgnores } from "eslint/config";
 
 export default tseslint.config(
@@ -48,4 +49,6 @@ export default tseslint.config(
 		// unsafe any assignments. Matches icon-palette and the standard template.
 		"eslint.config.mts",
 	]),
+	// Last, so it wins: turns off the stylistic rules that would fight Prettier.
+	prettierConfig,
 );

@@ -13,8 +13,14 @@ declare global {
 	// into no-unsafe-* errors. Declared here rather than cast at the call sites,
 	// per the no-`as any` rule at the top of this file.
 	interface Window {
-		createDiv(o?: DomElementInfo | string, callback?: (el: HTMLDivElement) => void): HTMLDivElement;
-		createSpan(o?: DomElementInfo | string, callback?: (el: HTMLSpanElement) => void): HTMLSpanElement;
+		createDiv(
+			o?: DomElementInfo | string,
+			callback?: (el: HTMLDivElement) => void,
+		): HTMLDivElement;
+		createSpan(
+			o?: DomElementInfo | string,
+			callback?: (el: HTMLSpanElement) => void,
+		): HTMLSpanElement;
 	}
 }
 

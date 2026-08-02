@@ -1,7 +1,7 @@
-import { App, Modal } from "obsidian";
+import { App, Modal } from 'obsidian';
 
-import type AnnotecaPlugin from "./main";
-import { ComposerForm, type ComposerRequest } from "./composer";
+import type AnnotecaPlugin from './main';
+import { ComposerForm, type ComposerRequest } from './composer';
 
 export class AddCommentModal extends Modal {
 	private readonly plugin: AnnotecaPlugin;

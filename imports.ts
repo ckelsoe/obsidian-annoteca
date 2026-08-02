@@ -25,29 +25,42 @@ function convertComments(
 	const updated = content.replace(pattern, (full, body: string) => {
 		if (skip?.(body)) return full;
 		converted += 1;
-		const cleaned = body.trim().replace(/\n+/g, " ");
+		const cleaned = body.trim().replace(/\n+/g, ' ');
 		return `<!-- annoteca/${category}: ${cleaned} -->`;
 	});
 	return { updated, converted };
 }
 
-export function convertNativeComments(content: string, category: string): ImportResult {
+export function convertNativeComments(
+	content: string,
+	category: string,
+): ImportResult {
 	return convertComments(content, category, NATIVE_COMMENT_RE);
 }
 
-export function convertGenericHtmlComments(content: string, category: string): ImportResult {
+export function convertGenericHtmlComments(
+	content: string,
+	category: string,
+): ImportResult {
 	// Skip markers that already follow the annoteca format.
 	return convertComments(content, category, HTML_COMMENT_RE, (body) =>
 		/^\s*annoteca\//.test(body),
 	);
 }
 
-export type ImportFormat = "native" | "html" | "all";
+export type ImportFormat = 'native' | 'html' | 'all';
 
-export function convertAllComments(content: string, format: ImportFormat, category: string): ImportResult {
-	if (format === "native") return convertNativeComments(content, category);
-	if (format === "html") return convertGenericHtmlComments(content, category);
+export function convertAllComments(
+	content: string,
+	format: ImportFormat,
+	category: string,
+): ImportResult {
+	if (format === 'native') return convertNativeComments(content, category);
+	if (format === 'html') return convertGenericHtmlComments(content, category);
 	const first = convertNativeComments(content, category);
 	const second = convertGenericHtmlComments(first.updated, category);
-	return { updated: second.updated, converted: first.converted + second.converted };
+	return {
+		updated: second.updated,
+		converted: first.converted + second.converted,
+	};
 }
