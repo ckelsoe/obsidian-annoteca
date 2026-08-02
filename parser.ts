@@ -1,7 +1,13 @@
 // Parser and serializer for the Annoteca marker format. No Obsidian dependency.
 // The format contract this implements is in dev-docs/annoteca/data-format.md.
 
-import type { AnchorText, Addressed, Comment, Reply, Resolution } from "./types";
+import type {
+	AnchorText,
+	Addressed,
+	Comment,
+	Reply,
+	Resolution,
+} from './types';
 
 // Canonical regex from data-format.md "greppable regex" section. Matches the
 // entire marker, opening through closing. The category is captured; the rest of
@@ -21,7 +27,7 @@ const ID_LINE_RE = /^\s*\[id=([a-z0-9]{1,32})\]\s*$/;
 // timestamped-threads change (YYYY-MM-DDTHH:MM:SS, seconds optional). Markers
 // from older versions still parse; one definition keeps the four line patterns
 // below from drifting apart.
-const STAMP_SRC = "\\d{4}-\\d{2}-\\d{2}(?:T\\d{2}:\\d{2}(?::\\d{2})?)?";
+const STAMP_SRC = '\\d{4}-\\d{2}-\\d{2}(?:T\\d{2}:\\d{2}(?::\\d{2})?)?';
 const DATE_LINE_RE = new RegExp(`^\\s*\\[date=(${STAMP_SRC})\\]\\s*$`);
 const AUTHOR_LINE_RE = /^\s*\[author=([^\s\]<>]{1,32})\]\s*$/;
 // Anchor value is permissive: anything but `]` or a line break. Length is
@@ -29,25 +35,32 @@ const AUTHOR_LINE_RE = /^\s*\[author=([^\s\]<>]{1,32})\]\s*$/;
 // indicate truncation (per data-format.md). Longer values are still parsed —
 // forward-compat — but the cap is enforced at serialize time.
 const ANCHOR_LINE_RE = /^\s*\[anchor=([^\]\r\n]{1,200})\]\s*$/;
-const REPLY_LINE_RE = new RegExp(`^\\s*\\[reply\\s+([^\\s\\]<>]{1,32})\\s+(${STAMP_SRC})\\]:\\s?([\\s\\S]*)$`);
+const REPLY_LINE_RE = new RegExp(
+	`^\\s*\\[reply\\s+([^\\s\\]<>]{1,32})\\s+(${STAMP_SRC})\\]:\\s?([\\s\\S]*)$`,
+);
 // Addressed trailing line (F-270). Same shape as reply/resolved. Positioned
 // after [reply ...] lines and before any [resolved ...] line; at most one.
-const ADDRESSED_LINE_RE = new RegExp(`^\\s*\\[addressed\\s+([^\\s\\]<>]{1,32})\\s+(${STAMP_SRC})\\]:\\s?([\\s\\S]*)$`);
-const RESOLVED_LINE_RE = new RegExp(`^\\s*\\[resolved\\s+([^\\s\\]<>]{1,32})\\s+(${STAMP_SRC})\\]:\\s?([\\s\\S]*)$`);
+const ADDRESSED_LINE_RE = new RegExp(
+	`^\\s*\\[addressed\\s+([^\\s\\]<>]{1,32})\\s+(${STAMP_SRC})\\]:\\s?([\\s\\S]*)$`,
+);
+const RESOLVED_LINE_RE = new RegExp(
+	`^\\s*\\[resolved\\s+([^\\s\\]<>]{1,32})\\s+(${STAMP_SRC})\\]:\\s?([\\s\\S]*)$`,
+);
 
 // The lossless-original fence (F-271): a fenced block tagged annoteca-original
 // inside the [addressed ...] note, holding the verbatim pre-edit text. Matched
 // as whole lines (m flag); group 1 is the verbatim original. Tolerates CRLF and
 // trailing whitespace on the fence lines.
-const ORIGINAL_FENCE_RE = /^```annoteca-original[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/m;
+const ORIGINAL_FENCE_RE =
+	/^```annoteca-original[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/m;
 
 // Maximum visible characters in an anchor value before mid-truncation kicks
 // in. 80 strikes the balance between "disambiguate the commented words" and
 // "keep the marker file compact." Mirrors data-format.md.
 export const ANCHOR_MAX_CHARS = 80;
-const ANCHOR_ELLIPSIS = "…";
+const ANCHOR_ELLIPSIS = '…';
 
-const ID_BASE36_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz";
+const ID_BASE36_ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyz';
 
 interface RawMarker {
 	start: number;
@@ -95,14 +108,18 @@ function parseInnerContent(inner: string): ParsedTail {
 	let originalText: string | undefined;
 	let stripped = inner;
 	const fenceMatch = ORIGINAL_FENCE_RE.exec(inner);
-	if (fenceMatch && fenceMatch[1] !== undefined && fenceMatch.index !== undefined) {
+	if (
+		fenceMatch &&
+		fenceMatch[1] !== undefined &&
+		fenceMatch.index !== undefined
+	) {
 		originalText = fenceMatch[1];
-		const before = inner.slice(0, fenceMatch.index).replace(/\r?\n$/, "");
+		const before = inner.slice(0, fenceMatch.index).replace(/\r?\n$/, '');
 		const after = inner.slice(fenceMatch.index + fenceMatch[0].length);
 		stripped = before + after;
 	}
 
-	const lines = stripped.split("\n");
+	const lines = stripped.split('\n');
 	let id: string | undefined;
 	let date: string | undefined;
 	let author: string | undefined;
@@ -117,7 +134,7 @@ function parseInnerContent(inner: string): ParsedTail {
 		const line = lines[i];
 		if (line === undefined) continue;
 
-		if (line.trim() === "") {
+		if (line.trim() === '') {
 			bodyEndExclusive = i;
 			continue;
 		}
@@ -153,23 +170,31 @@ function parseInnerContent(inner: string): ParsedTail {
 		}
 
 		const replyMatch = REPLY_LINE_RE.exec(line);
-		if (replyMatch && replyMatch[1] !== undefined && replyMatch[2] !== undefined) {
+		if (
+			replyMatch &&
+			replyMatch[1] !== undefined &&
+			replyMatch[2] !== undefined
+		) {
 			replies.push({
 				author: replyMatch[1],
 				date: replyMatch[2],
-				body: replyMatch[3] ?? "",
+				body: replyMatch[3] ?? '',
 			});
 			bodyEndExclusive = i;
 			continue;
 		}
 
 		const addressedMatch = ADDRESSED_LINE_RE.exec(line);
-		if (addressedMatch && addressedMatch[1] !== undefined && addressedMatch[2] !== undefined) {
+		if (
+			addressedMatch &&
+			addressedMatch[1] !== undefined &&
+			addressedMatch[2] !== undefined
+		) {
 			if (!addressed) {
 				addressed = {
 					author: addressedMatch[1],
 					date: addressedMatch[2],
-					note: addressedMatch[3] ?? "",
+					note: addressedMatch[3] ?? '',
 					original: originalText,
 				};
 			}
@@ -178,12 +203,16 @@ function parseInnerContent(inner: string): ParsedTail {
 		}
 
 		const resolvedMatch = RESOLVED_LINE_RE.exec(line);
-		if (resolvedMatch && resolvedMatch[1] !== undefined && resolvedMatch[2] !== undefined) {
+		if (
+			resolvedMatch &&
+			resolvedMatch[1] !== undefined &&
+			resolvedMatch[2] !== undefined
+		) {
 			if (!resolution) {
 				resolution = {
 					author: resolvedMatch[1],
 					date: resolvedMatch[2],
-					note: resolvedMatch[3] ?? "",
+					note: resolvedMatch[3] ?? '',
 				};
 			}
 			bodyEndExclusive = i;
@@ -204,7 +233,7 @@ function parseInnerContent(inner: string): ParsedTail {
 	}
 
 	const bodyLines = lines.slice(0, bodyEndExclusive);
-	const bodyRaw = bodyLines.join("\n");
+	const bodyRaw = bodyLines.join('\n');
 	const body = bodyRaw.trim();
 
 	replies.reverse();
@@ -274,13 +303,23 @@ export interface SerializeInput {
 }
 
 export function serialize(c: SerializeInput): string {
-	const hasMetadata = c.id !== undefined || c.date !== undefined || c.author !== undefined || c.anchor !== undefined;
+	const hasMetadata =
+		c.id !== undefined ||
+		c.date !== undefined ||
+		c.author !== undefined ||
+		c.anchor !== undefined;
 	const hasReplies = (c.replies?.length ?? 0) > 0;
 	const hasAddressed = c.addressed !== undefined;
 	const hasResolution = c.resolution !== undefined;
-	const bodyMultiline = c.body.includes("\n");
+	const bodyMultiline = c.body.includes('\n');
 
-	if (!hasMetadata && !hasReplies && !hasAddressed && !hasResolution && !bodyMultiline) {
+	if (
+		!hasMetadata &&
+		!hasReplies &&
+		!hasAddressed &&
+		!hasResolution &&
+		!bodyMultiline
+	) {
 		return `<!-- annoteca/${c.category}: ${c.body} -->`;
 	}
 
@@ -294,24 +333,29 @@ export function serialize(c: SerializeInput): string {
 		lines.push(`[reply ${r.author} ${r.date}]: ${r.body}`);
 	}
 	if (c.addressed) {
-		const note = c.addressed.note.length > 0 ? ` ${c.addressed.note}` : "";
-		lines.push(`[addressed ${c.addressed.author} ${c.addressed.date}]:${note}`);
+		const note = c.addressed.note.length > 0 ? ` ${c.addressed.note}` : '';
+		lines.push(
+			`[addressed ${c.addressed.author} ${c.addressed.date}]:${note}`,
+		);
 		// F-271: the verbatim replaced text lives in a fenced annoteca-original
 		// block directly after the [addressed ...] line. The fence is inert
 		// markdown inside the HTML comment; the only sequence that would break
 		// the wrapper is `-->`, which never appears in the captured prose.
 		if (c.addressed.original !== undefined) {
-			lines.push("```annoteca-original");
+			lines.push('```annoteca-original');
 			lines.push(c.addressed.original);
-			lines.push("```");
+			lines.push('```');
 		}
 	}
 	if (c.resolution) {
-		const note = c.resolution.note.length > 0 ? ` ${c.resolution.note}` : "";
-		lines.push(`[resolved ${c.resolution.author} ${c.resolution.date}]:${note}`);
+		const note =
+			c.resolution.note.length > 0 ? ` ${c.resolution.note}` : '';
+		lines.push(
+			`[resolved ${c.resolution.author} ${c.resolution.date}]:${note}`,
+		);
 	}
 	lines.push(`-->`);
-	return lines.join("\n");
+	return lines.join('\n');
 }
 
 // Normalize a selected text range into a storable anchor. Strips `]` and
@@ -323,9 +367,9 @@ export function serialize(c: SerializeInput): string {
 // composer treats as "no anchor" (cursor-position comment).
 export function buildAnchorFromSelection(raw: string): AnchorText | undefined {
 	const cleaned = raw
-		.replace(/[\r\n]+/g, " ")
-		.replace(/\]/g, "")
-		.replace(/\s+/g, " ")
+		.replace(/[\r\n]+/g, ' ')
+		.replace(/\]/g, '')
+		.replace(/\s+/g, ' ')
 		.trim();
 	if (cleaned.length === 0) return undefined;
 
@@ -346,7 +390,7 @@ export function buildAnchorFromSelection(raw: string): AnchorText | undefined {
 // Obsidian renderer process. Collision probability ~1 in 2.8 trillion;
 // callers retry against the vault-wide index on collision.
 export function generateId(): string {
-	let id = "";
+	let id = '';
 	for (let i = 0; i < 8; i++) {
 		const idx = Math.floor(Math.random() * ID_BASE36_ALPHABET.length);
 		id += ID_BASE36_ALPHABET.charAt(idx);
@@ -356,8 +400,8 @@ export function generateId(): string {
 
 export function todayISO(now: Date = new Date()): string {
 	const y = now.getFullYear();
-	const m = String(now.getMonth() + 1).padStart(2, "0");
-	const d = String(now.getDate()).padStart(2, "0");
+	const m = String(now.getMonth() + 1).padStart(2, '0');
+	const d = String(now.getDate()).padStart(2, '0');
 	return `${y}-${m}-${d}`;
 }
 
@@ -366,7 +410,7 @@ export function todayISO(now: Date = new Date()): string {
 // and addressed stamps so fast back-and-forth threads stay ordered to the
 // second. todayISO remains for the rare date-granularity case.
 export function nowISO(now: Date = new Date()): string {
-	const pad = (n: number): string => String(n).padStart(2, "0");
+	const pad = (n: number): string => String(n).padStart(2, '0');
 	const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 	const time = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
 	return `${date}T${time}`;
@@ -378,7 +422,8 @@ export interface MalformedMarker {
 	reason: string;
 }
 
-const OPENING_TOKEN_RE = /<!--\s*annoteca\/(?![a-z][a-z0-9-]*\s*:)[^>]{0,120}-->|<!--\s*annoteca\/[^a-z][^>]*-->/g;
+const OPENING_TOKEN_RE =
+	/<!--\s*annoteca\/(?![a-z][a-z0-9-]*\s*:)[^>]{0,120}-->|<!--\s*annoteca\/[^a-z][^>]*-->/g;
 
 export function findMalformedMarkers(content: string): MalformedMarker[] {
 	const valid = new Set<number>();
@@ -389,11 +434,14 @@ export function findMalformedMarkers(content: string): MalformedMarker[] {
 	let match: RegExpExecArray | null;
 	while ((match = OPENING_TOKEN_RE.exec(content)) !== null) {
 		if (valid.has(match.index)) continue;
-		const excerpt = content.slice(match.index, Math.min(content.length, match.index + 120));
+		const excerpt = content.slice(
+			match.index,
+			Math.min(content.length, match.index + 120),
+		);
 		out.push({
 			start: match.index,
 			excerpt,
-			reason: "Marker did not match the canonical Annoteca format.",
+			reason: 'Marker did not match the canonical Annoteca format.',
 		});
 	}
 	return out;

@@ -7,77 +7,86 @@ import {
 	ButtonComponent,
 	setIcon,
 	requireApiVersion,
-} from "obsidian";
+} from 'obsidian';
 
-import type AnnotecaPlugin from "./main";
-import type { AnnotecaSettings, CategoryDefinition, UserPreset } from "./types";
+import type AnnotecaPlugin from './main';
+import type { AnnotecaSettings, CategoryDefinition, UserPreset } from './types';
 import {
 	DEFAULT_CATEGORIES,
 	DEFAULT_PRESETS,
 	isValidCategoryName,
 	resolveEnabledCategories,
 	reorderCategories,
-} from "./categories";
-import { createStackedRow, createColorPicker, createIconPicker } from "./ui-helpers";
+} from './categories';
+import {
+	createStackedRow,
+	createColorPicker,
+	createIconPicker,
+} from './ui-helpers';
 
 export const DEFAULT_SETTINGS: AnnotecaSettings = {
-	categories: DEFAULT_CATEGORIES.map(c => ({ ...c })),
-	defaultCategory: "clarify",
+	categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })),
+	defaultCategory: 'clarify',
 	enableScholarlyPreset: false,
 	enableIndexEntryPreset: false,
 
-	indicatorStyle: "both",
-	defaultVisibility: "show",
+	indicatorStyle: 'both',
+	defaultVisibility: 'show',
 
 	hoverPreview: true,
-	hoverDelay: "default",
+	hoverDelay: 'default',
 
-	anchorStyle: "wavy",
-	anchorThickness: "medium",
-	resolvedBrightness: "normal",
+	anchorStyle: 'wavy',
+	anchorThickness: 'medium',
+	resolvedBrightness: 'normal',
 
-	resolvedDisplay: "dim",
+	resolvedDisplay: 'dim',
 	deleteOnResolve: false,
 
-	composerLocation: "panel",
+	composerLocation: 'panel',
 	selectionPopup: false,
 	submitCommentOnEnter: true,
-	markerScrollAlign: "top",
+	markerScrollAlign: 'top',
 
 	enableAuthorTag: false,
-	authorTag: "",
+	authorTag: '',
 	authorStyles: [],
 
 	debugMode: false,
-	debugLogTarget: "console",
+	debugLogTarget: 'console',
 
 	settingsBackupPath: undefined,
 
 	starredComments: [],
-	lastHubTab: "thread",
+	lastHubTab: 'thread',
 	scopeState: {
-		shape: { kind: "file" },
-		anchorPath: "",
+		shape: { kind: 'file' },
+		anchorPath: '',
 		pinned: false,
 	},
-	statusFilter: "open",
+	statusFilter: 'open',
 	autoCollapseInactiveFiles: true,
 	customPresets: [],
-	indicatorSize: "medium",
-	skillExportTarget: "claude",
-	readingViewIndicator: "banner",
+	indicatorSize: 'medium',
+	skillExportTarget: 'claude',
+	readingViewIndicator: 'banner',
 };
 
 // Resolve the active category list given current settings. Centralized so the
 // modal, decorations, and views consume one source of truth.
-export function resolveSettingsCategories(s: AnnotecaSettings): CategoryDefinition[] {
-	const base = resolveEnabledCategories(s.categories, s.enableScholarlyPreset);
-	if (s.enableIndexEntryPreset && !base.find(c => c.id === "index-entry")) {
+export function resolveSettingsCategories(
+	s: AnnotecaSettings,
+): CategoryDefinition[] {
+	const base = resolveEnabledCategories(
+		s.categories,
+		s.enableScholarlyPreset,
+	);
+	if (s.enableIndexEntryPreset && !base.find((c) => c.id === 'index-entry')) {
 		base.push({
-			id: "index-entry",
-			displayName: "Index entry",
-			icon: "list",
-			color: "var(--text-accent)",
+			id: 'index-entry',
+			displayName: 'Index entry',
+			icon: 'list',
+			color: 'var(--text-accent)',
 		});
 	}
 	return base;
@@ -111,210 +120,255 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 
 		return [
 			{
-				type: "group",
-				heading: "Categories",
+				type: 'group',
+				heading: 'Categories',
 				items: [
 					this.customBlock((host) => this.renderPresetSection(host)),
 					{
-						name: "Index-entry preset",
-						desc: "Add an index-entry category for tagging concepts that should appear in a printed index. Pairs with the pandoc filter shipped under docs in the plugin repository.",
-						control: { type: "toggle", key: "enableIndexEntryPreset" },
+						name: 'Index-entry preset',
+						desc: 'Add an index-entry category for tagging concepts that should appear in a printed index. Pairs with the pandoc filter shipped under docs in the plugin repository.',
+						control: {
+							type: 'toggle',
+							key: 'enableIndexEntryPreset',
+						},
 					},
 					{
-						name: "Default category",
-						desc: "Selected in the add-comment modal by default.",
-						control: { type: "dropdown", key: "defaultCategory", options: categoryOptions },
+						name: 'Default category',
+						desc: 'Selected in the add-comment modal by default.',
+						control: {
+							type: 'dropdown',
+							key: 'defaultCategory',
+							options: categoryOptions,
+						},
 					},
 					this.customBlock((host) => this.renderCategoryList(host)),
 					this.customBlock((host) => this.renderAddCategory(host)),
 				],
 			},
 			{
-				type: "group",
-				heading: "Editor indicators",
+				type: 'group',
+				heading: 'Editor indicators',
 				items: [
 					{
-						name: "Indicator style",
+						name: 'Indicator style',
 						desc: "How comments are surfaced in the editor. The underline marks the text the comment was made against. The icon marks the comment's location when no text was selected at create time.",
 						control: {
-							type: "dropdown",
-							key: "indicatorStyle",
+							type: 'dropdown',
+							key: 'indicatorStyle',
 							options: {
-								icon: "Inline icon only",
-								underline: "Anchor underline only",
-								both: "Icon and underline",
-								none: "Hidden",
+								icon: 'Inline icon only',
+								underline: 'Anchor underline only',
+								both: 'Icon and underline',
+								none: 'Hidden',
 							},
 						},
 					},
 					{
-						name: "Indicator size",
-						desc: "Visual size of the marker icon in the editor.",
+						name: 'Indicator size',
+						desc: 'Visual size of the marker icon in the editor.',
 						control: {
-							type: "dropdown",
-							key: "indicatorSize",
-							options: { small: "Small", medium: "Medium", large: "Large" },
-						},
-					},
-					{
-						name: "Marker hover preview",
-						desc: "Show a preview of the comment and its thread when you hover a marker or its underline in the editor. Turn off to rely on clicking the marker to open the side panel.",
-						control: { type: "toggle", key: "hoverPreview" },
-					},
-					{
-						name: "Hover preview delay",
-						desc: "How long to hover before the preview appears. Takes effect after reloading the plugin.",
-						control: {
-							type: "dropdown",
-							key: "hoverDelay",
-							options: { instant: "Instant", short: "Short", default: "Default", relaxed: "Relaxed" },
-						},
-					},
-					{
-						name: "Anchor underline style",
-						desc: "Visual character of the underline drawn over commented text. Applies to every category.",
-						control: {
-							type: "dropdown",
-							key: "anchorStyle",
-							options: { wavy: "Wavy", solid: "Solid", dotted: "Dotted", dashed: "Dashed" },
-						},
-					},
-					{
-						name: "Anchor underline thickness",
-						desc: "Baseline thickness for categories on the normal tier. Subtle always renders thin, strong always renders thick, regardless of this setting.",
-						control: {
-							type: "dropdown",
-							key: "anchorThickness",
-							options: { thin: "Thin", medium: "Medium", thick: "Thick" },
-						},
-					},
-					{
-						name: "Default visibility on file open",
-						desc: "Whether comments are visible when a file opens.",
-						control: {
-							type: "dropdown",
-							key: "defaultVisibility",
-							options: { show: "Show", hide: "Hide", last: "Last state" },
-						},
-					},
-				],
-			},
-			{
-				type: "group",
-				heading: "Resolved comments",
-				items: [
-					{
-						name: "Resolved comment display",
-						desc: "How resolved comments appear in the editor.",
-						control: {
-							type: "dropdown",
-							key: "resolvedDisplay",
-							options: { dim: "Dim", hide: "Hide" },
-						},
-					},
-					{
-						name: "Delete on resolve",
-						desc: "Resolving a comment permanently removes it from the file instead of keeping it as a dimmed [resolved] marker. The thread and its replies are gone; rely on git or backups for history. The separate \"Resolve and remove\" action always asks first; with this on, plain Resolve removes without asking.",
-						control: { type: "toggle", key: "deleteOnResolve" },
-					},
-					{
-						name: "Resolved brightness",
-						desc: "How aggressively resolved comments are dimmed. Normal works well in light themes; bright keeps resolved content legible against dark backgrounds where the base text is already muted.",
-						control: {
-							type: "dropdown",
-							key: "resolvedBrightness",
-							options: { normal: "Normal", bright: "Bright" },
-						},
-					},
-				],
-			},
-			{
-				type: "group",
-				heading: "Composer",
-				items: [
-					{
-						name: "Composer location",
-						desc: "Where the add-comment form appears. The side panel keeps the document visible while you draft.",
-						control: {
-							type: "dropdown",
-							key: "composerLocation",
-							options: { modal: "Modal dialog", panel: "Right side panel" },
-						},
-					},
-					{
-						name: "Send comment on Enter",
-						desc: "When on, Enter sends the comment and Shift+Enter starts a new line. When off, send with Cmd or Ctrl plus Enter, and Enter starts a new line. Applies to the comment box and the reply box.",
-						control: { type: "toggle", key: "submitCommentOnEnter" },
-					},
-					{
-						name: "Selection comment button",
-						desc: "Show a floating Comment button next to text you select in the editor, so you can start a comment with one click instead of the right-click menu. The Add comment here and Add comment for selection commands can also be bound to a hotkey.",
-						control: { type: "toggle", key: "selectionPopup" },
-					},
-				],
-			},
-			{
-				type: "group",
-				heading: "Reading view",
-				items: [
-					{
-						name: "Reading view indicator",
-						desc: "Comments are invisible in reading view (markers are HTML comments). Show a note-level banner with totals, a badge on each section that has comments, or both. Click an indicator to open the comment panel. Counts are threads; replies are not counted.",
-						control: {
-							type: "dropdown",
-							key: "readingViewIndicator",
+							type: 'dropdown',
+							key: 'indicatorSize',
 							options: {
-								off: "Off",
-								banner: "Note banner",
-								"per-section": "Per-section badges",
-								both: "Banner and badges",
+								small: 'Small',
+								medium: 'Medium',
+								large: 'Large',
+							},
+						},
+					},
+					{
+						name: 'Marker hover preview',
+						desc: 'Show a preview of the comment and its thread when you hover a marker or its underline in the editor. Turn off to rely on clicking the marker to open the side panel.',
+						control: { type: 'toggle', key: 'hoverPreview' },
+					},
+					{
+						name: 'Hover preview delay',
+						desc: 'How long to hover before the preview appears. Takes effect after reloading the plugin.',
+						control: {
+							type: 'dropdown',
+							key: 'hoverDelay',
+							options: {
+								instant: 'Instant',
+								short: 'Short',
+								default: 'Default',
+								relaxed: 'Relaxed',
+							},
+						},
+					},
+					{
+						name: 'Anchor underline style',
+						desc: 'Visual character of the underline drawn over commented text. Applies to every category.',
+						control: {
+							type: 'dropdown',
+							key: 'anchorStyle',
+							options: {
+								wavy: 'Wavy',
+								solid: 'Solid',
+								dotted: 'Dotted',
+								dashed: 'Dashed',
+							},
+						},
+					},
+					{
+						name: 'Anchor underline thickness',
+						desc: 'Baseline thickness for categories on the normal tier. Subtle always renders thin, strong always renders thick, regardless of this setting.',
+						control: {
+							type: 'dropdown',
+							key: 'anchorThickness',
+							options: {
+								thin: 'Thin',
+								medium: 'Medium',
+								thick: 'Thick',
+							},
+						},
+					},
+					{
+						name: 'Default visibility on file open',
+						desc: 'Whether comments are visible when a file opens.',
+						control: {
+							type: 'dropdown',
+							key: 'defaultVisibility',
+							options: {
+								show: 'Show',
+								hide: 'Hide',
+								last: 'Last state',
 							},
 						},
 					},
 				],
 			},
 			{
-				type: "group",
-				heading: "Panel and navigation",
+				type: 'group',
+				heading: 'Resolved comments',
 				items: [
 					{
-						name: "Auto-collapse other files in scope",
-						desc: "When the thread panel shows comments from multiple files, collapse files other than the one you are editing. Click a file header to expand it manually.",
-						control: { type: "toggle", key: "autoCollapseInactiveFiles" },
+						name: 'Resolved comment display',
+						desc: 'How resolved comments appear in the editor.',
+						control: {
+							type: 'dropdown',
+							key: 'resolvedDisplay',
+							options: { dim: 'Dim', hide: 'Hide' },
+						},
 					},
 					{
-						name: "Marker position when navigating",
+						name: 'Delete on resolve',
+						desc: 'Resolving a comment permanently removes it from the file instead of keeping it as a dimmed [resolved] marker. The thread and its replies are gone; rely on git or backups for history. The separate "Resolve and remove" action always asks first; with this on, plain Resolve removes without asking.',
+						control: { type: 'toggle', key: 'deleteOnResolve' },
+					},
+					{
+						name: 'Resolved brightness',
+						desc: 'How aggressively resolved comments are dimmed. Normal works well in light themes; bright keeps resolved content legible against dark backgrounds where the base text is already muted.',
+						control: {
+							type: 'dropdown',
+							key: 'resolvedBrightness',
+							options: { normal: 'Normal', bright: 'Bright' },
+						},
+					},
+				],
+			},
+			{
+				type: 'group',
+				heading: 'Composer',
+				items: [
+					{
+						name: 'Composer location',
+						desc: 'Where the add-comment form appears. The side panel keeps the document visible while you draft.',
+						control: {
+							type: 'dropdown',
+							key: 'composerLocation',
+							options: {
+								modal: 'Modal dialog',
+								panel: 'Right side panel',
+							},
+						},
+					},
+					{
+						name: 'Send comment on Enter',
+						desc: 'When on, Enter sends the comment and Shift+Enter starts a new line. When off, send with Cmd or Ctrl plus Enter, and Enter starts a new line. Applies to the comment box and the reply box.',
+						control: {
+							type: 'toggle',
+							key: 'submitCommentOnEnter',
+						},
+					},
+					{
+						name: 'Selection comment button',
+						desc: 'Show a floating Comment button next to text you select in the editor, so you can start a comment with one click instead of the right-click menu. The Add comment here and Add comment for selection commands can also be bound to a hotkey.',
+						control: { type: 'toggle', key: 'selectionPopup' },
+					},
+				],
+			},
+			{
+				type: 'group',
+				heading: 'Reading view',
+				items: [
+					{
+						name: 'Reading view indicator',
+						desc: 'Comments are invisible in reading view (markers are HTML comments). Show a note-level banner with totals, a badge on each section that has comments, or both. Click an indicator to open the comment panel. Counts are threads; replies are not counted.',
+						control: {
+							type: 'dropdown',
+							key: 'readingViewIndicator',
+							options: {
+								off: 'Off',
+								banner: 'Note banner',
+								'per-section': 'Per-section badges',
+								both: 'Banner and badges',
+							},
+						},
+					},
+				],
+			},
+			{
+				type: 'group',
+				heading: 'Panel and navigation',
+				items: [
+					{
+						name: 'Auto-collapse other files in scope',
+						desc: 'When the thread panel shows comments from multiple files, collapse files other than the one you are editing. Click a file header to expand it manually.',
+						control: {
+							type: 'toggle',
+							key: 'autoCollapseInactiveFiles',
+						},
+					},
+					{
+						name: 'Marker position when navigating',
 						desc: "Where a comment's marker lands in the editor when you jump to it. Top anchors it near the top of the pane for a predictable reading spot. Center puts it in the middle. Minimal scrolls the least needed and stays put if the marker is already visible, so opening the panel does not move your place.",
 						control: {
-							type: "dropdown",
-							key: "markerScrollAlign",
-							options: { top: "Top of pane", center: "Center", minimal: "Minimal (don't move if visible)" },
+							type: 'dropdown',
+							key: 'markerScrollAlign',
+							options: {
+								top: 'Top of pane',
+								center: 'Center',
+								minimal: "Minimal (don't move if visible)",
+							},
 						},
 					},
 				],
 			},
 			{
-				type: "group",
-				heading: "Authors",
+				type: 'group',
+				heading: 'Authors',
 				items: [
 					{
-						name: "Author tag",
-						desc: "When enabled, new comments include an [author=...] line. Useful when collaborating with an AI agent or multiple reviewers.",
-						control: { type: "toggle", key: "enableAuthorTag" },
+						name: 'Author tag',
+						desc: 'When enabled, new comments include an [author=...] line. Useful when collaborating with an AI agent or multiple reviewers.',
+						control: { type: 'toggle', key: 'enableAuthorTag' },
 					},
 					{
-						name: "Author identifier",
-						desc: "Short tag with no spaces; maximum 32 characters.",
+						name: 'Author identifier',
+						desc: 'Short tag with no spaces; maximum 32 characters.',
 						visible: () => this.plugin.settings.enableAuthorTag,
 						control: {
-							type: "text",
-							key: "authorTag",
-							placeholder: "reviewer",
+							type: 'text',
+							key: 'authorTag',
+							placeholder: 'reviewer',
 							validate: (value: unknown) => {
-								const v = typeof value === "string" ? value.trim() : "";
-								return v === "" || /^[^\s\]<>]{1,32}$/.test(v)
+								const v =
+									typeof value === 'string'
+										? value.trim()
+										: '';
+								return v === '' || /^[^\s\]<>]{1,32}$/.test(v)
 									? undefined
-									: "Use a single tag with no spaces (max 32 characters).";
+									: 'Use a single tag with no spaces (max 32 characters).';
 							},
 						},
 					},
@@ -322,19 +376,19 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 				],
 			},
 			{
-				type: "group",
-				heading: "AI integration",
+				type: 'group',
+				heading: 'AI integration',
 				items: [
 					{
-						name: "Skill export destination",
-						desc: "Vault folder the exported skill file is written to. Claude Code reads .claude/skills; some other assistants read a .agent folder.",
+						name: 'Skill export destination',
+						desc: 'Vault folder the exported skill file is written to. Claude Code reads .claude/skills; some other assistants read a .agent folder.',
 						control: {
-							type: "dropdown",
-							key: "skillExportTarget",
+							type: 'dropdown',
+							key: 'skillExportTarget',
 							options: {
-								claude: ".claude/skills (Claude Code)",
-								agent: ".agent/skills (other assistants)",
-								both: "Both folders",
+								claude: '.claude/skills (Claude Code)',
+								agent: '.agent/skills (other assistants)',
+								both: 'Both folders',
 							},
 						},
 					},
@@ -342,22 +396,25 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 				],
 			},
 			{
-				type: "group",
-				heading: "Diagnostics",
+				type: 'group',
+				heading: 'Diagnostics',
 				items: [
 					{
-						name: "Debug mode",
-						desc: "Log additional information for troubleshooting. Off by default to avoid log spam.",
-						control: { type: "toggle", key: "debugMode" },
+						name: 'Debug mode',
+						desc: 'Log additional information for troubleshooting. Off by default to avoid log spam.',
+						control: { type: 'toggle', key: 'debugMode' },
 					},
 					{
-						name: "Debug log destination",
-						desc: "Where diagnostic output is written.",
+						name: 'Debug log destination',
+						desc: 'Where diagnostic output is written.',
 						visible: () => this.plugin.settings.debugMode,
 						control: {
-							type: "dropdown",
-							key: "debugLogTarget",
-							options: { console: "Browser console", vault: "Log file in the vault" },
+							type: 'dropdown',
+							key: 'debugLogTarget',
+							options: {
+								console: 'Browser console',
+								vault: 'Log file in the vault',
+							},
 						},
 					},
 					this.customBlock((host) => this.renderFooter(host)),
@@ -401,113 +458,232 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		}
 
 		// Categories
-		this.heading(containerEl, "Categories");
-		this.renderCustomBlock(containerEl, (host) => this.renderPresetSection(host));
-		this.addToggleRow(containerEl, "Index-entry preset",
-			"Add an index-entry category for tagging concepts that should appear in a printed index. Pairs with the pandoc filter shipped under docs in the plugin repository.",
-			"enableIndexEntryPreset");
-		this.addDropdownRow(containerEl, "Default category",
-			"Selected in the add-comment modal by default.",
-			"defaultCategory", categoryOptions);
-		this.renderCustomBlock(containerEl, (host) => this.renderCategoryList(host));
-		this.renderCustomBlock(containerEl, (host) => this.renderAddCategory(host));
+		this.heading(containerEl, 'Categories');
+		this.renderCustomBlock(containerEl, (host) =>
+			this.renderPresetSection(host),
+		);
+		this.addToggleRow(
+			containerEl,
+			'Index-entry preset',
+			'Add an index-entry category for tagging concepts that should appear in a printed index. Pairs with the pandoc filter shipped under docs in the plugin repository.',
+			'enableIndexEntryPreset',
+		);
+		this.addDropdownRow(
+			containerEl,
+			'Default category',
+			'Selected in the add-comment modal by default.',
+			'defaultCategory',
+			categoryOptions,
+		);
+		this.renderCustomBlock(containerEl, (host) =>
+			this.renderCategoryList(host),
+		);
+		this.renderCustomBlock(containerEl, (host) =>
+			this.renderAddCategory(host),
+		);
 
 		// Editor indicators
-		this.heading(containerEl, "Editor indicators");
-		this.addDropdownRow(containerEl, "Indicator style",
+		this.heading(containerEl, 'Editor indicators');
+		this.addDropdownRow(
+			containerEl,
+			'Indicator style',
 			"How comments are surfaced in the editor. The underline marks the text the comment was made against. The icon marks the comment's location when no text was selected at create time.",
-			"indicatorStyle",
-			{ icon: "Inline icon only", underline: "Anchor underline only", both: "Icon and underline", none: "Hidden" });
-		this.addDropdownRow(containerEl, "Indicator size",
-			"Visual size of the marker icon in the editor.",
-			"indicatorSize", { small: "Small", medium: "Medium", large: "Large" });
-		this.addToggleRow(containerEl, "Marker hover preview",
-			"Show a preview of the comment and its thread when you hover a marker or its underline in the editor. Turn off to rely on clicking the marker to open the side panel.",
-			"hoverPreview");
-		this.addDropdownRow(containerEl, "Hover preview delay",
-			"How long to hover before the preview appears. Takes effect after reloading the plugin.",
-			"hoverDelay", { instant: "Instant", short: "Short", default: "Default", relaxed: "Relaxed" });
-		this.addDropdownRow(containerEl, "Anchor underline style",
-			"Visual character of the underline drawn over commented text. Applies to every category.",
-			"anchorStyle", { wavy: "Wavy", solid: "Solid", dotted: "Dotted", dashed: "Dashed" });
-		this.addDropdownRow(containerEl, "Anchor underline thickness",
-			"Baseline thickness for categories on the normal tier. Subtle always renders thin, strong always renders thick, regardless of this setting.",
-			"anchorThickness", { thin: "Thin", medium: "Medium", thick: "Thick" });
-		this.addDropdownRow(containerEl, "Default visibility on file open",
-			"Whether comments are visible when a file opens.",
-			"defaultVisibility", { show: "Show", hide: "Hide", last: "Last state" });
+			'indicatorStyle',
+			{
+				icon: 'Inline icon only',
+				underline: 'Anchor underline only',
+				both: 'Icon and underline',
+				none: 'Hidden',
+			},
+		);
+		this.addDropdownRow(
+			containerEl,
+			'Indicator size',
+			'Visual size of the marker icon in the editor.',
+			'indicatorSize',
+			{ small: 'Small', medium: 'Medium', large: 'Large' },
+		);
+		this.addToggleRow(
+			containerEl,
+			'Marker hover preview',
+			'Show a preview of the comment and its thread when you hover a marker or its underline in the editor. Turn off to rely on clicking the marker to open the side panel.',
+			'hoverPreview',
+		);
+		this.addDropdownRow(
+			containerEl,
+			'Hover preview delay',
+			'How long to hover before the preview appears. Takes effect after reloading the plugin.',
+			'hoverDelay',
+			{
+				instant: 'Instant',
+				short: 'Short',
+				default: 'Default',
+				relaxed: 'Relaxed',
+			},
+		);
+		this.addDropdownRow(
+			containerEl,
+			'Anchor underline style',
+			'Visual character of the underline drawn over commented text. Applies to every category.',
+			'anchorStyle',
+			{
+				wavy: 'Wavy',
+				solid: 'Solid',
+				dotted: 'Dotted',
+				dashed: 'Dashed',
+			},
+		);
+		this.addDropdownRow(
+			containerEl,
+			'Anchor underline thickness',
+			'Baseline thickness for categories on the normal tier. Subtle always renders thin, strong always renders thick, regardless of this setting.',
+			'anchorThickness',
+			{ thin: 'Thin', medium: 'Medium', thick: 'Thick' },
+		);
+		this.addDropdownRow(
+			containerEl,
+			'Default visibility on file open',
+			'Whether comments are visible when a file opens.',
+			'defaultVisibility',
+			{ show: 'Show', hide: 'Hide', last: 'Last state' },
+		);
 
-		this.heading(containerEl, "Resolved comments");
-		this.addDropdownRow(containerEl, "Resolved comment display",
-			"How resolved comments appear in the editor.",
-			"resolvedDisplay", { dim: "Dim", hide: "Hide" });
-		this.addToggleRow(containerEl, "Delete on resolve",
-			"Resolving a comment permanently removes it from the file instead of keeping it as a dimmed [resolved] marker. The thread and its replies are gone; rely on git or backups for history. The separate \"Resolve and remove\" action always asks first; with this on, plain Resolve removes without asking.",
-			"deleteOnResolve");
-		this.addDropdownRow(containerEl, "Resolved brightness",
-			"How aggressively resolved comments are dimmed. Normal works well in light themes; bright keeps resolved content legible against dark backgrounds where the base text is already muted.",
-			"resolvedBrightness", { normal: "Normal", bright: "Bright" });
+		this.heading(containerEl, 'Resolved comments');
+		this.addDropdownRow(
+			containerEl,
+			'Resolved comment display',
+			'How resolved comments appear in the editor.',
+			'resolvedDisplay',
+			{ dim: 'Dim', hide: 'Hide' },
+		);
+		this.addToggleRow(
+			containerEl,
+			'Delete on resolve',
+			'Resolving a comment permanently removes it from the file instead of keeping it as a dimmed [resolved] marker. The thread and its replies are gone; rely on git or backups for history. The separate "Resolve and remove" action always asks first; with this on, plain Resolve removes without asking.',
+			'deleteOnResolve',
+		);
+		this.addDropdownRow(
+			containerEl,
+			'Resolved brightness',
+			'How aggressively resolved comments are dimmed. Normal works well in light themes; bright keeps resolved content legible against dark backgrounds where the base text is already muted.',
+			'resolvedBrightness',
+			{ normal: 'Normal', bright: 'Bright' },
+		);
 
-		this.heading(containerEl, "Composer");
-		this.addDropdownRow(containerEl, "Composer location",
-			"Where the add-comment form appears. The side panel keeps the document visible while you draft.",
-			"composerLocation", { modal: "Modal dialog", panel: "Right side panel" });
-		this.addToggleRow(containerEl, "Send comment on Enter",
-			"When on, Enter sends the comment and Shift+Enter starts a new line. When off, send with Cmd or Ctrl plus Enter, and Enter starts a new line. Applies to the comment box and the reply box.",
-			"submitCommentOnEnter");
-		this.addToggleRow(containerEl, "Selection comment button",
-			"Show a floating Comment button next to text you select in the editor, so you can start a comment with one click instead of the right-click menu. The Add comment here and Add comment for selection commands can also be bound to a hotkey.",
-			"selectionPopup");
+		this.heading(containerEl, 'Composer');
+		this.addDropdownRow(
+			containerEl,
+			'Composer location',
+			'Where the add-comment form appears. The side panel keeps the document visible while you draft.',
+			'composerLocation',
+			{ modal: 'Modal dialog', panel: 'Right side panel' },
+		);
+		this.addToggleRow(
+			containerEl,
+			'Send comment on Enter',
+			'When on, Enter sends the comment and Shift+Enter starts a new line. When off, send with Cmd or Ctrl plus Enter, and Enter starts a new line. Applies to the comment box and the reply box.',
+			'submitCommentOnEnter',
+		);
+		this.addToggleRow(
+			containerEl,
+			'Selection comment button',
+			'Show a floating Comment button next to text you select in the editor, so you can start a comment with one click instead of the right-click menu. The Add comment here and Add comment for selection commands can also be bound to a hotkey.',
+			'selectionPopup',
+		);
 
-		this.heading(containerEl, "Reading view");
-		this.addDropdownRow(containerEl, "Reading view indicator",
-			"Comments are invisible in reading view (markers are HTML comments). Show a note-level banner with totals, a badge on each section that has comments, or both. Click an indicator to open the comment panel. Counts are threads; replies are not counted.",
-			"readingViewIndicator",
-			{ off: "Off", banner: "Note banner", "per-section": "Per-section badges", both: "Banner and badges" });
+		this.heading(containerEl, 'Reading view');
+		this.addDropdownRow(
+			containerEl,
+			'Reading view indicator',
+			'Comments are invisible in reading view (markers are HTML comments). Show a note-level banner with totals, a badge on each section that has comments, or both. Click an indicator to open the comment panel. Counts are threads; replies are not counted.',
+			'readingViewIndicator',
+			{
+				off: 'Off',
+				banner: 'Note banner',
+				'per-section': 'Per-section badges',
+				both: 'Banner and badges',
+			},
+		);
 
-		this.heading(containerEl, "Panel and navigation");
-		this.addToggleRow(containerEl, "Auto-collapse other files in scope",
-			"When the thread panel shows comments from multiple files, collapse files other than the one you are editing. Click a file header to expand it manually.",
-			"autoCollapseInactiveFiles");
-		this.addDropdownRow(containerEl, "Marker position when navigating",
+		this.heading(containerEl, 'Panel and navigation');
+		this.addToggleRow(
+			containerEl,
+			'Auto-collapse other files in scope',
+			'When the thread panel shows comments from multiple files, collapse files other than the one you are editing. Click a file header to expand it manually.',
+			'autoCollapseInactiveFiles',
+		);
+		this.addDropdownRow(
+			containerEl,
+			'Marker position when navigating',
 			"Where a comment's marker lands in the editor when you jump to it. Top anchors it near the top of the pane for a predictable reading spot. Center puts it in the middle. Minimal scrolls the least needed and stays put if the marker is already visible, so opening the panel does not move your place.",
-			"markerScrollAlign",
-			{ top: "Top of pane", center: "Center", minimal: "Minimal (don't move if visible)" });
+			'markerScrollAlign',
+			{
+				top: 'Top of pane',
+				center: 'Center',
+				minimal: "Minimal (don't move if visible)",
+			},
+		);
 
 		// Authors
-		this.heading(containerEl, "Authors");
-		this.addToggleRow(containerEl, "Author tag",
-			"When enabled, new comments include an [author=...] line. Useful when collaborating with an AI agent or multiple reviewers.",
-			"enableAuthorTag");
+		this.heading(containerEl, 'Authors');
+		this.addToggleRow(
+			containerEl,
+			'Author tag',
+			'When enabled, new comments include an [author=...] line. Useful when collaborating with an AI agent or multiple reviewers.',
+			'enableAuthorTag',
+		);
 		if (this.plugin.settings.enableAuthorTag) {
-			this.addTextRow(containerEl, "Author identifier",
-				"Short tag with no spaces; maximum 32 characters.",
-				"authorTag", "reviewer", (value: string) => {
+			this.addTextRow(
+				containerEl,
+				'Author identifier',
+				'Short tag with no spaces; maximum 32 characters.',
+				'authorTag',
+				'reviewer',
+				(value: string) => {
 					const v = value.trim();
-					return v === "" || /^[^\s\]<>]{1,32}$/.test(v)
+					return v === '' || /^[^\s\]<>]{1,32}$/.test(v)
 						? undefined
-						: "Use a single tag with no spaces (max 32 characters).";
-				});
+						: 'Use a single tag with no spaces (max 32 characters).';
+				},
+			);
 		}
-		this.renderCustomBlock(containerEl, (host) => this.renderAuthorStyles(host));
+		this.renderCustomBlock(containerEl, (host) =>
+			this.renderAuthorStyles(host),
+		);
 
 		// AI integration
-		this.heading(containerEl, "AI integration");
-		this.addDropdownRow(containerEl, "Skill export destination",
-			"Vault folder the exported skill file is written to. Claude Code reads .claude/skills; some other assistants read a .agent folder.",
-			"skillExportTarget",
-			{ claude: ".claude/skills (Claude Code)", agent: ".agent/skills (other assistants)", both: "Both folders" });
-		this.renderCustomBlock(containerEl, (host) => this.renderSkillExport(host));
+		this.heading(containerEl, 'AI integration');
+		this.addDropdownRow(
+			containerEl,
+			'Skill export destination',
+			'Vault folder the exported skill file is written to. Claude Code reads .claude/skills; some other assistants read a .agent folder.',
+			'skillExportTarget',
+			{
+				claude: '.claude/skills (Claude Code)',
+				agent: '.agent/skills (other assistants)',
+				both: 'Both folders',
+			},
+		);
+		this.renderCustomBlock(containerEl, (host) =>
+			this.renderSkillExport(host),
+		);
 
 		// Diagnostics
-		this.heading(containerEl, "Diagnostics");
-		this.addToggleRow(containerEl, "Debug mode",
-			"Log additional information for troubleshooting. Off by default to avoid log spam.",
-			"debugMode");
+		this.heading(containerEl, 'Diagnostics');
+		this.addToggleRow(
+			containerEl,
+			'Debug mode',
+			'Log additional information for troubleshooting. Off by default to avoid log spam.',
+			'debugMode',
+		);
 		if (this.plugin.settings.debugMode) {
-			this.addDropdownRow(containerEl, "Debug log destination",
-				"Where diagnostic output is written.",
-				"debugLogTarget", { console: "Browser console", vault: "Log file in the vault" });
+			this.addDropdownRow(
+				containerEl,
+				'Debug log destination',
+				'Where diagnostic output is written.',
+				'debugLogTarget',
+				{ console: 'Browser console', vault: 'Log file in the vault' },
+			);
 		}
 		this.renderCustomBlock(containerEl, (host) => this.renderFooter(host));
 	}
@@ -517,7 +693,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 	// update() is the only 1.13 method touched anywhere in this tab and is
 	// reached solely through this guard.
 	private rerender(): void {
-		if (requireApiVersion("1.13.0")) {
+		if (requireApiVersion('1.13.0')) {
 			// 1.13+ owns the declarative tree; update() is the new (non-deprecated)
 			// re-render entry point.
 			this.update();
@@ -536,9 +712,10 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 	// getControlValue()'s coercion and avoids stringifying a non-primitive.
 	private controlString(key: string): string {
 		const value = this.getControlValue(key);
-		if (typeof value === "string") return value;
-		if (typeof value === "number" || typeof value === "boolean") return String(value);
-		return "";
+		if (typeof value === 'string') return value;
+		if (typeof value === 'number' || typeof value === 'boolean')
+			return String(value);
+		return '';
 	}
 
 	// Imperative row helpers used only by display(). Each binds through the same
@@ -550,11 +727,16 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		desc: string,
 		key: string,
 	): void {
-		new Setting(container).setName(name).setDesc(desc).addToggle((toggle) =>
-			toggle
-				.setValue(Boolean(this.getControlValue(key)))
-				.onChange((value) => { void this.setControlValue(key, value); }),
-		);
+		new Setting(container)
+			.setName(name)
+			.setDesc(desc)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(Boolean(this.getControlValue(key)))
+					.onChange((value) => {
+						void this.setControlValue(key, value);
+					}),
+			);
 	}
 
 	private addDropdownRow(
@@ -564,14 +746,17 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		key: string,
 		options: Record<string, string>,
 	): void {
-		new Setting(container).setName(name).setDesc(desc).addDropdown((dropdown) => {
-			for (const [value, label] of Object.entries(options)) {
-				dropdown.addOption(value, label);
-			}
-			dropdown
-				.setValue(this.controlString(key))
-				.onChange((value) => { void this.setControlValue(key, value); });
-		});
+		new Setting(container)
+			.setName(name)
+			.setDesc(desc)
+			.addDropdown((dropdown) => {
+				for (const [value, label] of Object.entries(options)) {
+					dropdown.addOption(value, label);
+				}
+				dropdown.setValue(this.controlString(key)).onChange((value) => {
+					void this.setControlValue(key, value);
+				});
+			});
 	}
 
 	private addTextRow(
@@ -582,37 +767,53 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		placeholder: string,
 		validate?: (value: string) => string | undefined,
 	): void {
-		new Setting(container).setName(name).setDesc(desc).addText((text) =>
-			text
-				.setPlaceholder(placeholder)
-				.setValue(this.controlString(key))
-				.onChange((value) => {
-					if (validate) {
-						const error = validate(value);
-						if (error) { new Notice(error); return; }
-					}
-					void this.setControlValue(key, value);
-				}),
-		);
+		new Setting(container)
+			.setName(name)
+			.setDesc(desc)
+			.addText((text) =>
+				text
+					.setPlaceholder(placeholder)
+					.setValue(this.controlString(key))
+					.onChange((value) => {
+						if (validate) {
+							const error = validate(value);
+							if (error) {
+								new Notice(error);
+								return;
+							}
+						}
+						void this.setControlValue(key, value);
+					}),
+			);
 	}
 
 	// Wraps a custom block in a full-width row, reusing the same builder the
 	// declarative path runs via customBlock().render().
-	private renderCustomBlock(container: HTMLElement, build: (host: HTMLElement) => void): void {
+	private renderCustomBlock(
+		container: HTMLElement,
+		build: (host: HTMLElement) => void,
+	): void {
 		this.customBlock(build).render(new Setting(container));
 	}
 
 	// Version + links footer, the same trailing row the workspace's reference
 	// plugin renders (shell-path-copy settings-tab renderFooter).
 	private renderFooter(host: HTMLElement): void {
-		host.addClass("annoteca-settings-footer");
+		host.addClass('annoteca-settings-footer');
 		host.createSpan({ text: `Version ${this.plugin.manifest.version} | ` });
 		const link = (text: string, url: string) => {
-			host.createEl("a", { text, href: url, attr: { target: "_blank", rel: "noopener" } });
+			host.createEl('a', {
+				text,
+				href: url,
+				attr: { target: '_blank', rel: 'noopener' },
+			});
 		};
-		link("GitHub", "https://github.com/ckelsoe/obsidian-annoteca");
-		host.createSpan({ text: " | " });
-		link("Report Issues", "https://github.com/ckelsoe/obsidian-annoteca/issues");
+		link('GitHub', 'https://github.com/ckelsoe/obsidian-annoteca');
+		host.createSpan({ text: ' | ' });
+		link(
+			'Report Issues',
+			'https://github.com/ckelsoe/obsidian-annoteca/issues',
+		);
 	}
 
 	// Routes declarative controls to the plugin's own settings store and runs the
@@ -621,31 +822,34 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 	// Toggles that show or hide dependent rows, or that change the default-category
 	// options, trigger a full re-render via update().
 	getControlValue(key: string): unknown {
-		return (this.plugin.settings as unknown as Record<string, unknown>)[key];
+		return (this.plugin.settings as unknown as Record<string, unknown>)[
+			key
+		];
 	}
 
 	async setControlValue(key: string, value: unknown): Promise<void> {
-		if (key === "authorTag") {
+		if (key === 'authorTag') {
 			// Preserve the tag's casing; the parser accepts mixed-case authors.
 			this.plugin.settings.authorTag =
-				typeof value === "string" ? value.trim() : "";
+				typeof value === 'string' ? value.trim() : '';
 		} else {
-			(this.plugin.settings as unknown as Record<string, unknown>)[key] = value;
+			(this.plugin.settings as unknown as Record<string, unknown>)[key] =
+				value;
 		}
 		await this.plugin.saveSettings();
 
 		switch (key) {
-			case "indicatorSize":
+			case 'indicatorSize':
 				this.plugin.applyIndicatorSize();
 				break;
-			case "anchorStyle":
-			case "anchorThickness":
-			case "resolvedBrightness":
+			case 'anchorStyle':
+			case 'anchorThickness':
+			case 'resolvedBrightness':
 				this.plugin.applyAnchorAppearance();
 				break;
-			case "enableIndexEntryPreset":
-			case "enableAuthorTag":
-			case "debugMode":
+			case 'enableIndexEntryPreset':
+			case 'enableAuthorTag':
+			case 'debugMode':
 				this.rerender();
 				break;
 		}
@@ -657,12 +861,12 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 	// imperatively and stay out of settings search.
 	private customBlock(build: (host: HTMLElement) => void) {
 		return {
-			name: "",
+			name: '',
 			searchable: false,
 			render: (setting: Setting) => {
 				const host = setting.settingEl;
 				host.empty();
-				host.addClass("annoteca-custom-block");
+				host.addClass('annoteca-custom-block');
 				build(host);
 			},
 		};
@@ -670,182 +874,242 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 
 	private renderSkillExport(container: HTMLElement): void {
 		const setting = new Setting(container)
-			.setName("Export AI skill")
-			.setDesc("Write a skill file into the vault that teaches an AI assistant this vault's comment format and categories. Re-export after changing categories or updating the plugin.");
+			.setName('Export AI skill')
+			.setDesc(
+				"Write a skill file into the vault that teaches an AI assistant this vault's comment format and categories. Re-export after changing categories or updating the plugin.",
+			);
 
 		// Live staleness indicator (F-277): reads the on-disk skill and reports
 		// whether it matches the current guidance.
-		const status = setting.descEl.createDiv({ cls: "annoteca-skill-status" });
+		const status = setting.descEl.createDiv({
+			cls: 'annoteca-skill-status',
+		});
 		const updateStatus = async (): Promise<void> => {
 			const s = await this.plugin.readExportedSkillStatus();
-			status.removeClasses(["is-stale", "is-current", "is-missing"]);
-			if (s === "missing") {
-				status.setText("Not yet exported.");
-				status.addClass("is-missing");
-			} else if (s === "stale") {
-				status.setText("Out of date; re-export to update your assistant.");
-				status.addClass("is-stale");
+			status.removeClasses(['is-stale', 'is-current', 'is-missing']);
+			if (s === 'missing') {
+				status.setText('Not yet exported.');
+				status.addClass('is-missing');
+			} else if (s === 'stale') {
+				status.setText(
+					'Out of date; re-export to update your assistant.',
+				);
+				status.addClass('is-stale');
 			} else {
-				status.setText("Up to date.");
-				status.addClass("is-current");
+				status.setText('Up to date.');
+				status.addClass('is-current');
 			}
 		};
 		void updateStatus();
 
-		setting.addButton(b => b
-			.setButtonText("Export")
-			.setCta()
-			.onClick(() => {
-				this.plugin.exportAiSkill();
-				// Refresh the indicator after the async write settles.
-				window.setTimeout(() => { void updateStatus(); }, 400);
-			}));
+		setting.addButton((b) =>
+			b
+				.setButtonText('Export')
+				.setCta()
+				.onClick(() => {
+					this.plugin.exportAiSkill();
+					// Refresh the indicator after the async write settles.
+					window.setTimeout(() => {
+						void updateStatus();
+					}, 400);
+				}),
+		);
 	}
 
 	private renderAddCategory(container: HTMLElement): void {
 		new Setting(container)
-			.setName("Add category")
-			.setDesc("Lowercase letters, digits, and single dashes. Cannot start or end with a dash. A few format keywords are unavailable as category names.")
-			.addText(t => t.setPlaceholder("Fact-check").then(text => {
-				let pendingName = "";
-				text.onChange(v => { pendingName = v.trim(); });
-
-				new ButtonComponent(text.inputEl.parentElement ?? container)
-					.setButtonText("Add")
-					.setCta()
-					.onClick(async () => {
-						if (!pendingName) return;
-						if (!isValidCategoryName(pendingName)) {
-							new Notice("Invalid category name.");
-							return;
-						}
-						if (this.plugin.settings.categories.some(c => c.id === pendingName)) {
-							new Notice("Category already exists.");
-							return;
-						}
-						this.plugin.settings.categories.push({
-							id: pendingName,
-							displayName: pendingName.charAt(0).toUpperCase() + pendingName.slice(1).replace(/-/g, " "),
-						});
-						await this.plugin.saveSettings();
-						this.rerender();
+			.setName('Add category')
+			.setDesc(
+				'Lowercase letters, digits, and single dashes. Cannot start or end with a dash. A few format keywords are unavailable as category names.',
+			)
+			.addText((t) =>
+				t.setPlaceholder('Fact-check').then((text) => {
+					let pendingName = '';
+					text.onChange((v) => {
+						pendingName = v.trim();
 					});
-			}));
+
+					new ButtonComponent(text.inputEl.parentElement ?? container)
+						.setButtonText('Add')
+						.setCta()
+						.onClick(async () => {
+							if (!pendingName) return;
+							if (!isValidCategoryName(pendingName)) {
+								new Notice('Invalid category name.');
+								return;
+							}
+							if (
+								this.plugin.settings.categories.some(
+									(c) => c.id === pendingName,
+								)
+							) {
+								new Notice('Category already exists.');
+								return;
+							}
+							this.plugin.settings.categories.push({
+								id: pendingName,
+								displayName:
+									pendingName.charAt(0).toUpperCase() +
+									pendingName.slice(1).replace(/-/g, ' '),
+							});
+							await this.plugin.saveSettings();
+							this.rerender();
+						});
+				}),
+			);
 	}
 
 	private renderPresetSection(container: HTMLElement): void {
 		const customPresets = this.plugin.settings.customPresets;
-		const allPresets: Array<{ id: string; displayName: string; categories: readonly CategoryDefinition[]; isCustom: boolean }> = [
-			...DEFAULT_PRESETS.map(p => ({ ...p, isCustom: false })),
-			...customPresets.map(p => ({ ...p, isCustom: true })),
+		const allPresets: Array<{
+			id: string;
+			displayName: string;
+			categories: readonly CategoryDefinition[];
+			isCustom: boolean;
+		}> = [
+			...DEFAULT_PRESETS.map((p) => ({ ...p, isCustom: false })),
+			...customPresets.map((p) => ({ ...p, isCustom: true })),
 		];
 
 		const { content } = createStackedRow(container, {
-			name: "Browse presets",
-			description: "Cherry-pick categories from any preset into your working list. Picking a preset never replaces existing categories.",
+			name: 'Browse presets',
+			description:
+				'Cherry-pick categories from any preset into your working list. Picking a preset never replaces existing categories.',
 		});
 
 		// Preset selector dropdown.
-		const selectorRow = content.createDiv({ cls: "annoteca-preset-selector" });
-		const select = selectorRow.createEl("select", { cls: "dropdown" });
+		const selectorRow = content.createDiv({
+			cls: 'annoteca-preset-selector',
+		});
+		const select = selectorRow.createEl('select', { cls: 'dropdown' });
 		for (const p of allPresets) {
-			select.createEl("option", {
+			select.createEl('option', {
 				value: p.id,
 				text: p.isCustom ? `★ ${p.displayName}` : p.displayName,
 			});
 		}
 
 		// Preview of selected preset's categories with checkboxes.
-		const previewArea = content.createDiv({ cls: "annoteca-preset-preview" });
+		const previewArea = content.createDiv({
+			cls: 'annoteca-preset-preview',
+		});
 
 		const renderPreview = (): void => {
 			previewArea.empty();
-			const selected = allPresets.find(p => p.id === select.value);
+			const selected = allPresets.find((p) => p.id === select.value);
 			if (!selected) return;
-			const existingIds = new Set(this.plugin.settings.categories.map(c => c.id));
-			const checks: Array<{ cat: CategoryDefinition; input: HTMLInputElement; conflict: boolean }> = [];
+			const existingIds = new Set(
+				this.plugin.settings.categories.map((c) => c.id),
+			);
+			const checks: Array<{
+				cat: CategoryDefinition;
+				input: HTMLInputElement;
+				conflict: boolean;
+			}> = [];
 
 			for (const cat of selected.categories) {
 				const conflict = existingIds.has(cat.id);
 				const row = previewArea.createDiv({
-					cls: `annoteca-preset-cat${conflict ? " is-conflict" : ""}`,
+					cls: `annoteca-preset-cat${conflict ? ' is-conflict' : ''}`,
 				});
-				const input = row.createEl("input", { attr: { type: "checkbox" } });
+				const input = row.createEl('input', {
+					attr: { type: 'checkbox' },
+				});
 				input.disabled = conflict;
-				const label = row.createSpan({ cls: "annoteca-preset-cat-label" });
+				const label = row.createSpan({
+					cls: 'annoteca-preset-cat-label',
+				});
 				if (cat.icon) {
-					const iconEl = label.createSpan({ cls: "annoteca-preset-cat-icon" });
+					const iconEl = label.createSpan({
+						cls: 'annoteca-preset-cat-icon',
+					});
 					setIcon(iconEl, cat.icon);
 				}
 				label.createSpan({ text: cat.displayName });
 				if (conflict) {
-					row.createSpan({ cls: "annoteca-preset-conflict", text: "already in list" });
+					row.createSpan({
+						cls: 'annoteca-preset-conflict',
+						text: 'already in list',
+					});
 				}
 				checks.push({ cat, input, conflict });
 			}
 
-			const actions = previewArea.createDiv({ cls: "annoteca-preset-actions" });
-			const addBtn = actions.createEl("button", {
-				cls: "annoteca-preset-add mod-cta",
-				text: "Add selected categories",
-				attr: { type: "button" },
+			const actions = previewArea.createDiv({
+				cls: 'annoteca-preset-actions',
 			});
-			addBtn.addEventListener("click", () => {
-				const chosen = checks.filter(c => !c.conflict && c.input.checked).map(c => c.cat);
+			const addBtn = actions.createEl('button', {
+				cls: 'annoteca-preset-add mod-cta',
+				text: 'Add selected categories',
+				attr: { type: 'button' },
+			});
+			addBtn.addEventListener('click', () => {
+				const chosen = checks
+					.filter((c) => !c.conflict && c.input.checked)
+					.map((c) => c.cat);
 				if (chosen.length === 0) {
-					new Notice("Pick at least one category.");
+					new Notice('Pick at least one category.');
 					return;
 				}
-				this.plugin.settings.categories.push(...chosen.map(c => ({ ...c })));
+				this.plugin.settings.categories.push(
+					...chosen.map((c) => ({ ...c })),
+				);
 				void this.plugin.saveSettings();
-				new Notice(`Added ${chosen.length} categor${chosen.length === 1 ? "y" : "ies"}.`);
+				new Notice(
+					`Added ${chosen.length} categor${chosen.length === 1 ? 'y' : 'ies'}.`,
+				);
 				this.rerender();
 			});
 
 			if (selected.isCustom) {
-				const deleteBtn = actions.createEl("button", {
-					cls: "annoteca-preset-delete",
-					text: "Delete preset",
-					attr: { type: "button" },
+				const deleteBtn = actions.createEl('button', {
+					cls: 'annoteca-preset-delete',
+					text: 'Delete preset',
+					attr: { type: 'button' },
 				});
-				deleteBtn.addEventListener("click", () => {
+				deleteBtn.addEventListener('click', () => {
 					this.plugin.settings.customPresets =
-						this.plugin.settings.customPresets.filter(p => p.id !== selected.id);
+						this.plugin.settings.customPresets.filter(
+							(p) => p.id !== selected.id,
+						);
 					void this.plugin.saveSettings();
 					this.rerender();
 				});
 			}
 		};
 
-		select.addEventListener("change", renderPreview);
+		select.addEventListener('change', renderPreview);
 		renderPreview();
 
 		// Save current categories as a custom preset.
 		const { content: saveContent } = createStackedRow(container, {
-			name: "Save current as preset",
-			description: "Capture your current working categories under a name so you can reuse them later or share between vaults.",
+			name: 'Save current as preset',
+			description:
+				'Capture your current working categories under a name so you can reuse them later or share between vaults.',
 		});
-		const saveRow = saveContent.createDiv({ cls: "annoteca-preset-save" });
-		const nameInput = saveRow.createEl("input", {
-			cls: "annoteca-preset-save-name",
-			attr: { type: "text", placeholder: "Preset name" },
+		const saveRow = saveContent.createDiv({ cls: 'annoteca-preset-save' });
+		const nameInput = saveRow.createEl('input', {
+			cls: 'annoteca-preset-save-name',
+			attr: { type: 'text', placeholder: 'Preset name' },
 		});
-		const saveBtn = saveRow.createEl("button", {
-			cls: "annoteca-preset-save-button mod-cta",
-			text: "Save",
-			attr: { type: "button" },
+		const saveBtn = saveRow.createEl('button', {
+			cls: 'annoteca-preset-save-button mod-cta',
+			text: 'Save',
+			attr: { type: 'button' },
 		});
-		saveBtn.addEventListener("click", () => {
+		saveBtn.addEventListener('click', () => {
 			const name = nameInput.value.trim();
 			if (name.length === 0) {
-				new Notice("Give the preset a name.");
+				new Notice('Give the preset a name.');
 				return;
 			}
 			const id = `user-${Date.now().toString(36)}`;
 			const preset: UserPreset = {
 				id,
 				displayName: name,
-				categories: this.plugin.settings.categories.map(c => ({ ...c })),
+				categories: this.plugin.settings.categories.map((c) => ({
+					...c,
+				})),
 			};
 			this.plugin.settings.customPresets.push(preset);
 			void this.plugin.saveSettings();
@@ -855,7 +1119,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 	}
 
 	private renderCategoryList(container: HTMLElement): void {
-		const list = container.createDiv({ cls: "annoteca-category-list" });
+		const list = container.createDiv({ cls: 'annoteca-category-list' });
 		this.refreshCategoryList(list);
 	}
 
@@ -876,20 +1140,23 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 	// Accordion row: collapsed summary (icon + name + color dot + identifier
 	// + chevron) plus a hidden detail panel with the full editor. Expansion
 	// state lives in `expandedCategoryIds` so it survives re-renders.
-	private renderCategoryRow(list: HTMLElement, cat: CategoryDefinition): void {
-		const isProtected = cat.id === "uncategorized";
+	private renderCategoryRow(
+		list: HTMLElement,
+		cat: CategoryDefinition,
+	): void {
+		const isProtected = cat.id === 'uncategorized';
 		const isExpanded = this.expandedCategoryIds.has(cat.id);
 
 		const row = list.createDiv({
-			cls: `annoteca-category-row${isExpanded ? " is-expanded" : ""}`,
+			cls: `annoteca-category-row${isExpanded ? ' is-expanded' : ''}`,
 		});
 
 		// --- Summary row ------------------------------------------------
-		const summary = row.createEl("button", {
-			cls: "annoteca-category-summary",
+		const summary = row.createEl('button', {
+			cls: 'annoteca-category-summary',
 			attr: {
-				type: "button",
-				"aria-expanded": isExpanded ? "true" : "false",
+				type: 'button',
+				'aria-expanded': isExpanded ? 'true' : 'false',
 			},
 		});
 
@@ -899,86 +1166,100 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		// button. Drag is pointer-only (HTML5 DnD), so reordering is a desktop
 		// affordance; mobile users add categories in the order they want them.
 		const handle = summary.createSpan({
-			cls: "annoteca-category-drag-handle",
-			attr: { draggable: "true", "aria-label": "Drag to reorder" },
+			cls: 'annoteca-category-drag-handle',
+			attr: { draggable: 'true', 'aria-label': 'Drag to reorder' },
 		});
-		setIcon(handle, "grip-vertical");
-		handle.addEventListener("click", e => e.stopPropagation());
-		handle.addEventListener("dragstart", (e: DragEvent) => {
+		setIcon(handle, 'grip-vertical');
+		handle.addEventListener('click', (e) => e.stopPropagation());
+		handle.addEventListener('dragstart', (e: DragEvent) => {
 			this.draggedCategoryId = cat.id;
-			row.addClass("is-dragging");
+			row.addClass('is-dragging');
 			if (e.dataTransfer) {
-				e.dataTransfer.effectAllowed = "move";
-				e.dataTransfer.setData("text/plain", cat.id);
+				e.dataTransfer.effectAllowed = 'move';
+				e.dataTransfer.setData('text/plain', cat.id);
 			}
 		});
-		handle.addEventListener("dragend", () => {
+		handle.addEventListener('dragend', () => {
 			this.draggedCategoryId = null;
-			row.removeClass("is-dragging");
-			for (const r of list.findAll(".annoteca-category-row")) {
-				r.removeClass("is-drag-over");
+			row.removeClass('is-dragging');
+			for (const r of list.findAll('.annoteca-category-row')) {
+				r.removeClass('is-drag-over');
 			}
 		});
 
-		const summaryIcon = summary.createSpan({ cls: "annoteca-category-summary-icon" });
+		const summaryIcon = summary.createSpan({
+			cls: 'annoteca-category-summary-icon',
+		});
 		if (cat.icon) {
 			setIcon(summaryIcon, cat.icon);
 		} else {
-			summaryIcon.addClass("is-empty");
-			summaryIcon.setText("?");
+			summaryIcon.addClass('is-empty');
+			summaryIcon.setText('?');
 		}
 
 		summary.createSpan({
-			cls: "annoteca-category-summary-name",
+			cls: 'annoteca-category-summary-name',
 			text: cat.displayName,
 		});
 
-		const colorDot = summary.createSpan({ cls: "annoteca-category-summary-color" });
+		const colorDot = summary.createSpan({
+			cls: 'annoteca-category-summary-color',
+		});
 		if (cat.color) {
 			colorDot.style.backgroundColor = cat.color;
 		} else {
-			colorDot.addClass("is-empty");
+			colorDot.addClass('is-empty');
 		}
 
 		summary.createSpan({
-			cls: "annoteca-category-summary-id",
+			cls: 'annoteca-category-summary-id',
 			text: cat.id,
 		});
 
-		const chevron = summary.createSpan({ cls: "annoteca-category-summary-chevron" });
-		setIcon(chevron, "chevron-down");
+		const chevron = summary.createSpan({
+			cls: 'annoteca-category-summary-chevron',
+		});
+		setIcon(chevron, 'chevron-down');
 
 		// --- Detail panel -----------------------------------------------
-		const detail = row.createDiv({ cls: "annoteca-category-detail" });
+		const detail = row.createDiv({ cls: 'annoteca-category-detail' });
 
-		summary.addEventListener("click", () => {
+		summary.addEventListener('click', () => {
 			const nowExpanded = !this.expandedCategoryIds.has(cat.id);
 			if (nowExpanded) {
 				this.expandedCategoryIds.add(cat.id);
 			} else {
 				this.expandedCategoryIds.delete(cat.id);
 			}
-			row.toggleClass("is-expanded", nowExpanded);
-			summary.setAttribute("aria-expanded", nowExpanded ? "true" : "false");
+			row.toggleClass('is-expanded', nowExpanded);
+			summary.setAttribute(
+				'aria-expanded',
+				nowExpanded ? 'true' : 'false',
+			);
 		});
 
 		// Drop target: any row accepts the dragged category and reorders the
 		// working list so the dragged entry lands at this row's position.
-		row.addEventListener("dragover", (e: DragEvent) => {
-			if (!this.draggedCategoryId || this.draggedCategoryId === cat.id) return;
+		row.addEventListener('dragover', (e: DragEvent) => {
+			if (!this.draggedCategoryId || this.draggedCategoryId === cat.id)
+				return;
 			e.preventDefault(); // required for the row to be a valid drop target
-			if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-			row.addClass("is-drag-over");
+			if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+			row.addClass('is-drag-over');
 		});
-		row.addEventListener("dragleave", () => row.removeClass("is-drag-over"));
-		row.addEventListener("drop", (e: DragEvent) => {
+		row.addEventListener('dragleave', () =>
+			row.removeClass('is-drag-over'),
+		);
+		row.addEventListener('drop', (e: DragEvent) => {
 			e.preventDefault();
-			row.removeClass("is-drag-over");
+			row.removeClass('is-drag-over');
 			const dragId = this.draggedCategoryId;
 			this.draggedCategoryId = null;
 			if (!dragId || dragId === cat.id) return;
 			this.plugin.settings.categories = reorderCategories(
-				this.plugin.settings.categories, dragId, cat.id,
+				this.plugin.settings.categories,
+				dragId,
+				cat.id,
 			);
 			void this.plugin.saveSettings();
 			// Repaint the list directly (the custom block does not refresh via
@@ -987,60 +1268,79 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			this.rerender();
 		});
 
-		const controls = detail.createDiv({ cls: "annoteca-category-controls" });
+		const controls = detail.createDiv({
+			cls: 'annoteca-category-controls',
+		});
 
 		// Display name editing.
-		const nameWrap = controls.createDiv({ cls: "annoteca-category-control" });
-		nameWrap.createDiv({ cls: "annoteca-category-control-label", text: "Display name" });
-		const nameInput = nameWrap.createEl("input", {
-			cls: "annoteca-category-name",
-			attr: { type: "text", value: cat.displayName },
+		const nameWrap = controls.createDiv({
+			cls: 'annoteca-category-control',
 		});
-		nameInput.addEventListener("input", () => {
+		nameWrap.createDiv({
+			cls: 'annoteca-category-control-label',
+			text: 'Display name',
+		});
+		const nameInput = nameWrap.createEl('input', {
+			cls: 'annoteca-category-name',
+			attr: { type: 'text', value: cat.displayName },
+		});
+		nameInput.addEventListener('input', () => {
 			const v = nameInput.value.trim();
 			if (v.length === 0) return;
 			cat.displayName = v;
 			// Keep the summary label in sync without re-rendering the tab.
-			const summaryName = summary.querySelector(".annoteca-category-summary-name");
+			const summaryName = summary.querySelector(
+				'.annoteca-category-summary-name',
+			);
 			if (summaryName) summaryName.setText(v);
 			void this.plugin.saveSettings();
 		});
 
 		// Icon picker.
-		const iconWrap = controls.createDiv({ cls: "annoteca-category-control" });
-		iconWrap.createDiv({ cls: "annoteca-category-control-label", text: "Icon" });
+		const iconWrap = controls.createDiv({
+			cls: 'annoteca-category-control',
+		});
+		iconWrap.createDiv({
+			cls: 'annoteca-category-control-label',
+			text: 'Icon',
+		});
 		createIconPicker(iconWrap, {
 			app: this.app,
 			current: cat.icon,
-			onChange: async next => {
+			onChange: async (next) => {
 				cat.icon = next;
 				await this.plugin.saveSettings();
 				// Reflect the change in the summary icon without a re-render.
 				summaryIcon.empty();
-				summaryIcon.removeClass("is-empty");
+				summaryIcon.removeClass('is-empty');
 				if (next) {
 					setIcon(summaryIcon, next);
 				} else {
-					summaryIcon.addClass("is-empty");
-					summaryIcon.setText("?");
+					summaryIcon.addClass('is-empty');
+					summaryIcon.setText('?');
 				}
 			},
 		});
 
 		// Color picker.
-		const colorWrap = controls.createDiv({ cls: "annoteca-category-control" });
-		colorWrap.createDiv({ cls: "annoteca-category-control-label", text: "Color" });
+		const colorWrap = controls.createDiv({
+			cls: 'annoteca-category-control',
+		});
+		colorWrap.createDiv({
+			cls: 'annoteca-category-control-label',
+			text: 'Color',
+		});
 		createColorPicker(colorWrap, {
 			current: cat.color,
-			onChange: async next => {
+			onChange: async (next) => {
 				cat.color = next;
 				await this.plugin.saveSettings();
 				if (next) {
 					colorDot.style.backgroundColor = next;
-					colorDot.removeClass("is-empty");
+					colorDot.removeClass('is-empty');
 				} else {
-					colorDot.style.removeProperty("background-color");
-					colorDot.addClass("is-empty");
+					colorDot.style.removeProperty('background-color');
+					colorDot.addClass('is-empty');
 				}
 			},
 		});
@@ -1048,39 +1348,57 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		// Tier (anchor-underline urgency). Drives the underline's thickness
 		// for comments in this category: subtle → thin, normal → uses the
 		// global anchor thickness, strong → thick.
-		const tierWrap = controls.createDiv({ cls: "annoteca-category-control" });
-		tierWrap.createDiv({ cls: "annoteca-category-control-label", text: "Tier" });
-		const tierSelect = tierWrap.createEl("select", { cls: "dropdown" });
-		tierSelect.createEl("option", { value: "subtle", text: "Subtle — informational" });
-		tierSelect.createEl("option", { value: "normal", text: "Normal — actionable feedback" });
-		tierSelect.createEl("option", { value: "strong", text: "Strong — urgent" });
-		tierSelect.value = cat.tier ?? "normal";
-		tierSelect.addEventListener("change", () => {
-			const next = tierSelect.value as "subtle" | "normal" | "strong";
-			cat.tier = next === "normal" ? undefined : next;
+		const tierWrap = controls.createDiv({
+			cls: 'annoteca-category-control',
+		});
+		tierWrap.createDiv({
+			cls: 'annoteca-category-control-label',
+			text: 'Tier',
+		});
+		const tierSelect = tierWrap.createEl('select', { cls: 'dropdown' });
+		tierSelect.createEl('option', {
+			value: 'subtle',
+			text: 'Subtle — informational',
+		});
+		tierSelect.createEl('option', {
+			value: 'normal',
+			text: 'Normal — actionable feedback',
+		});
+		tierSelect.createEl('option', {
+			value: 'strong',
+			text: 'Strong — urgent',
+		});
+		tierSelect.value = cat.tier ?? 'normal';
+		tierSelect.addEventListener('change', () => {
+			const next = tierSelect.value as 'subtle' | 'normal' | 'strong';
+			cat.tier = next === 'normal' ? undefined : next;
 			void this.plugin.saveSettings();
 		});
 
 		// Actions: either Remove or the protected note.
-		const actions = detail.createDiv({ cls: "annoteca-category-actions" });
+		const actions = detail.createDiv({ cls: 'annoteca-category-actions' });
 		if (isProtected) {
 			actions.createDiv({
-				cls: "annoteca-category-protected-note",
-				text: "Used as the scratchpad fallback; this category cannot be removed.",
+				cls: 'annoteca-category-protected-note',
+				text: 'Used as the scratchpad fallback; this category cannot be removed.',
 			});
 		} else {
-			const removeBtn = actions.createEl("button", {
-				cls: "annoteca-category-remove",
-				text: "Remove category",
-				attr: { type: "button" },
+			const removeBtn = actions.createEl('button', {
+				cls: 'annoteca-category-remove',
+				text: 'Remove category',
+				attr: { type: 'button' },
 			});
-			removeBtn.addEventListener("click", () => {
+			removeBtn.addEventListener('click', () => {
 				if (this.plugin.settings.defaultCategory === cat.id) {
-					new Notice("Cannot remove the default category. Pick a different default first.");
+					new Notice(
+						'Cannot remove the default category. Pick a different default first.',
+					);
 					return;
 				}
 				this.plugin.settings.categories =
-					this.plugin.settings.categories.filter(c => c.id !== cat.id);
+					this.plugin.settings.categories.filter(
+						(c) => c.id !== cat.id,
+					);
 				this.expandedCategoryIds.delete(cat.id);
 				void this.plugin.saveSettings();
 				this.refreshCategoryList(list);
@@ -1094,54 +1412,64 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 	// the color tints that author's name and replies in the thread and hover.
 	private renderAuthorStyles(host: HTMLElement): void {
 		const { content } = createStackedRow(host, {
-			name: "Collaborators and author colors",
-			description: "Tags for the people and assistants who reply in this vault. Each one appears in the reply author picker, and its color tints that author's name and replies.",
+			name: 'Collaborators and author colors',
+			description:
+				"Tags for the people and assistants who reply in this vault. Each one appears in the reply author picker, and its color tints that author's name and replies.",
 		});
 
-		const list = content.createDiv({ cls: "annoteca-author-style-list" });
+		const list = content.createDiv({ cls: 'annoteca-author-style-list' });
 		for (const style of this.plugin.settings.authorStyles) {
-			const row = list.createDiv({ cls: "annoteca-author-style-row" });
-			row.createSpan({ cls: "annoteca-author-style-tag", text: style.tag });
-			const colorWrap = row.createDiv({ cls: "annoteca-author-style-color" });
+			const row = list.createDiv({ cls: 'annoteca-author-style-row' });
+			row.createSpan({
+				cls: 'annoteca-author-style-tag',
+				text: style.tag,
+			});
+			const colorWrap = row.createDiv({
+				cls: 'annoteca-author-style-color',
+			});
 			createColorPicker(colorWrap, {
 				current: style.color,
-				onChange: async next => {
+				onChange: async (next) => {
 					style.color = next;
 					await this.plugin.saveSettings();
 				},
 			});
-			const remove = row.createEl("button", {
-				cls: "annoteca-author-style-remove",
-				text: "Remove",
-				attr: { type: "button" },
+			const remove = row.createEl('button', {
+				cls: 'annoteca-author-style-remove',
+				text: 'Remove',
+				attr: { type: 'button' },
 			});
-			remove.addEventListener("click", () => {
+			remove.addEventListener('click', () => {
 				this.plugin.settings.authorStyles =
-					this.plugin.settings.authorStyles.filter(s => s.tag !== style.tag);
+					this.plugin.settings.authorStyles.filter(
+						(s) => s.tag !== style.tag,
+					);
 				void this.plugin.saveSettings();
 				this.rerender();
 			});
 		}
 
-		const addRow = content.createDiv({ cls: "annoteca-author-style-add" });
-		const input = addRow.createEl("input", {
-			cls: "annoteca-author-style-input",
-			attr: { type: "text", placeholder: "Author tag" },
+		const addRow = content.createDiv({ cls: 'annoteca-author-style-add' });
+		const input = addRow.createEl('input', {
+			cls: 'annoteca-author-style-input',
+			attr: { type: 'text', placeholder: 'Author tag' },
 		});
-		const addBtn = addRow.createEl("button", {
-			cls: "mod-cta",
-			text: "Add author",
-			attr: { type: "button" },
+		const addBtn = addRow.createEl('button', {
+			cls: 'mod-cta',
+			text: 'Add author',
+			attr: { type: 'button' },
 		});
-		addBtn.addEventListener("click", () => {
+		addBtn.addEventListener('click', () => {
 			const tag = input.value.trim();
-			if (tag === "") return;
+			if (tag === '') return;
 			if (!/^[^\s\]<>]{1,32}$/.test(tag)) {
-				new Notice("Use a single tag with no spaces (max 32 characters).");
+				new Notice(
+					'Use a single tag with no spaces (max 32 characters).',
+				);
 				return;
 			}
-			if (this.plugin.settings.authorStyles.some(s => s.tag === tag)) {
-				new Notice("That author is already configured.");
+			if (this.plugin.settings.authorStyles.some((s) => s.tag === tag)) {
+				new Notice('That author is already configured.');
 				return;
 			}
 			this.plugin.settings.authorStyles.push({ tag });
@@ -1149,5 +1477,4 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			this.rerender();
 		});
 	}
-
 }

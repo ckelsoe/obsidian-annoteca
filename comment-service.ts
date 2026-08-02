@@ -16,13 +16,17 @@
 // editor keeps the in-memory document and disk in sync. The edit composer
 // already used `editor.replaceRange` for the same reason.
 
-import { MarkdownView, Notice, TFile } from "obsidian";
+import { MarkdownView, Notice, TFile } from 'obsidian';
 
-import type AnnotecaPlugin from "./main";
-import type { Addressed, Comment, Reply } from "./types";
-import { parseAll, serialize, nowISO } from "./parser";
+import type AnnotecaPlugin from './main';
+import type { Addressed, Comment, Reply } from './types';
+import { parseAll, serialize, nowISO } from './parser';
 
-interface SpliceRange { from: number; to: number; insert: string; }
+interface SpliceRange {
+	from: number;
+	to: number;
+	insert: string;
+}
 
 export class CommentService {
 	constructor(private readonly plugin: AnnotecaPlugin) {}
@@ -39,31 +43,34 @@ export class CommentService {
 		const author = this.resolvedAuthor();
 		const resolved: Comment = {
 			...comment,
-			resolution: { author, date: nowISO(), note: "" },
+			resolution: { author, date: nowISO(), note: '' },
 		};
 		await this.replaceMarker(path, comment, resolved);
-		new Notice("Resolved.");
+		new Notice('Resolved.');
 	}
 
 	// Resolve with file cleanup: removes the marker entirely instead of
 	// writing a [resolved ...] line. The thread leaves the file; history, when
 	// wanted, lives in git. Reached from the explicit "Resolve and remove"
 	// action and from resolveComment when deleteOnResolve is enabled.
-	async resolveAndRemoveComment(path: string, comment: Comment): Promise<void> {
+	async resolveAndRemoveComment(
+		path: string,
+		comment: Comment,
+	): Promise<void> {
 		const file = this.plugin.app.vault.getAbstractFileByPath(path);
 		if (!(file instanceof TFile)) return;
 		const content = await this.readCurrentContent(file, path);
 		const { start, end } = this.freshOffsets(content, comment);
 		const splice = this.buildDeleteSplice(content, start, end);
 		await this.applySplices(path, file, [splice]);
-		new Notice("Resolved and removed.");
+		new Notice('Resolved and removed.');
 	}
 
 	async reopenComment(path: string, comment: Comment): Promise<void> {
 		if (!comment.resolution) return;
 		const reopened: Comment = { ...comment, resolution: undefined };
 		await this.replaceMarker(path, comment, reopened);
-		new Notice("Reopened.");
+		new Notice('Reopened.');
 	}
 
 	async deleteComment(path: string, comment: Comment): Promise<void> {
@@ -73,7 +80,7 @@ export class CommentService {
 		const { start, end } = this.freshOffsets(content, comment);
 		const splice = this.buildDeleteSplice(content, start, end);
 		await this.applySplices(path, file, [splice]);
-		new Notice("Deleted.");
+		new Notice('Deleted.');
 	}
 
 	async appendReply(comment: Comment, reply: Reply): Promise<void> {
@@ -109,7 +116,7 @@ export class CommentService {
 		};
 		const next: Comment = { ...comment, addressed };
 		await this.replaceMarker(path, comment, next);
-		new Notice("Marked as addressed.");
+		new Notice('Marked as addressed.');
 	}
 
 	// addressed → resolved. The reviewer keeps the applied edit. Honors
@@ -124,10 +131,14 @@ export class CommentService {
 		const next: Comment = {
 			...comment,
 			addressed: undefined,
-			resolution: { author: this.resolvedAuthor(), date: nowISO(), note: "accepted" },
+			resolution: {
+				author: this.resolvedAuthor(),
+				date: nowISO(),
+				note: 'accepted',
+			},
 		};
 		await this.replaceMarker(path, comment, next);
-		new Notice("Accepted.");
+		new Notice('Accepted.');
 	}
 
 	// addressed → open. The reviewer wants to revise further: drop the
@@ -137,7 +148,7 @@ export class CommentService {
 		if (!comment.addressed) return;
 		const next: Comment = { ...comment, addressed: undefined };
 		await this.replaceMarker(path, comment, next);
-		new Notice("Reopened for revision.");
+		new Notice('Reopened for revision.');
 	}
 
 	// addressed → open, auto-reverting the prose. Restores the annoteca-original
@@ -163,7 +174,8 @@ export class CommentService {
 		const markerEnd = comment.marker.end;
 		// Skip the single begin-placement space between the marker and the new
 		// prose, if present.
-		const proseStart = content.charAt(markerEnd) === " " ? markerEnd + 1 : markerEnd;
+		const proseStart =
+			content.charAt(markerEnd) === ' ' ? markerEnd + 1 : markerEnd;
 		const lineEnd = this.endOfLine(content, proseStart);
 
 		const reopened: Comment = { ...comment, addressed: undefined };
@@ -182,11 +194,11 @@ export class CommentService {
 			{ from: markerStart, to: markerEnd, insert: markerText },
 			{ from: proseStart, to: lineEnd, insert: addressed.original },
 		]);
-		new Notice("Reverted to the original text.");
+		new Notice('Reverted to the original text.');
 	}
 
 	private endOfLine(content: string, from: number): number {
-		const idx = content.indexOf("\n", from);
+		const idx = content.indexOf('\n', from);
 		return idx === -1 ? content.length : idx;
 	}
 
@@ -196,7 +208,7 @@ export class CommentService {
 		const file = this.plugin.app.vault.getAbstractFileByPath(path);
 		if (!(file instanceof TFile)) return [];
 		const content = await this.readCurrentContent(file, path);
-		return parseAll(content).filter(c => c.resolution !== undefined);
+		return parseAll(content).filter((c) => c.resolution !== undefined);
 	}
 
 	// Strips every resolved marker from `path` in a single file write. Returns
@@ -206,7 +218,9 @@ export class CommentService {
 		const file = this.plugin.app.vault.getAbstractFileByPath(path);
 		if (!(file instanceof TFile)) return 0;
 		const content = await this.readCurrentContent(file, path);
-		const resolved = parseAll(content).filter(c => c.resolution !== undefined);
+		const resolved = parseAll(content).filter(
+			(c) => c.resolution !== undefined,
+		);
 		if (resolved.length === 0) return 0;
 
 		// Bulk cleanup intent is "tidy the file", not "remove this exact span",
@@ -216,14 +230,15 @@ export class CommentService {
 		for (const c of resolved) {
 			let start = c.marker.start;
 			let end = c.marker.end;
-			const standsAlone = (start === 0 || content.charAt(start - 1) === "\n")
-				&& (end === content.length || content.charAt(end) === "\n");
+			const standsAlone =
+				(start === 0 || content.charAt(start - 1) === '\n') &&
+				(end === content.length || content.charAt(end) === '\n');
 			if (standsAlone && end < content.length) {
 				end += 1;
-			} else if (start > 0 && content.charAt(start - 1) === " ") {
+			} else if (start > 0 && content.charAt(start - 1) === ' ') {
 				start -= 1;
 			}
-			splices.push({ from: start, to: end, insert: "" });
+			splices.push({ from: start, to: end, insert: '' });
 		}
 
 		await this.applySplices(path, file, splices);
@@ -233,7 +248,11 @@ export class CommentService {
 	// Single funnel for parser.serialize + write + index rebuild +
 	// "index-changed" event. Every comment-lifecycle write goes through here so
 	// future callers cannot bypass index rebuild or event emission.
-	async replaceMarker(path: string, prev: Comment, next: Comment): Promise<void> {
+	async replaceMarker(
+		path: string,
+		prev: Comment,
+		next: Comment,
+	): Promise<void> {
 		const file = this.plugin.app.vault.getAbstractFileByPath(path);
 		if (!(file instanceof TFile)) return;
 		const serialized = serialize({
@@ -258,17 +277,18 @@ export class CommentService {
 
 	resolvedAuthor(): string {
 		const tag = this.plugin.settings.authorTag.trim();
-		if (this.plugin.settings.enableAuthorTag && tag !== "") return tag;
-		return "user";
+		if (this.plugin.settings.enableAuthorTag && tag !== '') return tag;
+		return 'user';
 	}
 
 	// ---- internals -----------------------------------------------------
 
 	private getOpenMarkdownView(path: string): MarkdownView | undefined {
-		const leaves = this.plugin.app.workspace.getLeavesOfType("markdown");
+		const leaves = this.plugin.app.workspace.getLeavesOfType('markdown');
 		for (const leaf of leaves) {
 			const view = leaf.view;
-			if (view instanceof MarkdownView && view.file?.path === path) return view;
+			if (view instanceof MarkdownView && view.file?.path === path)
+				return view;
 		}
 		return undefined;
 	}
@@ -276,7 +296,10 @@ export class CommentService {
 	// Read the truth that a subsequent write must reconcile with. If the file
 	// is open in an editor, the editor's value is the truth (it may have
 	// unsaved typing the user expects to keep). Otherwise read from vault.
-	private async readCurrentContent(file: TFile, path: string): Promise<string> {
+	private async readCurrentContent(
+		file: TFile,
+		path: string,
+	): Promise<string> {
 		const view = this.getOpenMarkdownView(path);
 		if (view) return view.editor.getValue();
 		return this.plugin.app.vault.read(file);
@@ -288,20 +311,28 @@ export class CommentService {
 	// last built; splicing on stale offsets removes the wrong range and leaves
 	// the real marker in place. Matching by id against a fresh parse fixes that.
 	// Falls back to the cached offsets when there is no id or no match.
-	private freshOffsets(content: string, comment: Comment): { start: number; end: number } {
+	private freshOffsets(
+		content: string,
+		comment: Comment,
+	): { start: number; end: number } {
 		if (comment.id !== undefined) {
-			const match = parseAll(content).find(c => c.id === comment.id);
-			if (match) return { start: match.marker.start, end: match.marker.end };
+			const match = parseAll(content).find((c) => c.id === comment.id);
+			if (match)
+				return { start: match.marker.start, end: match.marker.end };
 		}
 		return { start: comment.marker.start, end: comment.marker.end };
 	}
 
-	private buildDeleteSplice(content: string, start: number, end: number): SpliceRange {
+	private buildDeleteSplice(
+		content: string,
+		start: number,
+		end: number,
+	): SpliceRange {
 		// Drop the marker plus any trailing space introduced by range insertion.
 		let from = start;
 		const to = end;
-		if (from > 0 && content.charAt(from - 1) === " ") from -= 1;
-		return { from, to, insert: "" };
+		if (from > 0 && content.charAt(from - 1) === ' ') from -= 1;
+		return { from, to, insert: '' };
 	}
 
 	// Apply a set of splices to a file, mutating via the editor's transaction
@@ -316,7 +347,9 @@ export class CommentService {
 		if (splices.length === 0) return;
 
 		const view = this.getOpenMarkdownView(path);
-		const before = view ? view.editor.getValue() : await this.plugin.app.vault.read(file);
+		const before = view
+			? view.editor.getValue()
+			: await this.plugin.app.vault.read(file);
 
 		// Compute updated content by applying splices in reverse so earlier
 		// splices do not shift later offsets.
@@ -349,6 +382,6 @@ export class CommentService {
 		}
 
 		this.plugin.commentIndex.rebuild(path, updated);
-		this.plugin.events.trigger("index-changed", { path });
+		this.plugin.events.trigger('index-changed', { path });
 	}
 }

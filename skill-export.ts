@@ -4,9 +4,9 @@
 // narrative contract lives in the (private) data-format spec; this file is the
 // distilled, assistant-facing version that ships into a user's vault.
 
-import type { CategoryDefinition } from "./types";
+import type { CategoryDefinition } from './types';
 
-export type SkillExportTarget = "claude" | "agent" | "both";
+export type SkillExportTarget = 'claude' | 'agent' | 'both';
 
 // Schema version of the exported skill's teaching. Bumped only when the
 // assistant-facing guidance materially changes, so users are prompted to
@@ -28,24 +28,26 @@ export function parseSkillVersion(content: string): number {
 	return raw !== undefined ? Number.parseInt(raw, 10) : 0;
 }
 
-export type SkillStatus = "missing" | "stale" | "current";
+export type SkillStatus = 'missing' | 'stale' | 'current';
 
 // Status of an exported skill given its on-disk content (null = the file does
 // not exist). Pure so it is unit-testable without the vault adapter.
 export function skillStatus(content: string | null): SkillStatus {
-	if (content === null) return "missing";
-	return parseSkillVersion(content) < SKILL_SCHEMA_VERSION ? "stale" : "current";
+	if (content === null) return 'missing';
+	return parseSkillVersion(content) < SKILL_SCHEMA_VERSION
+		? 'stale'
+		: 'current';
 }
 
 // Vault-relative destinations. Dot-folders are hidden from the vault file
 // index, so callers must write through the DataAdapter, not the Vault API.
-const SKILL_FILE_BY_TARGET: Record<"claude" | "agent", string> = {
-	claude: ".claude/skills/annoteca/SKILL.md",
-	agent: ".agent/skills/annoteca/SKILL.md",
+const SKILL_FILE_BY_TARGET: Record<'claude' | 'agent', string> = {
+	claude: '.claude/skills/annoteca/SKILL.md',
+	agent: '.agent/skills/annoteca/SKILL.md',
 };
 
 export function skillTargetPaths(target: SkillExportTarget): string[] {
-	if (target === "both") {
+	if (target === 'both') {
 		return [SKILL_FILE_BY_TARGET.claude, SKILL_FILE_BY_TARGET.agent];
 	}
 	return [SKILL_FILE_BY_TARGET[target]];
@@ -53,14 +55,15 @@ export function skillTargetPaths(target: SkillExportTarget): string[] {
 
 function categoryTable(categories: CategoryDefinition[]): string {
 	const rows = categories.map((c) => `| \`${c.id}\` | ${c.displayName} |`);
-	return ["| Category | Meaning |", "| --- | --- |", ...rows].join("\n");
+	return ['| Category | Meaning |', '| --- | --- |', ...rows].join('\n');
 }
 
 export function buildSkillMarkdown(
 	categories: CategoryDefinition[],
 	authorTag: string | undefined,
 ): string {
-	const reviewer = authorTag && authorTag.trim() !== "" ? authorTag.trim() : undefined;
+	const reviewer =
+		authorTag && authorTag.trim() !== '' ? authorTag.trim() : undefined;
 	const reviewerLine = reviewer
 		? `The human reviewer in this vault signs comments as \`${reviewer}\`. Pick a different tag for yourself (for example \`claude\` or \`ai\`).`
 		: `Sign your lines with a short tag such as \`claude\` or \`ai\`.`;

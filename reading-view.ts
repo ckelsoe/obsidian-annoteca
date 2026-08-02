@@ -4,9 +4,9 @@
 // via getSectionInfo and renders a small indicator: a note-level banner, a
 // per-section badge, or both, per the readingViewIndicator setting.
 
-import type AnnotecaPlugin from "./main";
-import { parseAll } from "./parser";
-import type { Comment } from "./types";
+import type AnnotecaPlugin from './main';
+import { parseAll } from './parser';
+import type { Comment } from './types';
 
 export interface ThreadCounts {
 	open: number;
@@ -36,7 +36,7 @@ export function indicatorLabel(counts: ThreadCounts): string {
 	if (counts.resolved > 0) {
 		parts.push(`${counts.resolved} resolved`);
 	}
-	return parts.join(" · ");
+	return parts.join(' · ');
 }
 
 // Char offset of the first character of `line` (0-based) in `content`.
@@ -44,7 +44,7 @@ export function indicatorLabel(counts: ThreadCounts): string {
 export function offsetOfLine(content: string, line: number): number {
 	let offset = 0;
 	for (let i = 0; i < line; i++) {
-		const idx = content.indexOf("\n", offset);
+		const idx = content.indexOf('\n', offset);
 		if (idx < 0) {
 			return content.length;
 		}
@@ -56,7 +56,7 @@ export function offsetOfLine(content: string, line: number): number {
 export function registerReadingViewIndicator(plugin: AnnotecaPlugin): void {
 	plugin.registerMarkdownPostProcessor((el, ctx) => {
 		const mode = plugin.settings.readingViewIndicator;
-		if (mode === "off") {
+		if (mode === 'off') {
 			return;
 		}
 		// getSectionInfo returns null for some render contexts (embeds, print);
@@ -75,7 +75,8 @@ export function registerReadingViewIndicator(plugin: AnnotecaPlugin): void {
 		const sectionStart = offsetOfLine(info.text, info.lineStart);
 		const sectionEnd = offsetOfLine(info.text, info.lineEnd + 1);
 		const inSection = all.filter(
-			(c) => c.marker.start >= sectionStart && c.marker.start < sectionEnd,
+			(c) =>
+				c.marker.start >= sectionStart && c.marker.start < sectionEnd,
 		);
 
 		const open = (comment: Comment) => {
@@ -86,23 +87,34 @@ export function registerReadingViewIndicator(plugin: AnnotecaPlugin): void {
 		// marker: stable across partial re-renders and immune to frontmatter
 		// shifting the first section's lineStart away from 0.
 		const first = all[0];
-		if ((mode === "banner" || mode === "both") && first !== undefined
-			&& first.marker.start >= sectionStart && first.marker.start < sectionEnd) {
-			const banner = el.createEl("button", {
+		if (
+			(mode === 'banner' || mode === 'both') &&
+			first !== undefined &&
+			first.marker.start >= sectionStart &&
+			first.marker.start < sectionEnd
+		) {
+			const banner = el.createEl('button', {
 				text: `Comments in this note: ${indicatorLabel(countThreads(all))}`,
-				cls: "annoteca-rv-indicator annoteca-rv-banner",
+				cls: 'annoteca-rv-indicator annoteca-rv-banner',
 			});
-			banner.addEventListener("click", () => { open(first); });
+			banner.addEventListener('click', () => {
+				open(first);
+			});
 			el.prepend(banner);
 		}
 
 		const firstInSection = inSection[0];
-		if ((mode === "per-section" || mode === "both") && firstInSection !== undefined) {
-			const badge = el.createEl("button", {
+		if (
+			(mode === 'per-section' || mode === 'both') &&
+			firstInSection !== undefined
+		) {
+			const badge = el.createEl('button', {
 				text: indicatorLabel(countThreads(inSection)),
-				cls: "annoteca-rv-indicator annoteca-rv-badge",
+				cls: 'annoteca-rv-indicator annoteca-rv-badge',
 			});
-			badge.addEventListener("click", () => { open(firstInSection); });
+			badge.addEventListener('click', () => {
+				open(firstInSection);
+			});
 		}
 	});
 }

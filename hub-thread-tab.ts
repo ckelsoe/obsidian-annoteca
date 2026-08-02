@@ -5,23 +5,32 @@
 // updated by the parent view's event handlers; the parent calls
 // `render()` after writing them.
 
-import { Notice, TFile, setIcon, type App } from "obsidian";
+import { Notice, TFile, setIcon, type App } from 'obsidian';
 
-import type AnnotecaPlugin from "./main";
-import type { Comment, ScopeState, StatusFilter } from "./types";
-import { getCategoryOrFallback } from "./categories";
-import { resolveSettingsCategories } from "./settings";
-import { nowISO } from "./parser";
-import { authorColorFor, authorPickerOptions, formatStamp, truncate } from "./view-utils";
-import { renderReplyRow, renderCategoryBadge, renderStarButton } from "./ui-helpers";
+import type AnnotecaPlugin from './main';
+import type { Comment, ScopeState, StatusFilter } from './types';
+import { getCategoryOrFallback } from './categories';
+import { resolveSettingsCategories } from './settings';
+import { nowISO } from './parser';
+import {
+	authorColorFor,
+	authorPickerOptions,
+	formatStamp,
+	truncate,
+} from './view-utils';
+import {
+	renderReplyRow,
+	renderCategoryBadge,
+	renderStarButton,
+} from './ui-helpers';
 
 // Thread-tab class names for the shared reply-row renderer (ui-helpers). Author
 // and date spans stay unclassed here, matching the prior inline markup; tinting
 // comes from the author-color callback.
 const THREAD_REPLY_CLASSES = {
-	row: "annoteca-reply",
-	meta: "annoteca-reply-meta",
-	body: "annoteca-reply-body",
+	row: 'annoteca-reply',
+	meta: 'annoteca-reply-meta',
+	body: 'annoteca-reply-body',
 };
 
 export class ThreadTabRenderer {
@@ -54,13 +63,16 @@ export class ThreadTabRenderer {
 
 		const scopeFiles = this.plugin.computeScopeFiles();
 		if (scopeFiles.size === 0) {
-			this.renderEmpty(container, "No files in current scope.");
+			this.renderEmpty(container, 'No files in current scope.');
 			return;
 		}
 
 		const groups = this.buildScopedGroups(scopeFiles);
 		if (groups.length === 0) {
-			this.renderEmpty(container, "No comments match this scope and filter.");
+			this.renderEmpty(
+				container,
+				'No comments match this scope and filter.',
+			);
 			return;
 		}
 
@@ -70,7 +82,7 @@ export class ThreadTabRenderer {
 		this.applyAutoCollapsePolicy(groups, showGroups);
 
 		this.activeCardEl = undefined;
-		const list = container.createDiv({ cls: "annoteca-reviewer-list" });
+		const list = container.createDiv({ cls: 'annoteca-reviewer-list' });
 		for (const group of groups) {
 			if (showGroups) {
 				this.renderFileGroup(list, group);
@@ -79,7 +91,7 @@ export class ThreadTabRenderer {
 				for (const c of group.comments) {
 					const isActive = c.marker.start === this.activeStart;
 					const card = list.createDiv({
-						cls: `annoteca-reviewer-card${isActive ? " is-active" : ""}`,
+						cls: `annoteca-reviewer-card${isActive ? ' is-active' : ''}`,
 					});
 					this.renderCommentCard(card, c, group.path, isActive);
 				}
@@ -94,12 +106,19 @@ export class ThreadTabRenderer {
 	// the selection so ordinary refreshes (reply edits, star toggles) do not move
 	// the panel. `block: "nearest"` leaves an already-visible card untouched.
 	private scrollActiveCardIntoView(): void {
-		const activeKey = this.activePath !== undefined && this.activeStart !== undefined
-			? this.cardKey(this.activePath, this.activeStart)
-			: undefined;
-		if (activeKey && activeKey !== this.lastScrolledActiveKey && this.activeCardEl) {
+		const activeKey =
+			this.activePath !== undefined && this.activeStart !== undefined
+				? this.cardKey(this.activePath, this.activeStart)
+				: undefined;
+		if (
+			activeKey &&
+			activeKey !== this.lastScrolledActiveKey &&
+			this.activeCardEl
+		) {
 			const el = this.activeCardEl;
-			window.requestAnimationFrame(() => el.scrollIntoView({ block: "nearest" }));
+			window.requestAnimationFrame(() =>
+				el.scrollIntoView({ block: 'nearest' }),
+			);
 		}
 		this.lastScrolledActiveKey = activeKey;
 	}
@@ -110,22 +129,32 @@ export class ThreadTabRenderer {
 
 	// Effective expand state for a card: the user's explicit chevron override if
 	// set, otherwise the default where only the active card is expanded (F-290).
-	private isCardExpanded(path: string, start: number, isActive: boolean): boolean {
-		return this.cardExpandOverrides.get(this.cardKey(path, start)) ?? isActive;
+	private isCardExpanded(
+		path: string,
+		start: number,
+		isActive: boolean,
+	): boolean {
+		return (
+			this.cardExpandOverrides.get(this.cardKey(path, start)) ?? isActive
+		);
 	}
 
-	private buildScopedGroups(scopeFiles: Set<string>): { path: string; comments: Comment[] }[] {
+	private buildScopedGroups(
+		scopeFiles: Set<string>,
+	): { path: string; comments: Comment[] }[] {
 		const statusFilter = this.plugin.settings.statusFilter;
 		const groups: { path: string; comments: Comment[] }[] = [];
 		for (const p of [...scopeFiles].sort()) {
 			const idx = this.plugin.commentIndex.get(p);
 			if (!idx) continue;
-			const filtered = idx.comments.filter(c => {
-				if (statusFilter === "open") return !c.resolution;
-				if (statusFilter === "resolved") return c.resolution !== undefined;
+			const filtered = idx.comments.filter((c) => {
+				if (statusFilter === 'open') return !c.resolution;
+				if (statusFilter === 'resolved')
+					return c.resolution !== undefined;
 				return true;
 			});
-			if (filtered.length > 0) groups.push({ path: p, comments: filtered });
+			if (filtered.length > 0)
+				groups.push({ path: p, comments: filtered });
 		}
 		return groups;
 	}
@@ -133,11 +162,17 @@ export class ThreadTabRenderer {
 	// Pick or validate the active comment. Identity is (path, start) — across
 	// files a bare marker.start could collide. Default to the first comment in
 	// the active file's group (if in scope), then fall back to the first group.
-	private selectActiveComment(groups: { path: string; comments: Comment[] }[]): void {
+	private selectActiveComment(
+		groups: { path: string; comments: Comment[] }[],
+	): void {
 		const activeFilePath = this.app.workspace.getActiveFile()?.path;
-		const activeGroup = activeFilePath ? groups.find(g => g.path === activeFilePath) : undefined;
+		const activeGroup = activeFilePath
+			? groups.find((g) => g.path === activeFilePath)
+			: undefined;
 		const stillValid = groups.some(
-			g => g.path === this.activePath && g.comments.some(c => c.marker.start === this.activeStart),
+			(g) =>
+				g.path === this.activePath &&
+				g.comments.some((c) => c.marker.start === this.activeStart),
 		);
 		if (!stillValid || this.activeStart === undefined) {
 			const def = activeGroup?.comments[0] ?? groups[0]?.comments[0];
@@ -155,13 +190,18 @@ export class ThreadTabRenderer {
 		groups: { path: string; comments: Comment[] }[],
 		showGroups: boolean,
 	): void {
-		const activeFileForCollapse = this.activePath ?? this.app.workspace.getActiveFile()?.path;
-		if (showGroups && this.plugin.settings.autoCollapseInactiveFiles
-			&& activeFileForCollapse
-			&& this.lastActiveFileForCollapse !== activeFileForCollapse) {
+		const activeFileForCollapse =
+			this.activePath ?? this.app.workspace.getActiveFile()?.path;
+		if (
+			showGroups &&
+			this.plugin.settings.autoCollapseInactiveFiles &&
+			activeFileForCollapse &&
+			this.lastActiveFileForCollapse !== activeFileForCollapse
+		) {
 			this.collapsedFilePaths.clear();
 			for (const g of groups) {
-				if (g.path !== activeFileForCollapse) this.collapsedFilePaths.add(g.path);
+				if (g.path !== activeFileForCollapse)
+					this.collapsedFilePaths.add(g.path);
 			}
 			this.lastActiveFileForCollapse = activeFileForCollapse;
 		}
@@ -173,16 +213,17 @@ export class ThreadTabRenderer {
 	): void {
 		const collapsed = this.collapsedFilePaths.has(group.path);
 		const groupEl = list.createDiv({
-			cls: `annoteca-file-group${collapsed ? " is-collapsed" : ""}`,
+			cls: `annoteca-file-group${collapsed ? ' is-collapsed' : ''}`,
 		});
 		this.renderFileHeader(groupEl, group, collapsed);
 		if (collapsed) return;
-		const body = groupEl.createDiv({ cls: "annoteca-file-group-body" });
+		const body = groupEl.createDiv({ cls: 'annoteca-file-group-body' });
 		for (const c of group.comments) {
-			const isActive = group.path === this.activePath
-				&& c.marker.start === this.activeStart;
+			const isActive =
+				group.path === this.activePath &&
+				c.marker.start === this.activeStart;
 			const card = body.createDiv({
-				cls: `annoteca-reviewer-card${isActive ? " is-active" : ""}`,
+				cls: `annoteca-reviewer-card${isActive ? ' is-active' : ''}`,
 			});
 			this.renderCommentCard(card, c, group.path, isActive);
 		}
@@ -195,23 +236,33 @@ export class ThreadTabRenderer {
 	): void {
 		const file = this.app.vault.getAbstractFileByPath(group.path);
 		const basename = file instanceof TFile ? file.basename : group.path;
-		const open = group.comments.filter(c => !c.resolution).length;
+		const open = group.comments.filter((c) => !c.resolution).length;
 		const total = group.comments.length;
 		const countText = open === total ? `${total}` : `${open}/${total}`;
 
-		const header = container.createDiv({ cls: "annoteca-file-header" });
+		const header = container.createDiv({ cls: 'annoteca-file-header' });
 
-		const chevron = header.createSpan({ cls: "annoteca-file-header-chevron" });
-		setIcon(chevron, collapsed ? "chevron-right" : "chevron-down");
+		const chevron = header.createSpan({
+			cls: 'annoteca-file-header-chevron',
+		});
+		setIcon(chevron, collapsed ? 'chevron-right' : 'chevron-down');
 
-		const fileIcon = header.createSpan({ cls: "annoteca-file-header-icon" });
-		setIcon(fileIcon, "file-text");
+		const fileIcon = header.createSpan({
+			cls: 'annoteca-file-header-icon',
+		});
+		setIcon(fileIcon, 'file-text');
 
-		header.createSpan({ cls: "annoteca-file-header-name", text: basename });
-		header.createSpan({ cls: "annoteca-file-header-path", text: group.path });
-		header.createSpan({ cls: "annoteca-file-header-count", text: countText });
+		header.createSpan({ cls: 'annoteca-file-header-name', text: basename });
+		header.createSpan({
+			cls: 'annoteca-file-header-path',
+			text: group.path,
+		});
+		header.createSpan({
+			cls: 'annoteca-file-header-count',
+			text: countText,
+		});
 
-		header.addEventListener("click", () => {
+		header.addEventListener('click', () => {
 			if (this.collapsedFilePaths.has(group.path)) {
 				this.collapsedFilePaths.delete(group.path);
 			} else {
@@ -226,104 +277,143 @@ export class ThreadTabRenderer {
 		const active = this.app.workspace.getActiveFile();
 		const dynamic = this.plugin.getDynamicScopeOptionsForActiveFile();
 
-		const toolbar = container.createDiv({ cls: "annoteca-scope-toolbar" });
+		const toolbar = container.createDiv({ cls: 'annoteca-scope-toolbar' });
 
 		// Scope dropdown — populated dynamically from active file's metadata.
-		interface ScopeOption { value: string; label: string; setter: () => Promise<void>; }
+		interface ScopeOption {
+			value: string;
+			label: string;
+			setter: () => Promise<void>;
+		}
 		const opts: ScopeOption[] = [];
 		opts.push({
-			value: "file",
-			label: "This file",
-			setter: () => active ? this.plugin.setScopeShape({ kind: "file" }, active.path) : Promise.resolve(),
+			value: 'file',
+			label: 'This file',
+			setter: () =>
+				active
+					? this.plugin.setScopeShape({ kind: 'file' }, active.path)
+					: Promise.resolve(),
 		});
 		if (active && active.parent) {
 			const folderPath = active.parent.path;
-			const folderName = active.parent.name || "vault root";
+			const folderName = active.parent.name || 'vault root';
 			opts.push({
 				value: `folder:${folderPath}`,
 				label: `This folder (${folderName})`,
-				setter: () => this.plugin.setScopeShape({ kind: "folder", subfolders: false }, folderPath),
+				setter: () =>
+					this.plugin.setScopeShape(
+						{ kind: 'folder', subfolders: false },
+						folderPath,
+					),
 			});
 			opts.push({
 				value: `folder-sub:${folderPath}`,
 				label: `This folder + subfolders`,
-				setter: () => this.plugin.setScopeShape({ kind: "folder", subfolders: true }, folderPath),
+				setter: () =>
+					this.plugin.setScopeShape(
+						{ kind: 'folder', subfolders: true },
+						folderPath,
+					),
 			});
 		}
 		opts.push({
-			value: "vault",
-			label: "Vault",
-			setter: () => this.plugin.setScopeShape({ kind: "vault" }, ""),
+			value: 'vault',
+			label: 'Vault',
+			setter: () => this.plugin.setScopeShape({ kind: 'vault' }, ''),
 		});
 		for (const prop of dynamic.properties) {
 			opts.push({
 				value: `prop:${prop.key}::${prop.value}`,
 				label: `Property: ${prop.key} = ${prop.value}`,
-				setter: () => this.plugin.setScopeShape(
-					{ kind: "property", key: prop.key, value: prop.value },
-					"",
-				),
+				setter: () =>
+					this.plugin.setScopeShape(
+						{ kind: 'property', key: prop.key, value: prop.value },
+						'',
+					),
 			});
 		}
 		for (const tag of dynamic.tags) {
 			opts.push({
 				value: `tag:${tag}`,
 				label: `Tag: ${tag}`,
-				setter: () => this.plugin.setScopeShape({ kind: "tag", tag }, ""),
+				setter: () =>
+					this.plugin.setScopeShape({ kind: 'tag', tag }, ''),
 			});
 		}
 
 		const currentValue = this.currentScopeOptionValue(state);
-		const scopeSelect = toolbar.createEl("select", { cls: "annoteca-scope-select dropdown" });
+		const scopeSelect = toolbar.createEl('select', {
+			cls: 'annoteca-scope-select dropdown',
+		});
 		for (const o of opts) {
-			const opt = scopeSelect.createEl("option", { value: o.value, text: o.label });
+			const opt = scopeSelect.createEl('option', {
+				value: o.value,
+				text: o.label,
+			});
 			if (o.value === currentValue) opt.selected = true;
 		}
-		scopeSelect.addEventListener("change", () => {
+		scopeSelect.addEventListener('change', () => {
 			const v = scopeSelect.value;
-			const target = opts.find(o => o.value === v);
+			const target = opts.find((o) => o.value === v);
 			if (target) void target.setter();
 		});
 
 		// Status filter dropdown.
-		const statusSelect = toolbar.createEl("select", { cls: "annoteca-scope-status dropdown" });
-		for (const s of ["open", "resolved", "all"] as const) {
-			const opt = statusSelect.createEl("option", {
+		const statusSelect = toolbar.createEl('select', {
+			cls: 'annoteca-scope-status dropdown',
+		});
+		for (const s of ['open', 'resolved', 'all'] as const) {
+			const opt = statusSelect.createEl('option', {
 				value: s,
 				text: s.charAt(0).toUpperCase() + s.slice(1),
 			});
 			if (this.plugin.settings.statusFilter === s) opt.selected = true;
 		}
-		statusSelect.addEventListener("change", () => {
-			void this.plugin.setStatusFilter(statusSelect.value as StatusFilter);
+		statusSelect.addEventListener('change', () => {
+			void this.plugin.setStatusFilter(
+				statusSelect.value as StatusFilter,
+			);
 		});
 
 		// Pin button — when active, scope no longer auto-collapses on file change.
-		const pinBtn = toolbar.createEl("button", {
-			cls: `annoteca-scope-pin${state.pinned ? " is-pinned" : ""}`,
+		const pinBtn = toolbar.createEl('button', {
+			cls: `annoteca-scope-pin${state.pinned ? ' is-pinned' : ''}`,
 		});
-		setIcon(pinBtn, state.pinned ? "pin" : "pin-off");
+		setIcon(pinBtn, state.pinned ? 'pin' : 'pin-off');
 		pinBtn.setAttribute(
-			"aria-label",
-			state.pinned ? "Unpin scope (allow auto-follow)" : "Pin scope (do not follow file changes)",
+			'aria-label',
+			state.pinned
+				? 'Unpin scope (allow auto-follow)'
+				: 'Pin scope (do not follow file changes)',
 		);
-		pinBtn.addEventListener("click", () => { void this.plugin.togglePinScope(); });
+		pinBtn.addEventListener('click', () => {
+			void this.plugin.togglePinScope();
+		});
 	}
 
 	private currentScopeOptionValue(state: ScopeState): string {
 		switch (state.shape.kind) {
-			case "file": return "file";
-			case "folder":
+			case 'file':
+				return 'file';
+			case 'folder':
 				return state.shape.subfolders
 					? `folder-sub:${state.anchorPath}`
 					: `folder:${state.anchorPath}`;
-			case "vault": return "vault";
-			case "property": return `prop:${state.shape.key}::${state.shape.value}`;
-			case "tag": return `tag:${state.shape.tag}`;
+			case 'vault':
+				return 'vault';
+			case 'property':
+				return `prop:${state.shape.key}::${state.shape.value}`;
+			case 'tag':
+				return `tag:${state.shape.tag}`;
 		}
 	}
 
-	private renderCommentCard(card: HTMLElement, c: Comment, path: string, isActive: boolean): void {
+	private renderCommentCard(
+		card: HTMLElement,
+		c: Comment,
+		path: string,
+		isActive: boolean,
+	): void {
 		if (isActive) this.activeCardEl = card;
 		const expanded = this.isCardExpanded(path, c.marker.start, isActive);
 		const compact = this.renderCompactRow(card, c, path, expanded);
@@ -332,7 +422,7 @@ export class ThreadTabRenderer {
 		// (Option 2). Same-file just scrolls; cross-file opens the file then
 		// scrolls. The chevron, sync, and star buttons stopPropagation so they do
 		// not also trigger this navigation.
-		compact.addEventListener("click", () => {
+		compact.addEventListener('click', () => {
 			this.activePath = path;
 			this.activeStart = c.marker.start;
 			// Ensure the file group is expanded so the newly-active card is visible.
@@ -344,46 +434,67 @@ export class ThreadTabRenderer {
 		if (expanded) this.renderExpandedSection(card, c, path);
 	}
 
-	private renderCompactRow(card: HTMLElement, c: Comment, path: string, expanded: boolean): HTMLElement {
+	private renderCompactRow(
+		card: HTMLElement,
+		c: Comment,
+		path: string,
+		expanded: boolean,
+	): HTMLElement {
 		const enabled = resolveSettingsCategories(this.plugin.settings);
 		const def = getCategoryOrFallback(c.category, enabled);
 
-		const compact = card.createDiv({ cls: "annoteca-reviewer-compact" });
+		const compact = card.createDiv({ cls: 'annoteca-reviewer-compact' });
 
 		// Chevron toggles this card's expand state independent of selection (F-290),
 		// so a reader on a small screen can collapse a tall active card or keep
 		// several cards open at once.
-		const chevron = compact.createEl("button", {
-			cls: "annoteca-reviewer-chevron",
-			attr: { "aria-label": expanded ? "Collapse comment" : "Expand comment" },
+		const chevron = compact.createEl('button', {
+			cls: 'annoteca-reviewer-chevron',
+			attr: {
+				'aria-label': expanded ? 'Collapse comment' : 'Expand comment',
+			},
 		});
-		setIcon(chevron, expanded ? "chevron-down" : "chevron-right");
-		chevron.addEventListener("click", (e) => {
+		setIcon(chevron, expanded ? 'chevron-down' : 'chevron-right');
+		chevron.addEventListener('click', (e) => {
 			e.stopPropagation();
-			this.cardExpandOverrides.set(this.cardKey(path, c.marker.start), !expanded);
+			this.cardExpandOverrides.set(
+				this.cardKey(path, c.marker.start),
+				!expanded,
+			);
 			this.refresh();
 		});
 
 		renderCategoryBadge(compact, def, {
-			badge: "annoteca-reviewer-category",
-			icon: "annoteca-reviewer-category-icon",
+			badge: 'annoteca-reviewer-category',
+			icon: 'annoteca-reviewer-category-icon',
 		});
-		if (c.resolution) compact.createSpan({ cls: "annoteca-reviewer-state", text: "resolved" });
-		if (c.date) compact.createSpan({ cls: "annoteca-reviewer-meta", text: formatStamp(c.date) });
+		if (c.resolution)
+			compact.createSpan({
+				cls: 'annoteca-reviewer-state',
+				text: 'resolved',
+			});
+		if (c.date)
+			compact.createSpan({
+				cls: 'annoteca-reviewer-meta',
+				text: formatStamp(c.date),
+			});
 		if (c.author) {
-			const authorEl = compact.createSpan({ cls: "annoteca-reviewer-meta", text: c.author });
+			const authorEl = compact.createSpan({
+				cls: 'annoteca-reviewer-meta',
+				text: c.author,
+			});
 			this.applyAuthorColor(authorEl, c.author);
 		}
 
 		// Sync button (F-291): re-anchor the document to this marker, always, even
 		// when it is already on screen. Forces the scroll past the don't-yank
 		// short-circuit so the user can pull the document back to the annotation.
-		const syncBtn = compact.createEl("button", {
-			cls: "annoteca-reviewer-sync",
-			attr: { "aria-label": "Scroll document to this comment" },
+		const syncBtn = compact.createEl('button', {
+			cls: 'annoteca-reviewer-sync',
+			attr: { 'aria-label': 'Scroll document to this comment' },
 		});
-		setIcon(syncBtn, "refresh-cw");
-		syncBtn.addEventListener("click", (e) => {
+		setIcon(syncBtn, 'refresh-cw');
+		syncBtn.addEventListener('click', (e) => {
 			e.stopPropagation();
 			this.activePath = path;
 			this.activeStart = c.marker.start;
@@ -395,38 +506,61 @@ export class ThreadTabRenderer {
 		// starred-changed event, so no in-place reflect is needed here.
 		const hasId = Boolean(c.id);
 		renderStarButton(compact, {
-			cls: "annoteca-row-star",
+			cls: 'annoteca-row-star',
 			hasId,
 			starred: hasId && this.plugin.isStarred(c),
-			onToggle: () => { void this.plugin.toggleStarred(c); },
+			onToggle: () => {
+				void this.plugin.toggleStarred(c);
+			},
 		});
 
-		compact.createDiv({ cls: "annoteca-reviewer-excerpt", text: truncate(c.body, 100) });
+		compact.createDiv({
+			cls: 'annoteca-reviewer-excerpt',
+			text: truncate(c.body, 100),
+		});
 		if (c.replies.length > 0) {
 			compact.createSpan({
-				cls: "annoteca-reviewer-replies-badge",
-				text: `${c.replies.length} repl${c.replies.length === 1 ? "y" : "ies"}`,
+				cls: 'annoteca-reviewer-replies-badge',
+				text: `${c.replies.length} repl${c.replies.length === 1 ? 'y' : 'ies'}`,
 			});
 		}
 
 		return compact;
 	}
 
-	private renderExpandedSection(card: HTMLElement, c: Comment, path: string): void {
-		const expandedSection = card.createDiv({ cls: "annoteca-reviewer-expanded" });
-		expandedSection.createDiv({ cls: "annoteca-reviewer-body", text: c.body });
+	private renderExpandedSection(
+		card: HTMLElement,
+		c: Comment,
+		path: string,
+	): void {
+		const expandedSection = card.createDiv({
+			cls: 'annoteca-reviewer-expanded',
+		});
+		expandedSection.createDiv({
+			cls: 'annoteca-reviewer-body',
+			text: c.body,
+		});
 
 		if (c.resolution) {
-			const res = expandedSection.createDiv({ cls: "annoteca-reviewer-resolution" });
-			res.createSpan({ text: `Resolved ${formatStamp(c.resolution.date)} by ${c.resolution.author}` });
+			const res = expandedSection.createDiv({
+				cls: 'annoteca-reviewer-resolution',
+			});
+			res.createSpan({
+				text: `Resolved ${formatStamp(c.resolution.date)} by ${c.resolution.author}`,
+			});
 			if (c.resolution.note) {
-				res.createDiv({ cls: "annoteca-reviewer-resolution-note", text: c.resolution.note });
+				res.createDiv({
+					cls: 'annoteca-reviewer-resolution-note',
+					text: c.resolution.note,
+				});
 			}
 		}
 
 		if (c.replies.length > 0) {
-			const thread = expandedSection.createDiv({ cls: "annoteca-reviewer-thread" });
-			thread.createEl("h5", { text: "Replies" });
+			const thread = expandedSection.createDiv({
+				cls: 'annoteca-reviewer-thread',
+			});
+			thread.createEl('h5', { text: 'Replies' });
 			for (const r of c.replies) {
 				renderReplyRow(thread, r, THREAD_REPLY_CLASSES, (el, tag) =>
 					this.applyAuthorColor(el, tag),
@@ -439,10 +573,10 @@ export class ThreadTabRenderer {
 	}
 
 	private renderReplyInput(container: HTMLElement, c: Comment): void {
-		const wrap = container.createDiv({ cls: "annoteca-reply-input-wrap" });
-		const textarea = wrap.createEl("textarea", {
-			cls: "annoteca-reply-input",
-			attr: { placeholder: "Reply…", rows: "3" },
+		const wrap = container.createDiv({ cls: 'annoteca-reply-input-wrap' });
+		const textarea = wrap.createEl('textarea', {
+			cls: 'annoteca-reply-input',
+			attr: { placeholder: 'Reply…', rows: '3' },
 		});
 		// Restore any draft saved for this comment, mirroring the popup composer.
 		if (c.id) {
@@ -450,7 +584,7 @@ export class ThreadTabRenderer {
 			if (draft.length > 0) textarea.value = draft;
 		}
 		let saveTimer: number | undefined;
-		textarea.addEventListener("input", () => {
+		textarea.addEventListener('input', () => {
 			if (!c.id) return;
 			if (saveTimer !== undefined) window.clearTimeout(saveTimer);
 			saveTimer = window.setTimeout(() => {
@@ -461,27 +595,44 @@ export class ThreadTabRenderer {
 
 		// F-274: per-reply author picker. Default plus configured collaborators
 		// plus authors already in this thread.
-		const controls = wrap.createDiv({ cls: "annoteca-reply-controls" });
-		const defaultAuthor = this.plugin.settings.authorTag !== "" ? this.plugin.settings.authorTag : "user";
-		const threadAuthors = [c.author, ...c.replies.map(r => r.author)]
-			.filter((a): a is string => typeof a === "string" && a.trim() !== "");
-		const options = authorPickerOptions(defaultAuthor, this.plugin.settings.authorStyles, threadAuthors);
-		const authorSelect = controls.createEl("select", { cls: "annoteca-reply-author-select dropdown" });
-		for (const tag of options) authorSelect.createEl("option", { value: tag, text: tag });
+		const controls = wrap.createDiv({ cls: 'annoteca-reply-controls' });
+		const defaultAuthor =
+			this.plugin.settings.authorTag !== ''
+				? this.plugin.settings.authorTag
+				: 'user';
+		const threadAuthors = [
+			c.author,
+			...c.replies.map((r) => r.author),
+		].filter((a): a is string => typeof a === 'string' && a.trim() !== '');
+		const options = authorPickerOptions(
+			defaultAuthor,
+			this.plugin.settings.authorStyles,
+			threadAuthors,
+		);
+		const authorSelect = controls.createEl('select', {
+			cls: 'annoteca-reply-author-select dropdown',
+		});
+		for (const tag of options)
+			authorSelect.createEl('option', { value: tag, text: tag });
 		authorSelect.value = defaultAuthor;
 
-		const submitBtn = controls.createEl("button", { cls: "annoteca-reply-submit", text: "Reply" });
-		submitBtn.addEventListener("click", () => {
+		const submitBtn = controls.createEl('button', {
+			cls: 'annoteca-reply-submit',
+			text: 'Reply',
+		});
+		submitBtn.addEventListener('click', () => {
 			const body = textarea.value.trim();
-			if (body === "") {
-				new Notice("Reply is empty.");
+			if (body === '') {
+				new Notice('Reply is empty.');
 				return;
 			}
 			const author = authorSelect.value.trim() || defaultAuthor;
-			void this.plugin.appendReply(c, { author, date: nowISO(), body }).then(() => {
-				textarea.value = "";
-				if (c.id) this.plugin.clearDraft(c.id);
-			});
+			void this.plugin
+				.appendReply(c, { author, date: nowISO(), body })
+				.then(() => {
+					textarea.value = '';
+					if (c.id) this.plugin.clearDraft(c.id);
+				});
 		});
 	}
 
@@ -490,35 +641,46 @@ export class ThreadTabRenderer {
 	private applyAuthorColor(el: HTMLElement, tag: string): void {
 		const color = authorColorFor(tag, this.plugin.settings.authorStyles);
 		if (!color) return;
-		el.addClass("annoteca-author");
-		el.style.setProperty("--annoteca-author-color", color);
+		el.addClass('annoteca-author');
+		el.style.setProperty('--annoteca-author-color', color);
 	}
 
-	private renderActions(container: HTMLElement, c: Comment, path: string): void {
-		const actions = container.createDiv({ cls: "annoteca-reviewer-actions" });
+	private renderActions(
+		container: HTMLElement,
+		c: Comment,
+		path: string,
+	): void {
+		const actions = container.createDiv({
+			cls: 'annoteca-reviewer-actions',
+		});
 
 		if (c.resolution) {
-			this.createActionButton(actions, "Reopen", "rotate-ccw", () => {
+			this.createActionButton(actions, 'Reopen', 'rotate-ccw', () => {
 				void this.plugin.reopenComment(path, c);
 			});
 		} else {
-			this.createActionButton(actions, "Resolve", "check", () => {
+			this.createActionButton(actions, 'Resolve', 'check', () => {
 				void this.plugin.resolveComment(path, c);
 			});
-			this.createActionButton(actions, "Resolve and remove", "check-check", () => {
-				void this.plugin.resolveAndRemoveComment(path, c);
-			});
+			this.createActionButton(
+				actions,
+				'Resolve and remove',
+				'check-check',
+				() => {
+					void this.plugin.resolveAndRemoveComment(path, c);
+				},
+			);
 		}
-		this.createActionButton(actions, "Edit", "pencil", () => {
+		this.createActionButton(actions, 'Edit', 'pencil', () => {
 			void this.plugin.editCommentFromReviewer(path, c);
 		});
-		this.createActionButton(actions, "Delete", "trash", () => {
+		this.createActionButton(actions, 'Delete', 'trash', () => {
 			void this.plugin.deleteComment(path, c);
 		});
-		this.createActionButton(actions, "Copy ID", "copy", () => {
+		this.createActionButton(actions, 'Copy ID', 'copy', () => {
 			void this.plugin.copyCommentId(c);
 		});
-		this.createActionButton(actions, "Open", "external-link", () => {
+		this.createActionButton(actions, 'Open', 'external-link', () => {
 			void this.plugin.navigateToComment(path, c.marker.start, c);
 		});
 	}
@@ -529,13 +691,13 @@ export class ThreadTabRenderer {
 		icon: string,
 		handler: () => void,
 	): void {
-		const btn = parent.createEl("button", { cls: "annoteca-action-btn" });
+		const btn = parent.createEl('button', { cls: 'annoteca-action-btn' });
 		setIcon(btn, icon);
 		btn.createSpan({ text: label });
-		btn.addEventListener("click", handler);
+		btn.addEventListener('click', handler);
 	}
 
 	private renderEmpty(container: HTMLElement, message: string): void {
-		container.createEl("p", { text: message, cls: "annoteca-empty" });
+		container.createEl('p', { text: message, cls: 'annoteca-empty' });
 	}
 }

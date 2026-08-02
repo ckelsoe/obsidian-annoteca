@@ -9,29 +9,45 @@ import {
 	getAllTags,
 	normalizePath,
 	type WorkspaceLeaf,
-} from "obsidian";
+} from 'obsidian';
 
-import type { AnnotecaSettings, Comment, Reply, ScopeShape, ScopeState, StatusFilter } from "./types";
-import { CommentIndex } from "./index";
-import { DEFAULT_SETTINGS, AnnotecaSettingTab, resolveSettingsCategories } from "./settings";
-import { getCategoryOrFallback } from "./categories";
+import type {
+	AnnotecaSettings,
+	Comment,
+	Reply,
+	ScopeShape,
+	ScopeState,
+	StatusFilter,
+} from './types';
+import { CommentIndex } from './index';
+import {
+	DEFAULT_SETTINGS,
+	AnnotecaSettingTab,
+	resolveSettingsCategories,
+} from './settings';
+import { getCategoryOrFallback } from './categories';
 import {
 	buildSkillMarkdown,
 	skillTargetPaths,
 	parseSkillVersion,
 	SKILL_SCHEMA_VERSION,
 	type SkillStatus,
-} from "./skill-export";
-import { registerReadingViewIndicator } from "./reading-view";
-import { AddCommentModal } from "./modal";
+} from './skill-export';
+import { registerReadingViewIndicator } from './reading-view';
+import { AddCommentModal } from './modal';
 import {
 	buildAnnotecaExtension,
 	setHideAllComments,
 	isHideAllComments,
 	setActiveComment,
-} from "./decorations";
-import { decideScrollAction, authorColorFor, authorPickerOptions, type ScrollAction } from "./view-utils";
-import { EditorView } from "@codemirror/view";
+} from './decorations';
+import {
+	decideScrollAction,
+	authorColorFor,
+	authorPickerOptions,
+	type ScrollAction,
+} from './view-utils';
+import { EditorView } from '@codemirror/view';
 
 // Top margin (px) left above the marker when anchoring it near the top of the
 // editor pane (markerScrollAlign === "top"). A little breathing room reads
@@ -46,15 +62,19 @@ import {
 	ComposerPanelView,
 	ANNOTECA_HUB_VIEW_TYPE,
 	AnnotecaPanelView,
-} from "./views";
-import type { ComposerRequest } from "./composer";
-import { todayISO } from "./parser";
-import { convertAllComments, type ImportFormat } from "./imports";
-import { ConfirmBackupModal, ConfirmDeleteCommentModal, ConfirmDeleteResolvedModal } from "./confirm-modal";
-import { formatScripture } from "./scripture";
-import { computeScopeFileSet, type ScopeFile } from "./scope";
-import { CommentService } from "./comment-service";
-import { DiagnosticsService } from "./diagnostics-service";
+} from './views';
+import type { ComposerRequest } from './composer';
+import { todayISO } from './parser';
+import { convertAllComments, type ImportFormat } from './imports';
+import {
+	ConfirmBackupModal,
+	ConfirmDeleteCommentModal,
+	ConfirmDeleteResolvedModal,
+} from './confirm-modal';
+import { formatScripture } from './scripture';
+import { computeScopeFileSet, type ScopeFile } from './scope';
+import { CommentService } from './comment-service';
+import { DiagnosticsService } from './diagnostics-service';
 
 export default class AnnotecaPlugin extends Plugin {
 	settings!: AnnotecaSettings;
@@ -69,36 +89,71 @@ export default class AnnotecaPlugin extends Plugin {
 		this.comments = new CommentService(this);
 		this.diagnostics = new DiagnosticsService(this);
 
-		this.registerEditorExtension(buildAnnotecaExtension({
-			getSettings: () => this.settings,
-			onMarkerClick: (m) => this.openReviewerOnComment(m),
-			openInReviewer: (m) => this.openReviewerOnComment(m),
-			addCommentForSelection: () => {
-				const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (view) this.openModalForSelection(view.editor);
-			},
-			categoryFor: (id) => getCategoryOrFallback(id, resolveSettingsCategories(this.settings)),
-			toggleResolution: (m) => { void this.toggleResolutionFromPopup(m); },
-			resolveAndRemove: (m) => { void this.resolveAndRemoveFromPopup(m); },
-			acceptAddressed: (m) => { void this.acceptAddressedFromPopup(m); },
-			reviseAddressed: (m) => { void this.reviseAddressedFromPopup(m); },
-			rejectAddressed: (m) => { void this.rejectAddressedFromPopup(m); },
-			copyPermalink: (m) => { void this.copyCommentId(m); },
-			submitReply: (m, body, author) => { void this.submitReplyFromPopup(m, body, author); },
-			getAuthorTag: () => this.comments.resolvedAuthor(),
-			getAuthorOptions: () => this.authorPickerOptions([]),
-			authorColor: (tag) => this.authorColor(tag),
-			isStarred: (m) => this.isStarred(m),
-			toggleStarred: (m) => { void this.toggleStarred(m); },
-			loadDraft: (id) => this.loadDraft(id),
-			saveDraft: (id, body) => this.saveDraft(id, body),
-			clearDraft: (id) => this.clearDraft(id),
-		}));
+		this.registerEditorExtension(
+			buildAnnotecaExtension({
+				getSettings: () => this.settings,
+				onMarkerClick: (m) => this.openReviewerOnComment(m),
+				openInReviewer: (m) => this.openReviewerOnComment(m),
+				addCommentForSelection: () => {
+					const view =
+						this.app.workspace.getActiveViewOfType(MarkdownView);
+					if (view) this.openModalForSelection(view.editor);
+				},
+				categoryFor: (id) =>
+					getCategoryOrFallback(
+						id,
+						resolveSettingsCategories(this.settings),
+					),
+				toggleResolution: (m) => {
+					void this.toggleResolutionFromPopup(m);
+				},
+				resolveAndRemove: (m) => {
+					void this.resolveAndRemoveFromPopup(m);
+				},
+				acceptAddressed: (m) => {
+					void this.acceptAddressedFromPopup(m);
+				},
+				reviseAddressed: (m) => {
+					void this.reviseAddressedFromPopup(m);
+				},
+				rejectAddressed: (m) => {
+					void this.rejectAddressedFromPopup(m);
+				},
+				copyPermalink: (m) => {
+					void this.copyCommentId(m);
+				},
+				submitReply: (m, body, author) => {
+					void this.submitReplyFromPopup(m, body, author);
+				},
+				getAuthorTag: () => this.comments.resolvedAuthor(),
+				getAuthorOptions: () => this.authorPickerOptions([]),
+				authorColor: (tag) => this.authorColor(tag),
+				isStarred: (m) => this.isStarred(m),
+				toggleStarred: (m) => {
+					void this.toggleStarred(m);
+				},
+				loadDraft: (id) => this.loadDraft(id),
+				saveDraft: (id, body) => this.saveDraft(id, body),
+				clearDraft: (id) => this.clearDraft(id),
+			}),
+		);
 
-		this.registerView(ANNOTECA_HUB_VIEW_TYPE, leaf => new AnnotecaPanelView(leaf, this));
-		this.registerView(VAULT_UNRESOLVED_VIEW_TYPE, leaf => new VaultUnresolvedView(leaf, this));
-		this.registerView(INDEX_VIEW_TYPE, leaf => new IndexEntryView(leaf, this));
-		this.registerView(COMPOSER_PANEL_VIEW_TYPE, leaf => new ComposerPanelView(leaf, this));
+		this.registerView(
+			ANNOTECA_HUB_VIEW_TYPE,
+			(leaf) => new AnnotecaPanelView(leaf, this),
+		);
+		this.registerView(
+			VAULT_UNRESOLVED_VIEW_TYPE,
+			(leaf) => new VaultUnresolvedView(leaf, this),
+		);
+		this.registerView(
+			INDEX_VIEW_TYPE,
+			(leaf) => new IndexEntryView(leaf, this),
+		);
+		this.registerView(
+			COMPOSER_PANEL_VIEW_TYPE,
+			(leaf) => new ComposerPanelView(leaf, this),
+		);
 
 		this.addSettingTab(new AnnotecaSettingTab(this.app, this));
 
@@ -107,9 +162,13 @@ export default class AnnotecaPlugin extends Plugin {
 		this.registerEditorMenu();
 		registerReadingViewIndicator(this);
 
-		this.addRibbonIcon("message-square", "Annoteca: open comments pane", () => {
-			void this.activateView(ANNOTECA_HUB_VIEW_TYPE, "right");
-		});
+		this.addRibbonIcon(
+			'message-square',
+			'Annoteca: open comments pane',
+			() => {
+				void this.activateView(ANNOTECA_HUB_VIEW_TYPE, 'right');
+			},
+		);
 
 		this.applyIndicatorSize();
 		this.applyAnchorAppearance();
@@ -125,13 +184,13 @@ export default class AnnotecaPlugin extends Plugin {
 	// marker styling in styles.css can scale dynamically without recreating
 	// the editor extension. Called on load and on settings change.
 	applyIndicatorSize(): void {
-		const sizes: Record<AnnotecaSettings["indicatorSize"], string> = {
-			small: "0.85em",
-			medium: "1em",
-			large: "1.25em",
+		const sizes: Record<AnnotecaSettings['indicatorSize'], string> = {
+			small: '0.85em',
+			medium: '1em',
+			large: '1.25em',
 		};
 		activeDocument.body.style.setProperty(
-			"--annoteca-indicator-size",
+			'--annoteca-indicator-size',
 			sizes[this.settings.indicatorSize],
 		);
 	}
@@ -141,25 +200,29 @@ export default class AnnotecaPlugin extends Plugin {
 	// the .annoteca-anchor rule, the per-tier overrides, and the .annoteca-
 	// resolved opacity. Called on load and on settings change.
 	applyAnchorAppearance(): void {
-		const thicknesses: Record<AnnotecaSettings["anchorThickness"], string> = {
-			thin: "1px",
-			medium: "2px",
-			thick: "3px",
-		};
-		const resolvedOpacities: Record<AnnotecaSettings["resolvedBrightness"], string> = {
-			normal: "0.5",
-			bright: "0.85",
+		const thicknesses: Record<AnnotecaSettings['anchorThickness'], string> =
+			{
+				thin: '1px',
+				medium: '2px',
+				thick: '3px',
+			};
+		const resolvedOpacities: Record<
+			AnnotecaSettings['resolvedBrightness'],
+			string
+		> = {
+			normal: '0.5',
+			bright: '0.85',
 		};
 		activeDocument.body.style.setProperty(
-			"--annoteca-anchor-style",
+			'--annoteca-anchor-style',
 			this.settings.anchorStyle,
 		);
 		activeDocument.body.style.setProperty(
-			"--annoteca-anchor-thickness-normal",
+			'--annoteca-anchor-thickness-normal',
 			thicknesses[this.settings.anchorThickness],
 		);
 		activeDocument.body.style.setProperty(
-			"--annoteca-resolved-opacity",
+			'--annoteca-resolved-opacity',
 			resolvedOpacities[this.settings.resolvedBrightness],
 		);
 	}
@@ -170,7 +233,9 @@ export default class AnnotecaPlugin extends Plugin {
 		// right-pane tools. If a user has explicitly closed it, this won't
 		// reopen on subsequent loads because the leaf record persists across
 		// sessions and we only add when none exists.
-		const existing = this.app.workspace.getLeavesOfType(ANNOTECA_HUB_VIEW_TYPE);
+		const existing = this.app.workspace.getLeavesOfType(
+			ANNOTECA_HUB_VIEW_TYPE,
+		);
 		if (existing.length > 0) return;
 		const leaf = this.app.workspace.getRightLeaf(false);
 		if (!leaf) return;
@@ -183,21 +248,35 @@ export default class AnnotecaPlugin extends Plugin {
 	}
 
 	async loadSettings(): Promise<void> {
-		const loaded = (await this.loadData()) as Partial<AnnotecaSettings> | null;
-		this.settings = { ...DEFAULT_SETTINGS, ...(loaded ?? {}), indicatorStyle: DEFAULT_SETTINGS.indicatorStyle };
+		const loaded =
+			(await this.loadData()) as Partial<AnnotecaSettings> | null;
+		this.settings = {
+			...DEFAULT_SETTINGS,
+			...(loaded ?? {}),
+			indicatorStyle: DEFAULT_SETTINGS.indicatorStyle,
+		};
 
 		// Migrate legacy indicatorStyle values. Prior to the underline rewrite,
 		// "gutter" meant the (misplaced) left-margin dot and "inline" meant the
 		// in-prose ◆ widget. New names are "icon" and "underline" respectively.
 		// Use unknown-string compares so TypeScript doesn't narrow the union.
-		const legacy = (loaded?.indicatorStyle as string | undefined);
-		if (legacy === "gutter") this.settings.indicatorStyle = "icon";
-		else if (legacy === "inline") this.settings.indicatorStyle = "underline";
-		else if (legacy === "icon" || legacy === "underline" || legacy === "both" || legacy === "none") {
+		const legacy = loaded?.indicatorStyle as string | undefined;
+		if (legacy === 'gutter') this.settings.indicatorStyle = 'icon';
+		else if (legacy === 'inline')
+			this.settings.indicatorStyle = 'underline';
+		else if (
+			legacy === 'icon' ||
+			legacy === 'underline' ||
+			legacy === 'both' ||
+			legacy === 'none'
+		) {
 			this.settings.indicatorStyle = legacy;
 		}
 
-		if (!this.settings.categories || this.settings.categories.length === 0) {
+		if (
+			!this.settings.categories ||
+			this.settings.categories.length === 0
+		) {
 			this.settings.categories = [...DEFAULT_SETTINGS.categories];
 		}
 
@@ -206,253 +285,369 @@ export default class AnnotecaPlugin extends Plugin {
 		// "center"; everyone else adopts the new "top" default, which is the
 		// improved reading anchor. "Minimal" (the old don't-yank behavior) stays
 		// available in the dropdown for anyone who wants it back.
-		const legacyCenter = (loaded as { centerCommentOnNavigate?: unknown } | null)?.centerCommentOnNavigate;
-		if (loaded && !("markerScrollAlign" in loaded) && legacyCenter === true) {
-			this.settings.markerScrollAlign = "center";
+		const legacyCenter = (
+			loaded as { centerCommentOnNavigate?: unknown } | null
+		)?.centerCommentOnNavigate;
+		if (
+			loaded &&
+			!('markerScrollAlign' in loaded) &&
+			legacyCenter === true
+		) {
+			this.settings.markerScrollAlign = 'center';
 		}
 	}
 
 	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
-		this.events.trigger("settings-changed");
+		this.events.trigger('settings-changed');
 	}
 
 	private registerFileEvents(): void {
-		this.registerEvent(this.app.vault.on("modify", (file) => {
-			if (file instanceof TFile && file.extension === "md") {
-				void this.rebuildIndexForFile(file);
-			}
-		}));
-		this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
-			if (file instanceof TFile) {
-				this.commentIndex.rename(oldPath, file.path);
-				this.events.trigger("index-changed");
-			}
-		}));
-		this.registerEvent(this.app.vault.on("delete", (file) => {
-			if (file instanceof TFile) {
-				this.commentIndex.remove(file.path);
-				this.events.trigger("index-changed");
-			}
-		}));
-		this.registerEvent(this.app.workspace.on("file-open", (file) => {
-			if (file && file.extension === "md") {
-				void this.rebuildIndexForFile(file);
-				this.onActiveFileChangedForScope(file);
-			}
-		}));
+		this.registerEvent(
+			this.app.vault.on('modify', (file) => {
+				if (file instanceof TFile && file.extension === 'md') {
+					void this.rebuildIndexForFile(file);
+				}
+			}),
+		);
+		this.registerEvent(
+			this.app.vault.on('rename', (file, oldPath) => {
+				if (file instanceof TFile) {
+					this.commentIndex.rename(oldPath, file.path);
+					this.events.trigger('index-changed');
+				}
+			}),
+		);
+		this.registerEvent(
+			this.app.vault.on('delete', (file) => {
+				if (file instanceof TFile) {
+					this.commentIndex.remove(file.path);
+					this.events.trigger('index-changed');
+				}
+			}),
+		);
+		this.registerEvent(
+			this.app.workspace.on('file-open', (file) => {
+				if (file && file.extension === 'md') {
+					void this.rebuildIndexForFile(file);
+					this.onActiveFileChangedForScope(file);
+				}
+			}),
+		);
 	}
 
 	private registerEditorMenu(): void {
-		this.registerEvent(this.app.workspace.on("editor-menu", (menu: Menu, editor: Editor, view: MarkdownView) => {
-			menu.addSeparator();
-			if (editor.getSelection().length > 0) {
-				menu.addItem(item => item
-					.setTitle("Annoteca: add comment for selection")
-					.setIcon("message-square-plus")
-					.onClick(() => this.openModalForSelection(editor)));
-			} else {
-				menu.addItem(item => item
-					.setTitle("Annoteca: add comment here")
-					.setIcon("message-square-plus")
-					.onClick(() => this.openModalAtCursor(editor)));
-			}
+		this.registerEvent(
+			this.app.workspace.on(
+				'editor-menu',
+				(menu: Menu, editor: Editor, view: MarkdownView) => {
+					menu.addSeparator();
+					if (editor.getSelection().length > 0) {
+						menu.addItem((item) =>
+							item
+								.setTitle('Annoteca: add comment for selection')
+								.setIcon('message-square-plus')
+								.onClick(() =>
+									this.openModalForSelection(editor),
+								),
+						);
+					} else {
+						menu.addItem((item) =>
+							item
+								.setTitle('Annoteca: add comment here')
+								.setIcon('message-square-plus')
+								.onClick(() => this.openModalAtCursor(editor)),
+						);
+					}
 
-			const file = view.file;
-			if (!file) return;
-			const idx = this.commentIndex.get(file.path);
-			if (!idx) return;
-			const cursorOffset = editor.posToOffset(editor.getCursor());
-			const inside = idx.comments.find(c =>
-				cursorOffset >= c.marker.start && cursorOffset <= c.marker.end,
-			);
-			if (!inside) return;
+					const file = view.file;
+					if (!file) return;
+					const idx = this.commentIndex.get(file.path);
+					if (!idx) return;
+					const cursorOffset = editor.posToOffset(editor.getCursor());
+					const inside = idx.comments.find(
+						(c) =>
+							cursorOffset >= c.marker.start &&
+							cursorOffset <= c.marker.end,
+					);
+					if (!inside) return;
 
-			menu.addItem(item => item
-				.setTitle("Annoteca: edit comment")
-				.setIcon("pencil")
-				.onClick(() => this.openEditModal(editor, file.path, inside)));
-			if (inside.resolution) {
-				menu.addItem(item => item
-					.setTitle("Annoteca: reopen comment")
-					.setIcon("rotate-ccw")
-					.onClick(() => { void this.reopenComment(file.path, inside); }));
-			} else {
-				menu.addItem(item => item
-					.setTitle("Annoteca: resolve comment")
-					.setIcon("check")
-					.onClick(() => { void this.resolveComment(file.path, inside); }));
-				menu.addItem(item => item
-					.setTitle("Annoteca: resolve and remove comment")
-					.setIcon("check-check")
-					.onClick(() => { void this.resolveAndRemoveComment(file.path, inside); }));
-			}
-			menu.addItem(item => item
-				.setTitle("Annoteca: reply to comment")
-				.setIcon("reply")
-				.onClick(() => this.openReviewerOnComment(inside, file.path)));
-			menu.addItem(item => item
-				.setTitle("Annoteca: delete comment")
-				.setIcon("trash")
-				.onClick(() => { void this.deleteComment(file.path, inside); }));
-		}));
+					menu.addItem((item) =>
+						item
+							.setTitle('Annoteca: edit comment')
+							.setIcon('pencil')
+							.onClick(() =>
+								this.openEditModal(editor, file.path, inside),
+							),
+					);
+					if (inside.resolution) {
+						menu.addItem((item) =>
+							item
+								.setTitle('Annoteca: reopen comment')
+								.setIcon('rotate-ccw')
+								.onClick(() => {
+									void this.reopenComment(file.path, inside);
+								}),
+						);
+					} else {
+						menu.addItem((item) =>
+							item
+								.setTitle('Annoteca: resolve comment')
+								.setIcon('check')
+								.onClick(() => {
+									void this.resolveComment(file.path, inside);
+								}),
+						);
+						menu.addItem((item) =>
+							item
+								.setTitle(
+									'Annoteca: resolve and remove comment',
+								)
+								.setIcon('check-check')
+								.onClick(() => {
+									void this.resolveAndRemoveComment(
+										file.path,
+										inside,
+									);
+								}),
+						);
+					}
+					menu.addItem((item) =>
+						item
+							.setTitle('Annoteca: reply to comment')
+							.setIcon('reply')
+							.onClick(() =>
+								this.openReviewerOnComment(inside, file.path),
+							),
+					);
+					menu.addItem((item) =>
+						item
+							.setTitle('Annoteca: delete comment')
+							.setIcon('trash')
+							.onClick(() => {
+								void this.deleteComment(file.path, inside);
+							}),
+					);
+				},
+			),
+		);
 	}
 
 	private registerCommands(): void {
 		this.addCommand({
-			id: "add-comment-at-cursor",
-			name: "Add comment here",
+			id: 'add-comment-at-cursor',
+			name: 'Add comment here',
 			editorCallback: (editor: Editor) => this.openModalAtCursor(editor),
 		});
 		this.addCommand({
-			id: "add-comment-for-selection",
-			name: "Add comment for selection",
-			editorCallback: (editor: Editor) => this.openModalForSelection(editor),
+			id: 'add-comment-for-selection',
+			name: 'Add comment for selection',
+			editorCallback: (editor: Editor) =>
+				this.openModalForSelection(editor),
 		});
 		this.addCommand({
-			id: "add-scratchpad-comment",
-			name: "Add scratchpad comment",
-			editorCallback: (editor: Editor) => this.openScratchpadModal(editor),
+			id: 'add-scratchpad-comment',
+			name: 'Add scratchpad comment',
+			editorCallback: (editor: Editor) =>
+				this.openScratchpadModal(editor),
 		});
 		this.addCommand({
-			id: "edit-comment-at-cursor",
-			name: "Edit comment here",
+			id: 'edit-comment-at-cursor',
+			name: 'Edit comment here',
 			editorCallback: (editor: Editor, view: MarkdownView) => {
-				this.withCommentAtCursor(editor, view, (path, c) => this.openEditModal(editor, path, c));
+				this.withCommentAtCursor(editor, view, (path, c) =>
+					this.openEditModal(editor, path, c),
+				);
 			},
 		});
 		this.addCommand({
-			id: "delete-comment-at-cursor",
-			name: "Delete comment here",
+			id: 'delete-comment-at-cursor',
+			name: 'Delete comment here',
 			editorCallback: (editor: Editor, view: MarkdownView) => {
-				this.withCommentAtCursor(editor, view, (path, c) => { void this.deleteComment(path, c); });
+				this.withCommentAtCursor(editor, view, (path, c) => {
+					void this.deleteComment(path, c);
+				});
 			},
 		});
 		this.addCommand({
-			id: "resolve-comment-at-cursor",
-			name: "Resolve comment here",
+			id: 'resolve-comment-at-cursor',
+			name: 'Resolve comment here',
 			editorCallback: (editor: Editor, view: MarkdownView) => {
-				this.withCommentAtCursor(editor, view, (path, c) => { void this.resolveComment(path, c); });
+				this.withCommentAtCursor(editor, view, (path, c) => {
+					void this.resolveComment(path, c);
+				});
 			},
 		});
 		this.addCommand({
-			id: "resolve-and-remove-comment-at-cursor",
-			name: "Resolve and remove comment here",
+			id: 'resolve-and-remove-comment-at-cursor',
+			name: 'Resolve and remove comment here',
 			editorCallback: (editor: Editor, view: MarkdownView) => {
-				this.withCommentAtCursor(editor, view, (path, c) => { void this.resolveAndRemoveComment(path, c); });
+				this.withCommentAtCursor(editor, view, (path, c) => {
+					void this.resolveAndRemoveComment(path, c);
+				});
 			},
 		});
 		this.addCommand({
-			id: "delete-all-resolved-in-file",
-			name: "Delete all resolved comments in this file",
+			id: 'delete-all-resolved-in-file',
+			name: 'Delete all resolved comments in this file',
 			editorCallback: (_editor: Editor, view: MarkdownView) => {
 				const file = view.file;
 				if (!file) return;
 				void (async () => {
 					const resolved = await this.listResolvedInFile(file.path);
 					if (resolved.length === 0) {
-						new Notice("No resolved comments in this file.");
+						new Notice('No resolved comments in this file.');
 						return;
 					}
-					new ConfirmDeleteResolvedModal(this.app, resolved.length, file.basename, () => {
-						void (async () => {
-							const removed = await this.deleteAllResolvedInFile(file.path);
-							const noun = removed === 1 ? "comment" : "comments";
-							new Notice(`Deleted ${removed} resolved ${noun}.`);
-						})();
-					}).open();
+					new ConfirmDeleteResolvedModal(
+						this.app,
+						resolved.length,
+						file.basename,
+						() => {
+							void (async () => {
+								const removed =
+									await this.deleteAllResolvedInFile(
+										file.path,
+									);
+								const noun =
+									removed === 1 ? 'comment' : 'comments';
+								new Notice(
+									`Deleted ${removed} resolved ${noun}.`,
+								);
+							})();
+						},
+					).open();
 				})();
 			},
 		});
 		this.addCommand({
-			id: "reopen-comment-at-cursor",
-			name: "Reopen resolved comment here",
+			id: 'reopen-comment-at-cursor',
+			name: 'Reopen resolved comment here',
 			editorCallback: (editor: Editor, view: MarkdownView) => {
-				this.withCommentAtCursor(editor, view, (path, c) => { void this.reopenComment(path, c); });
+				this.withCommentAtCursor(editor, view, (path, c) => {
+					void this.reopenComment(path, c);
+				});
 			},
 		});
 		this.addCommand({
-			id: "reply-to-comment-at-cursor",
-			name: "Reply to comment here",
+			id: 'reply-to-comment-at-cursor',
+			name: 'Reply to comment here',
 			editorCallback: (editor: Editor, view: MarkdownView) => {
-				this.withCommentAtCursor(editor, view, (path, c) => this.openReviewerOnComment(c, path));
+				this.withCommentAtCursor(editor, view, (path, c) =>
+					this.openReviewerOnComment(c, path),
+				);
 			},
 		});
 		this.addCommand({
-			id: "next-comment",
-			name: "Next comment",
-			editorCallback: (editor: Editor, view: MarkdownView) => { void this.jumpToAdjacentComment(editor, view, "next", false); },
+			id: 'next-comment',
+			name: 'Next comment',
+			editorCallback: (editor: Editor, view: MarkdownView) => {
+				void this.jumpToAdjacentComment(editor, view, 'next', false);
+			},
 		});
 		this.addCommand({
-			id: "previous-comment",
-			name: "Previous comment",
-			editorCallback: (editor: Editor, view: MarkdownView) => { void this.jumpToAdjacentComment(editor, view, "previous", false); },
+			id: 'previous-comment',
+			name: 'Previous comment',
+			editorCallback: (editor: Editor, view: MarkdownView) => {
+				void this.jumpToAdjacentComment(
+					editor,
+					view,
+					'previous',
+					false,
+				);
+			},
 		});
 		this.addCommand({
-			id: "next-unresolved-comment",
-			name: "Next unresolved comment",
-			editorCallback: (editor: Editor, view: MarkdownView) => { void this.jumpToAdjacentComment(editor, view, "next", true); },
+			id: 'next-unresolved-comment',
+			name: 'Next unresolved comment',
+			editorCallback: (editor: Editor, view: MarkdownView) => {
+				void this.jumpToAdjacentComment(editor, view, 'next', true);
+			},
 		});
 		this.addCommand({
-			id: "previous-unresolved-comment",
-			name: "Previous unresolved comment",
-			editorCallback: (editor: Editor, view: MarkdownView) => { void this.jumpToAdjacentComment(editor, view, "previous", true); },
+			id: 'previous-unresolved-comment',
+			name: 'Previous unresolved comment',
+			editorCallback: (editor: Editor, view: MarkdownView) => {
+				void this.jumpToAdjacentComment(editor, view, 'previous', true);
+			},
 		});
 		this.addCommand({
-			id: "toggle-hide-all-comments",
-			name: "Toggle hide-all-comments mode",
+			id: 'toggle-hide-all-comments',
+			name: 'Toggle hide-all-comments mode',
 			editorCallback: (editor: Editor, view: MarkdownView) => {
 				const cm = view.editor.cm;
 				if (!cm) return;
 				const currentlyHidden = this.toggleHideAllForActiveView(view);
-				new Notice(currentlyHidden ? "Comments hidden." : "Comments visible.");
+				new Notice(
+					currentlyHidden ? 'Comments hidden.' : 'Comments visible.',
+				);
 			},
 		});
 		this.addCommand({
-			id: "cycle-indicator-style",
-			name: "Cycle indicator style",
-			callback: () => { void this.cycleIndicatorStyle(); },
+			id: 'cycle-indicator-style',
+			name: 'Cycle indicator style',
+			callback: () => {
+				void this.cycleIndicatorStyle();
+			},
 		});
 		this.addCommand({
-			id: "open-hub",
-			name: "Open comments panel",
-			callback: () => { void this.activateView(ANNOTECA_HUB_VIEW_TYPE, "right"); },
+			id: 'open-hub',
+			name: 'Open comments panel',
+			callback: () => {
+				void this.activateView(ANNOTECA_HUB_VIEW_TYPE, 'right');
+			},
 		});
 		this.addCommand({
-			id: "open-vault-unresolved-view",
-			name: "Open unresolved comments view",
-			callback: () => { void this.activateView(VAULT_UNRESOLVED_VIEW_TYPE, "tab"); },
+			id: 'open-vault-unresolved-view',
+			name: 'Open unresolved comments view',
+			callback: () => {
+				void this.activateView(VAULT_UNRESOLVED_VIEW_TYPE, 'tab');
+			},
 		});
 		this.addCommand({
-			id: "open-index-view",
-			name: "Open index entries view",
-			callback: () => { void this.activateView(INDEX_VIEW_TYPE, "tab"); },
+			id: 'open-index-view',
+			name: 'Open index entries view',
+			callback: () => {
+				void this.activateView(INDEX_VIEW_TYPE, 'tab');
+			},
 		});
 		this.addCommand({
-			id: "check-marker-conflicts",
-			name: "Check for marker conflicts",
-			callback: () => { this.runGuarded("Conflict check", () => this.diagnostics.runConflictCheck()); },
+			id: 'check-marker-conflicts',
+			name: 'Check for marker conflicts',
+			callback: () => {
+				this.runGuarded('Conflict check', () =>
+					this.diagnostics.runConflictCheck(),
+				);
+			},
 		});
 		this.addCommand({
-			id: "detect-orphan-comments",
-			name: "Detect orphan comments",
-			callback: () => { this.runGuarded("Orphan check", () => this.diagnostics.runOrphanCheck()); },
+			id: 'detect-orphan-comments',
+			name: 'Detect orphan comments',
+			callback: () => {
+				this.runGuarded('Orphan check', () =>
+					this.diagnostics.runOrphanCheck(),
+				);
+			},
 		});
 		this.addCommand({
-			id: "validate-marker-format",
-			name: "Validate marker format",
-			callback: () => { this.runGuarded("Marker validation", () => this.diagnostics.runMarkerValidation()); },
+			id: 'validate-marker-format',
+			name: 'Validate marker format',
+			callback: () => {
+				this.runGuarded('Marker validation', () =>
+					this.diagnostics.runMarkerValidation(),
+				);
+			},
 		});
 		this.addCommand({
-			id: "format-scripture-references",
-			name: "Format scripture references in current file",
+			id: 'format-scripture-references',
+			name: 'Format scripture references in current file',
 			editorCallback: (editor: Editor, view: MarkdownView) => {
 				const file = view.file;
 				if (!file) return;
 				const text = editor.getValue();
 				const r = formatScripture(text);
 				if (r.changes === 0) {
-					new Notice("No scripture references to format.");
+					new Notice('No scripture references to format.');
 					return;
 				}
 				editor.setValue(r.updated);
@@ -460,44 +655,60 @@ export default class AnnotecaPlugin extends Plugin {
 			},
 		});
 		this.addCommand({
-			id: "export-ai-skill",
-			name: "Export AI skill",
-			callback: () => { this.exportAiSkill(); },
+			id: 'export-ai-skill',
+			name: 'Export AI skill',
+			callback: () => {
+				this.exportAiSkill();
+			},
 		});
 		this.addCommand({
-			id: "backup-settings",
-			name: "Back up settings",
-			callback: () => { this.runGuarded("Settings backup", () => this.backupSettings()); },
+			id: 'backup-settings',
+			name: 'Back up settings',
+			callback: () => {
+				this.runGuarded('Settings backup', () => this.backupSettings());
+			},
 		});
 		this.addCommand({
-			id: "restore-settings",
-			name: "Restore settings from backup",
-			callback: () => { this.runGuarded("Settings restore", () => this.restoreSettings()); },
+			id: 'restore-settings',
+			name: 'Restore settings from backup',
+			callback: () => {
+				this.runGuarded('Settings restore', () =>
+					this.restoreSettings(),
+				);
+			},
 		});
 		this.addCommand({
-			id: "self-diagnostic",
-			name: "Run self-diagnostic",
-			callback: () => { this.runGuarded("Self-diagnostic", () => this.diagnostics.runSelfDiagnostic()); },
+			id: 'self-diagnostic',
+			name: 'Run self-diagnostic',
+			callback: () => {
+				this.runGuarded('Self-diagnostic', () =>
+					this.diagnostics.runSelfDiagnostic(),
+				);
+			},
 		});
 		this.addCommand({
-			id: "detect-position-drift",
-			name: "Detect position drift",
-			callback: () => { this.runGuarded("Drift check", () => this.diagnostics.runDriftCheck()); },
+			id: 'detect-position-drift',
+			name: 'Detect position drift',
+			callback: () => {
+				this.runGuarded('Drift check', () =>
+					this.diagnostics.runDriftCheck(),
+				);
+			},
 		});
 		this.addCommand({
-			id: "import-native-comments",
-			name: "Import native Obsidian comments",
-			callback: () => this.confirmAndConvert("native"),
+			id: 'import-native-comments',
+			name: 'Import native Obsidian comments',
+			callback: () => this.confirmAndConvert('native'),
 		});
 		this.addCommand({
-			id: "import-html-comments",
-			name: "Import generic HTML comments",
-			callback: () => this.confirmAndConvert("html"),
+			id: 'import-html-comments',
+			name: 'Import generic HTML comments',
+			callback: () => this.confirmAndConvert('html'),
 		});
 		this.addCommand({
-			id: "import-all-comments",
-			name: "Convert every comment to the canonical format",
-			callback: () => this.confirmAndConvert("all"),
+			id: 'import-all-comments',
+			name: 'Convert every comment to the canonical format',
+			callback: () => this.confirmAndConvert('all'),
 		});
 	}
 
@@ -506,7 +717,7 @@ export default class AnnotecaPlugin extends Plugin {
 	private async rebuildIndexForFile(file: TFile): Promise<void> {
 		const content = await this.app.vault.cachedRead(file);
 		this.commentIndex.rebuild(file.path, content);
-		this.events.trigger("index-changed", { path: file.path });
+		this.events.trigger('index-changed', { path: file.path });
 	}
 
 	async scanVaultIfNeeded(): Promise<void> {
@@ -517,12 +728,12 @@ export default class AnnotecaPlugin extends Plugin {
 			this.commentIndex.rebuild(f.path, content);
 		}
 		this.vaultScanned = true;
-		this.events.trigger("index-changed");
+		this.events.trigger('index-changed');
 	}
 
 	private refreshActiveFileIndex(): void {
 		const active = this.app.workspace.getActiveFile();
-		if (active && active.extension === "md") {
+		if (active && active.extension === 'md') {
 			void this.rebuildIndexForFile(active);
 		}
 	}
@@ -547,7 +758,11 @@ export default class AnnotecaPlugin extends Plugin {
 		this.openComposer({ editor, filePath: path, scratchpad: true });
 	}
 
-	private openEditModal(editor: Editor, path: string, comment: Comment): void {
+	private openEditModal(
+		editor: Editor,
+		path: string,
+		comment: Comment,
+	): void {
 		const from = editor.offsetToPos(comment.marker.start);
 		const to = editor.offsetToPos(comment.marker.end);
 		this.openComposer({
@@ -558,7 +773,7 @@ export default class AnnotecaPlugin extends Plugin {
 	}
 
 	private openComposer(request: ComposerRequest): void {
-		if (this.settings.composerLocation === "panel") {
+		if (this.settings.composerLocation === 'panel') {
 			void this.openComposerPanel(request);
 		} else {
 			new AddCommentModal(this.app, this, request).open();
@@ -566,24 +781,34 @@ export default class AnnotecaPlugin extends Plugin {
 	}
 
 	private async openComposerPanel(request: ComposerRequest): Promise<void> {
-		await this.activateView(COMPOSER_PANEL_VIEW_TYPE, "right");
-		const leaves = this.app.workspace.getLeavesOfType(COMPOSER_PANEL_VIEW_TYPE);
+		await this.activateView(COMPOSER_PANEL_VIEW_TYPE, 'right');
+		const leaves = this.app.workspace.getLeavesOfType(
+			COMPOSER_PANEL_VIEW_TYPE,
+		);
 		const view = leaves[0]?.view;
 		if (view instanceof ComposerPanelView) view.setRequest(request);
 	}
 
-	async notifyComposerSubmitted(path: string, markerStart: number): Promise<void> {
+	async notifyComposerSubmitted(
+		path: string,
+		markerStart: number,
+	): Promise<void> {
 		// Snapshot the current editor text and rebuild the index so the new
 		// (or edited) marker is queryable before the vault.modify event lands.
 		const file = this.app.vault.getAbstractFileByPath(path);
 		if (file instanceof TFile) {
 			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-			const content = view?.editor.getValue() ?? await this.app.vault.cachedRead(file);
+			const content =
+				view?.editor.getValue() ??
+				(await this.app.vault.cachedRead(file));
 			this.commentIndex.rebuild(path, content);
 		}
-		this.events.trigger("index-changed", { path });
-		this.events.trigger("active-comment-changed", { path, start: markerStart });
-		await this.activateView(ANNOTECA_HUB_VIEW_TYPE, "right");
+		this.events.trigger('index-changed', { path });
+		this.events.trigger('active-comment-changed', {
+			path,
+			start: markerStart,
+		});
+		await this.activateView(ANNOTECA_HUB_VIEW_TYPE, 'right');
 	}
 
 	// Comment lifecycle operations ---------------------------------------
@@ -607,21 +832,42 @@ export default class AnnotecaPlugin extends Plugin {
 		// so the confirmation gate lives here in one place rather than at
 		// every call site. The bulk delete-all-resolved path has its own
 		// modal and is not affected.
-		return new Promise<void>(resolve => {
-			new ConfirmDeleteCommentModal(this.app, this.settings, comment, () => {
-				void this.comments.deleteComment(path, comment).then(resolve);
-			}).open();
+		return new Promise<void>((resolve) => {
+			new ConfirmDeleteCommentModal(
+				this.app,
+				this.settings,
+				comment,
+				() => {
+					void this.comments
+						.deleteComment(path, comment)
+						.then(resolve);
+				},
+			).open();
 		});
 	}
 
-	async resolveAndRemoveComment(path: string, comment: Comment): Promise<void> {
+	async resolveAndRemoveComment(
+		path: string,
+		comment: Comment,
+	): Promise<void> {
 		// Explicit destructive action: always confirms, mirroring deleteComment.
 		// (When the delete-on-resolve setting is on, plain resolveComment removes
 		// without asking; that path does not come through here.)
-		return new Promise<void>(resolve => {
-			new ConfirmDeleteCommentModal(this.app, this.settings, comment, () => {
-				void this.comments.resolveAndRemoveComment(path, comment).then(resolve);
-			}, { title: "Resolve and remove comment", cta: "Resolve and remove" }).open();
+		return new Promise<void>((resolve) => {
+			new ConfirmDeleteCommentModal(
+				this.app,
+				this.settings,
+				comment,
+				() => {
+					void this.comments
+						.resolveAndRemoveComment(path, comment)
+						.then(resolve);
+				},
+				{
+					title: 'Resolve and remove comment',
+					cta: 'Resolve and remove',
+				},
+			).open();
 		});
 	}
 
@@ -672,17 +918,21 @@ export default class AnnotecaPlugin extends Plugin {
 		await this.comments.rejectAddressed(path, comment);
 	}
 
-	async submitReplyFromPopup(comment: Comment, body: string, author?: string): Promise<void> {
+	async submitReplyFromPopup(
+		comment: Comment,
+		body: string,
+		author?: string,
+	): Promise<void> {
 		const trimmed = body.trim();
 		if (trimmed.length === 0) return;
-		const tag = (author ?? "").trim();
+		const tag = (author ?? '').trim();
 		const reply: Reply = {
-			author: tag !== "" ? tag : this.comments.resolvedAuthor(),
+			author: tag !== '' ? tag : this.comments.resolvedAuthor(),
 			date: todayISO(),
 			body: trimmed,
 		};
 		await this.comments.appendReply(comment, reply);
-		new Notice("Reply added.");
+		new Notice('Reply added.');
 	}
 
 	// Author picker options (F-274): the global author tag, the configured
@@ -702,7 +952,7 @@ export default class AnnotecaPlugin extends Plugin {
 
 	async copyCommentId(comment: Comment): Promise<void> {
 		if (!comment.id) {
-			new Notice("This comment has no ID.");
+			new Notice('This comment has no ID.');
 			return;
 		}
 		await navigator.clipboard.writeText(comment.id);
@@ -718,7 +968,7 @@ export default class AnnotecaPlugin extends Plugin {
 
 	async toggleStarred(comment: Comment): Promise<void> {
 		if (!comment.id) {
-			new Notice("This comment has no ID and cannot be starred.");
+			new Notice('This comment has no ID and cannot be starred.');
 			return;
 		}
 		const current = this.settings.starredComments;
@@ -729,10 +979,10 @@ export default class AnnotecaPlugin extends Plugin {
 			current.push(comment.id);
 		}
 		await this.saveSettings();
-		this.events.trigger("starred-changed", { id: comment.id });
+		this.events.trigger('starred-changed', { id: comment.id });
 	}
 
-	async setLastHubTab(tab: AnnotecaSettings["lastHubTab"]): Promise<void> {
+	async setLastHubTab(tab: AnnotecaSettings['lastHubTab']): Promise<void> {
 		if (this.settings.lastHubTab === tab) return;
 		this.settings.lastHubTab = tab;
 		await this.saveSettings();
@@ -743,8 +993,10 @@ export default class AnnotecaPlugin extends Plugin {
 	// loaded when the composer popup opens; cleared on Send.
 
 	loadDraft(commentId: string): string {
-		const raw: unknown = this.app.loadLocalStorage(this.draftKey(commentId));
-		return typeof raw === "string" ? raw : "";
+		const raw: unknown = this.app.loadLocalStorage(
+			this.draftKey(commentId),
+		);
+		return typeof raw === 'string' ? raw : '';
 	}
 
 	saveDraft(commentId: string, body: string): void {
@@ -768,7 +1020,7 @@ export default class AnnotecaPlugin extends Plugin {
 		if (!(file instanceof TFile)) return;
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!view) {
-			new Notice("Open the file to edit this comment.");
+			new Notice('Open the file to edit this comment.');
 			return;
 		}
 		this.openEditModal(view.editor, path, comment);
@@ -787,22 +1039,26 @@ export default class AnnotecaPlugin extends Plugin {
 	}
 
 	async setScopeShape(shape: ScopeShape, anchorPath: string): Promise<void> {
-		this.settings.scopeState = { shape, anchorPath, pinned: this.settings.scopeState.pinned };
+		this.settings.scopeState = {
+			shape,
+			anchorPath,
+			pinned: this.settings.scopeState.pinned,
+		};
 		await this.saveSettings();
-		this.events.trigger("scope-changed");
+		this.events.trigger('scope-changed');
 	}
 
 	async togglePinScope(): Promise<void> {
 		this.settings.scopeState.pinned = !this.settings.scopeState.pinned;
 		await this.saveSettings();
-		this.events.trigger("scope-changed");
+		this.events.trigger('scope-changed');
 	}
 
 	async setStatusFilter(f: StatusFilter): Promise<void> {
 		if (this.settings.statusFilter === f) return;
 		this.settings.statusFilter = f;
 		await this.saveSettings();
-		this.events.trigger("scope-changed");
+		this.events.trigger('scope-changed');
 	}
 
 	// Returns the set of vault-relative file paths that satisfy the current
@@ -815,13 +1071,13 @@ export default class AnnotecaPlugin extends Plugin {
 		// Single-file scope falls back to the active file when no anchor is
 		// stored. Resolve that here so the pure dispatch sees a concrete path.
 		let anchorPath: string | undefined = state.anchorPath || undefined;
-		if (state.shape.kind === "file" && !anchorPath) {
+		if (state.shape.kind === 'file' && !anchorPath) {
 			const active = this.app.workspace.getActiveFile();
 			if (active) anchorPath = active.path;
 		}
 
 		const allFiles = this.app.vault.getMarkdownFiles();
-		const files: ScopeFile[] = allFiles.map(f => {
+		const files: ScopeFile[] = allFiles.map((f) => {
 			const cache = this.app.metadataCache.getFileCache(f);
 			return {
 				path: f.path,
@@ -842,17 +1098,17 @@ export default class AnnotecaPlugin extends Plugin {
 	private onActiveFileChangedForScope(file: TFile): void {
 		const state = this.settings.scopeState;
 		if (state.pinned) return;
-		if (state.shape.kind === "vault") return;
-		if (state.shape.kind === "file") {
+		if (state.shape.kind === 'vault') return;
+		if (state.shape.kind === 'file') {
 			// Single-file scope always follows the active file.
 			if (state.anchorPath !== file.path) {
-				void this.setScopeShape({ kind: "file" }, file.path);
+				void this.setScopeShape({ kind: 'file' }, file.path);
 			}
 			return;
 		}
 		const inScope = this.computeScopeFiles().has(file.path);
 		if (!inScope) {
-			void this.setScopeShape({ kind: "file" }, file.path);
+			void this.setScopeShape({ kind: 'file' }, file.path);
 		}
 	}
 
@@ -864,18 +1120,29 @@ export default class AnnotecaPlugin extends Plugin {
 		tags: string[];
 	} {
 		const active = this.app.workspace.getActiveFile();
-		const result = { properties: [] as Array<{ key: string; value: string }>, tags: [] as string[] };
+		const result = {
+			properties: [] as Array<{ key: string; value: string }>,
+			tags: [] as string[],
+		};
 		if (!active) return result;
 		const cache = this.app.metadataCache.getFileCache(active);
 		if (!cache) return result;
 		if (cache.frontmatter) {
 			for (const [key, raw] of Object.entries(cache.frontmatter)) {
-				if (key === "position") continue;
-				if (typeof raw === "string" || typeof raw === "number" || typeof raw === "boolean") {
+				if (key === 'position') continue;
+				if (
+					typeof raw === 'string' ||
+					typeof raw === 'number' ||
+					typeof raw === 'boolean'
+				) {
 					result.properties.push({ key, value: String(raw) });
 				} else if (Array.isArray(raw)) {
 					for (const v of raw) {
-						if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+						if (
+							typeof v === 'string' ||
+							typeof v === 'number' ||
+							typeof v === 'boolean'
+						) {
 							result.properties.push({ key, value: String(v) });
 						}
 					}
@@ -889,7 +1156,11 @@ export default class AnnotecaPlugin extends Plugin {
 
 	// Navigation ---------------------------------------------------------
 
-	async navigateToComment(path: string, start: number, comment?: Comment): Promise<void> {
+	async navigateToComment(
+		path: string,
+		start: number,
+		comment?: Comment,
+	): Promise<void> {
 		await this.navigateToOffset(path, start);
 		if (comment) this.openReviewerOnComment(comment, path);
 	}
@@ -897,10 +1168,14 @@ export default class AnnotecaPlugin extends Plugin {
 	// `force` bypasses the "already visible -> don't move" short-circuit so the
 	// per-card sync button (F-291) can always re-anchor the document, even when
 	// the marker is on screen and the alignment is "minimal".
-	async navigateToOffset(path: string, offset: number, force = false): Promise<void> {
+	async navigateToOffset(
+		path: string,
+		offset: number,
+		force = false,
+	): Promise<void> {
 		const file = this.app.vault.getAbstractFileByPath(path);
 		if (!(file instanceof TFile)) {
-			new Notice("File not found.");
+			new Notice('File not found.');
 			return;
 		}
 
@@ -911,7 +1186,7 @@ export default class AnnotecaPlugin extends Plugin {
 		// the hub, not a MarkdownView, so the cursor + scroll calls would be
 		// gated out and produce a silent no-op.
 		let targetLeaf: WorkspaceLeaf | null = null;
-		for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+		for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
 			const view = leaf.view as MarkdownView;
 			if (view.file?.path === path) {
 				targetLeaf = leaf;
@@ -919,7 +1194,7 @@ export default class AnnotecaPlugin extends Plugin {
 			}
 		}
 		if (!targetLeaf) {
-			targetLeaf = this.app.workspace.getLeaf("tab");
+			targetLeaf = this.app.workspace.getLeaf('tab');
 			await targetLeaf.openFile(file);
 		}
 
@@ -943,17 +1218,24 @@ export default class AnnotecaPlugin extends Plugin {
 	// marker near the top of the pane via the CodeMirror view (Obsidian's
 	// editor.scrollIntoView only centers or does the minimum); it degrades to a
 	// minimal scroll when the CM view is unavailable.
-	private applyScrollAction(view: MarkdownView, offset: number, action: ScrollAction): void {
-		if (action === "none") return;
+	private applyScrollAction(
+		view: MarkdownView,
+		offset: number,
+		action: ScrollAction,
+	): void {
+		if (action === 'none') return;
 		const cm = view.editor.cm;
-		if (action === "top" && cm) {
+		if (action === 'top' && cm) {
 			cm.dispatch({
-				effects: EditorView.scrollIntoView(offset, { y: "start", yMargin: TOP_SCROLL_MARGIN_PX }),
+				effects: EditorView.scrollIntoView(offset, {
+					y: 'start',
+					yMargin: TOP_SCROLL_MARGIN_PX,
+				}),
 			});
 			return;
 		}
 		const pos = view.editor.offsetToPos(offset);
-		view.editor.scrollIntoView({ from: pos, to: pos }, action === "center");
+		view.editor.scrollIntoView({ from: pos, to: pos }, action === 'center');
 	}
 
 	// True when the given document offset is inside the editor's current
@@ -973,7 +1255,7 @@ export default class AnnotecaPlugin extends Plugin {
 	private async jumpToAdjacentComment(
 		editor: Editor,
 		view: MarkdownView,
-		direction: "next" | "previous",
+		direction: 'next' | 'previous',
 		unresolvedOnly: boolean,
 	): Promise<void> {
 		const currentFile = view.file;
@@ -982,7 +1264,10 @@ export default class AnnotecaPlugin extends Plugin {
 		// Gather every comment in the current scope across all files. The
 		// "next/previous" navigation walks this combined list so users can
 		// triage by chapter or by book without bouncing back to single-file.
-		interface Located { path: string; comment: Comment; }
+		interface Located {
+			path: string;
+			comment: Comment;
+		}
 		const scopeFiles = this.computeScopeFiles();
 		const all: Located[] = [];
 		for (const path of scopeFiles) {
@@ -994,7 +1279,7 @@ export default class AnnotecaPlugin extends Plugin {
 			}
 		}
 		if (all.length === 0) {
-			new Notice("No matching comments in scope.");
+			new Notice('No matching comments in scope.');
 			return;
 		}
 
@@ -1009,8 +1294,8 @@ export default class AnnotecaPlugin extends Plugin {
 		const currentPath = currentFile.path;
 		let target: Located | undefined;
 
-		if (direction === "next") {
-			target = all.find(item => {
+		if (direction === 'next') {
+			target = all.find((item) => {
 				if (item.path < currentPath) return false;
 				if (item.path > currentPath) return true;
 				return item.comment.marker.start > cursorOffset;
@@ -1021,7 +1306,10 @@ export default class AnnotecaPlugin extends Plugin {
 				const item = all[i];
 				if (!item) continue;
 				if (item.path > currentPath) continue;
-				if (item.path < currentPath || item.comment.marker.start < cursorOffset) {
+				if (
+					item.path < currentPath ||
+					item.comment.marker.start < cursorOffset
+				) {
 					target = item;
 					break;
 				}
@@ -1051,9 +1339,12 @@ export default class AnnotecaPlugin extends Plugin {
 		// already open, the listener is registered from its earlier onOpen.
 		// Emitting before activation lost the event on first open and made
 		// the panel fall back to comments[0] (the first item).
-		void this.activateView(ANNOTECA_HUB_VIEW_TYPE, "right").then(() => {
+		void this.activateView(ANNOTECA_HUB_VIEW_TYPE, 'right').then(() => {
 			restoreScroll();
-			this.events.trigger("active-comment-changed", { path: filePath, start });
+			this.events.trigger('active-comment-changed', {
+				path: filePath,
+				start,
+			});
 			this.highlightActiveComment(filePath, start);
 		});
 	}
@@ -1063,13 +1354,15 @@ export default class AnnotecaPlugin extends Plugin {
 	// after the sidebar reflow settles. No-op when the file is not open in a
 	// markdown editor.
 	private captureEditorScrollForPath(path: string): () => void {
-		for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+		for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
 			const v = leaf.view;
 			if (v instanceof MarkdownView && v.file?.path === path) {
 				const editor = v.editor;
 				const info = editor.getScrollInfo();
 				return () => {
-					window.requestAnimationFrame(() => editor.scrollTo(info.left, info.top));
+					window.requestAnimationFrame(() =>
+						editor.scrollTo(info.left, info.top),
+					);
 				};
 			}
 		}
@@ -1080,7 +1373,7 @@ export default class AnnotecaPlugin extends Plugin {
 	// and clear it in every other markdown editor, so exactly one comment is
 	// highlighted at a time. `start` of null clears everywhere.
 	private highlightActiveComment(path: string, start: number | null): void {
-		for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+		for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
 			const v = leaf.view;
 			if (!(v instanceof MarkdownView)) continue;
 			const cm = v.editor.cm;
@@ -1093,7 +1386,7 @@ export default class AnnotecaPlugin extends Plugin {
 	// Clear the active-comment highlight in every markdown editor. Called when
 	// the comment panel closes (deselect).
 	clearActiveCommentHighlight(): void {
-		this.highlightActiveComment("", null);
+		this.highlightActiveComment('', null);
 	}
 
 	// Display toggles ----------------------------------------------------
@@ -1107,9 +1400,14 @@ export default class AnnotecaPlugin extends Plugin {
 	}
 
 	private async cycleIndicatorStyle(): Promise<void> {
-		const order: AnnotecaSettings["indicatorStyle"][] = ["both", "icon", "underline", "none"];
+		const order: AnnotecaSettings['indicatorStyle'][] = [
+			'both',
+			'icon',
+			'underline',
+			'none',
+		];
 		const idx = order.indexOf(this.settings.indicatorStyle);
-		const next = order[(idx + 1) % order.length] ?? "both";
+		const next = order[(idx + 1) % order.length] ?? 'both';
 		this.settings.indicatorStyle = next;
 		await this.saveSettings();
 		new Notice(`Indicator style: ${next}.`);
@@ -1133,18 +1431,20 @@ export default class AnnotecaPlugin extends Plugin {
 	// tab's Export button and the command both route here. Dot-folders are
 	// invisible to the Vault file index, so this writes through the DataAdapter.
 	exportAiSkill(): void {
-		this.runGuarded("Skill export", async () => {
+		this.runGuarded('Skill export', async () => {
 			const body = buildSkillMarkdown(
 				resolveSettingsCategories(this.settings),
-				this.settings.enableAuthorTag ? this.settings.authorTag : undefined,
+				this.settings.enableAuthorTag
+					? this.settings.authorTag
+					: undefined,
 			);
 			const adapter = this.app.vault.adapter;
 			const paths = skillTargetPaths(this.settings.skillExportTarget);
 			for (const filePath of paths) {
-				const segments = filePath.split("/").slice(0, -1);
-				let dir = "";
+				const segments = filePath.split('/').slice(0, -1);
+				let dir = '';
 				for (const segment of segments) {
-					dir = dir === "" ? segment : `${dir}/${segment}`;
+					dir = dir === '' ? segment : `${dir}/${segment}`;
 					if (!(await adapter.exists(normalizePath(dir)))) {
 						await adapter.mkdir(normalizePath(dir));
 					}
@@ -1157,7 +1457,7 @@ export default class AnnotecaPlugin extends Plugin {
 			this.settings.exportedSkillVersion = SKILL_SCHEMA_VERSION;
 			this.settings.skillStaleNoticeShownFor = SKILL_SCHEMA_VERSION;
 			await this.saveSettings();
-			new Notice(`Skill written to ${paths.join(" and ")}.`);
+			new Notice(`Skill written to ${paths.join(' and ')}.`);
 		});
 	}
 
@@ -1168,7 +1468,7 @@ export default class AnnotecaPlugin extends Plugin {
 	async readExportedSkillVersion(): Promise<number | null> {
 		const adapter = this.app.vault.adapter;
 		let found: number | null = null;
-		for (const filePath of skillTargetPaths("both")) {
+		for (const filePath of skillTargetPaths('both')) {
 			const p = normalizePath(filePath);
 			if (!(await adapter.exists(p))) continue;
 			const version = parseSkillVersion(await adapter.read(p));
@@ -1180,8 +1480,8 @@ export default class AnnotecaPlugin extends Plugin {
 	// Status of the exported skill for the settings indicator.
 	async readExportedSkillStatus(): Promise<SkillStatus> {
 		const version = await this.readExportedSkillVersion();
-		if (version === null) return "missing";
-		return version < SKILL_SCHEMA_VERSION ? "stale" : "current";
+		if (version === null) return 'missing';
+		return version < SKILL_SCHEMA_VERSION ? 'stale' : 'current';
 	}
 
 	// On load: if an exported skill exists and is older than the current schema
@@ -1190,7 +1490,8 @@ export default class AnnotecaPlugin extends Plugin {
 	private async checkSkillStaleness(): Promise<void> {
 		const version = await this.readExportedSkillVersion();
 		if (version === null || version >= SKILL_SCHEMA_VERSION) return;
-		if (this.settings.skillStaleNoticeShownFor === SKILL_SCHEMA_VERSION) return;
+		if (this.settings.skillStaleNoticeShownFor === SKILL_SCHEMA_VERSION)
+			return;
 		new Notice(
 			"Annoteca's AI skill guidance changed. Re-export it from settings so your assistant gets the new instructions.",
 			8000,
@@ -1200,7 +1501,8 @@ export default class AnnotecaPlugin extends Plugin {
 	}
 
 	private async backupSettings(): Promise<void> {
-		const filename = this.settings.settingsBackupPath ?? `Annoteca settings backup.json`;
+		const filename =
+			this.settings.settingsBackupPath ?? `Annoteca settings backup.json`;
 		const exportable = { ...this.settings };
 		delete exportable.driftSnapshots;
 		const body = JSON.stringify(exportable, null, 2);
@@ -1214,7 +1516,8 @@ export default class AnnotecaPlugin extends Plugin {
 	}
 
 	private async restoreSettings(): Promise<void> {
-		const filename = this.settings.settingsBackupPath ?? `Annoteca settings backup.json`;
+		const filename =
+			this.settings.settingsBackupPath ?? `Annoteca settings backup.json`;
 		const file = this.app.vault.getAbstractFileByPath(filename);
 		if (!(file instanceof TFile)) {
 			new Notice(`Backup file not found: ${filename}.`);
@@ -1223,26 +1526,38 @@ export default class AnnotecaPlugin extends Plugin {
 		const body = await this.app.vault.read(file);
 		try {
 			const parsed = JSON.parse(body) as Partial<AnnotecaSettings>;
-			this.settings = { ...DEFAULT_SETTINGS, ...this.settings, ...parsed };
+			this.settings = {
+				...DEFAULT_SETTINGS,
+				...this.settings,
+				...parsed,
+			};
 			await this.saveSettings();
-			new Notice("Settings restored.");
+			new Notice('Settings restored.');
 		} catch (err) {
 			// Surface the parse failure to the console for bug reports; the
 			// Notice alone hides which line of the backup was malformed.
-			console.error("Annoteca: settings restore failed", err);
-			new Notice("Backup file is not valid JSON.");
+			console.error('Annoteca: settings restore failed', err);
+			new Notice('Backup file is not valid JSON.');
 		}
 	}
 
 	private confirmAndConvert(format: ImportFormat): void {
-		const description = format === "native"
-			? "Convert every %%comment%% in the vault into an Annoteca marker with the 'uncategorized' category."
-			: format === "html"
-				? "Convert every plain HTML comment in the vault (anything not already in Annoteca format) into an Annoteca marker with the 'uncategorized' category."
-				: "Convert every native and plain HTML comment in the vault into Annoteca markers with the 'uncategorized' category.";
-		new ConfirmBackupModal(this.app, "Convert comments", description, () => {
-			this.runGuarded("Comment conversion", () => this.runBulkConvert(format));
-		}).open();
+		const description =
+			format === 'native'
+				? "Convert every %%comment%% in the vault into an Annoteca marker with the 'uncategorized' category."
+				: format === 'html'
+					? "Convert every plain HTML comment in the vault (anything not already in Annoteca format) into an Annoteca marker with the 'uncategorized' category."
+					: "Convert every native and plain HTML comment in the vault into Annoteca markers with the 'uncategorized' category.";
+		new ConfirmBackupModal(
+			this.app,
+			'Convert comments',
+			description,
+			() => {
+				this.runGuarded('Comment conversion', () =>
+					this.runBulkConvert(format),
+				);
+			},
+		).open();
 	}
 
 	private async runBulkConvert(format: ImportFormat): Promise<void> {
@@ -1251,15 +1566,17 @@ export default class AnnotecaPlugin extends Plugin {
 		let filesTouched = 0;
 		for (const f of files) {
 			const content = await this.app.vault.read(f);
-			const result = convertAllComments(content, format, "uncategorized");
+			const result = convertAllComments(content, format, 'uncategorized');
 			if (result.converted === 0) continue;
 			await this.app.vault.modify(f, result.updated);
 			this.commentIndex.rebuild(f.path, result.updated);
 			totalConverted += result.converted;
 			filesTouched += 1;
 		}
-		this.events.trigger("index-changed");
-		new Notice(`Converted ${totalConverted} comment(s) across ${filesTouched} file(s).`);
+		this.events.trigger('index-changed');
+		new Notice(
+			`Converted ${totalConverted} comment(s) across ${filesTouched} file(s).`,
+		);
 	}
 
 	// Helpers used by commands -----------------------------------------
@@ -1274,24 +1591,30 @@ export default class AnnotecaPlugin extends Plugin {
 		const offset = editor.posToOffset(editor.getCursor());
 		const idx = this.commentIndex.get(file.path);
 		if (!idx) {
-			new Notice("Index not ready.");
+			new Notice('Index not ready.');
 			return;
 		}
-		const found = idx.comments.find(c => offset >= c.marker.start && offset <= c.marker.end);
+		const found = idx.comments.find(
+			(c) => offset >= c.marker.start && offset <= c.marker.end,
+		);
 		if (!found) {
-			new Notice("No comment here.");
+			new Notice('No comment here.');
 			return;
 		}
 		handler(file.path, found);
 	}
 
-	private async activateView(type: string, placement: "right" | "tab"): Promise<void> {
+	private async activateView(
+		type: string,
+		placement: 'right' | 'tab',
+	): Promise<void> {
 		const leaves = this.app.workspace.getLeavesOfType(type);
 		let leaf: WorkspaceLeaf | null = leaves[0] ?? null;
 		if (!leaf) {
-			leaf = placement === "right"
-				? this.app.workspace.getRightLeaf(false)
-				: this.app.workspace.getLeaf("tab");
+			leaf =
+				placement === 'right'
+					? this.app.workspace.getRightLeaf(false)
+					: this.app.workspace.getLeaf('tab');
 			if (!leaf) return;
 			await leaf.setViewState({ type, active: true });
 		}
