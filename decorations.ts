@@ -128,7 +128,7 @@ class MarkerIconWidget extends WidgetType {
 	}
 
 	override toDOM(view: EditorView): HTMLElement {
-		const el = view.dom.ownerDocument.createElement("span");
+		const el = view.dom.ownerDocument.win.createSpan();
 		el.className = `annoteca-icon annoteca-cat-${this.marker.category}`;
 		el.setAttribute("data-annoteca-marker-start", String(this.marker.marker.start));
 		el.setAttribute("data-annoteca-marker-end", String(this.marker.marker.end));
@@ -359,7 +359,7 @@ function hoverTooltipExtension(ctx: DecorationContext, field: StateField<Comment
 			end: hoverRange.to,
 			above: true,
 			create: () => {
-				const dom = view.dom.ownerDocument.createElement("div");
+				const dom = view.dom.ownerDocument.win.createDiv();
 				dom.addClass("annoteca-hover-preview");
 				// Tag the outer .cm-tooltip ancestor (closest, not parentElement,
 				// which can miss it) so styles.css strips the default frame.
@@ -581,7 +581,7 @@ function replyComposerField(ctx: DecorationContext, markersField: StateField<Com
 }
 
 function buildReplyComposerDom(view: EditorView, ctx: DecorationContext, m: Comment): { dom: HTMLElement } {
-	const dom = view.dom.ownerDocument.createElement("div");
+	const dom = view.dom.ownerDocument.win.createDiv();
 	dom.addClass("annoteca-reply-composer");
 	queueMicrotask(() => {
 		const tip = dom.closest(".cm-tooltip");
@@ -818,7 +818,7 @@ function selectionPopupExtension(ctx: DecorationContext): Extension {
 }
 
 function buildSelectionPopupDom(ctx: DecorationContext): { dom: HTMLElement } {
-	const dom = activeDocument.createElement("div");
+	const dom = activeWindow.createDiv();
 	dom.addClass("annoteca-selection-popup");
 	queueMicrotask(() => {
 		// The .cm-tooltip frame is an ancestor, not necessarily our direct
