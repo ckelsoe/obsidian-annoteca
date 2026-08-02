@@ -1926,8 +1926,18 @@ settings:
 	font-size: var(--font-ui-small);
 	border-top: none;
 }
-.annoteca-settings-footer a {
-	margin: 0 4px;
+/* Separators are a flex gap, not whitespace in text nodes: the row is a flex
+   row and a flex item drops the whitespace at its own edges, which collapsed
+   "GitHub | Discord" into "GitHub|Discord". */
+.annoteca-settings-footer-inner {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: center;
+	gap: var(--size-4-2);
+}
+.annoteca-settings-footer-separator {
+	color: var(--text-faint);
 }
 
 /* Per-author styling (F-274/F-275). Author labels in the hover popup and the
