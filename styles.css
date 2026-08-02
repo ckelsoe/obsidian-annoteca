@@ -1936,6 +1936,14 @@ settings:
 	justify-content: center;
 	gap: var(--size-4-2);
 }
+/* Separator plus its link travel as one unit, so a wrap never leaves a stray
+   "|" at the end or start of a line in a narrow settings pane. */
+.annoteca-settings-footer-link {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--size-4-2);
+	white-space: nowrap;
+}
 .annoteca-settings-footer-separator {
 	color: var(--text-faint);
 }

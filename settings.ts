@@ -841,12 +841,19 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		// "GitHub|Report issues". Same fix as the reference plugin's footer.
 		const inner = host.createDiv({ cls: 'annoteca-settings-footer-inner' });
 		inner.createSpan({ text: `Version ${this.plugin.manifest.version}` });
+		// Each separator is grouped with the link that follows it into a single
+		// nowrap flex item. The inner row wraps, and a bare separator span would
+		// be its own wrap opportunity, so a narrow settings pane could produce a
+		// line ending or starting with a stray "|".
 		const link = (text: string, url: string) => {
-			inner.createSpan({
+			const item = inner.createSpan({
+				cls: 'annoteca-settings-footer-link',
+			});
+			item.createSpan({
 				cls: 'annoteca-settings-footer-separator',
 				text: '|',
 			});
-			inner.createEl('a', {
+			item.createEl('a', {
 				text,
 				href: url,
 				attr: { target: '_blank', rel: 'noopener' },
