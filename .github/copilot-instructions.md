@@ -169,7 +169,10 @@ Settings tab section headings must not contain the words "settings", "options", 
 ## Adding or editing tests
 
 - Tests live in `__tests__/` and are named `*.test.ts`.
-- The Jest environment is `node`. Obsidian APIs are stubbed by `__mocks__/obsidian.ts`.
+- The Jest environment is `node` by default, so there is no DOM. Obsidian APIs are stubbed by `__mocks__/obsidian.ts`.
+- A test that needs a real DOM (constructing a CodeMirror `EditorView`, for instance) opts in per file with a `/** @jest-environment jsdom */` docblock, as `__tests__/live-views.test.ts` does. Do not switch the whole suite; the rest does not need it and jsdom is slower.
+- Under jsdom you still do NOT get Obsidian's injected DOM helpers (`document.win.createSpan`, `el.createDiv`, and friends). Prefer arranging the test so they are never called, the way `live-views.test.ts` uses `indicatorStyle: 'underline'` to avoid constructing any widget. Hand-writing a stub for them puts an imitation of Obsidian between the test and the code, and it trips `obsidianmd/prefer-create-el` on its own `createElement` call.
+- Shared test doubles go in a non-`*.test.ts` file under `__tests__/` so Jest does not collect them as a suite. `__tests__/stub-context.ts` is the `DecorationContext` double used by more than one suite.
 - Pure modules (`parser.ts`, `categories.ts`, `types.ts`, `skill-export.ts`, etc.) can be tested directly. Modules that import `obsidian` work via the stub — add new stubs to `__mocks__/obsidian.ts` if a class or function is missing.
 - Never remove or disable existing tests.
 
