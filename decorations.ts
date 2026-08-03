@@ -250,12 +250,18 @@ export function isShowingCommentBodies(): boolean {
 // a document-wide command can refuse on.
 export type InlineBodiesBlocker = 'hide-all' | 'no-icon';
 
+// The one definition of "this style draws a marker icon". `decorationsCompute`
+// and `inlineBodiesBlockedBy` both need it, and writing it twice in opposite
+// polarity was the exact drift the paragraph above warns about, one level down.
+function stylesShowIcon(style: AnnotecaSettings['indicatorStyle']): boolean {
+	return style === 'icon' || style === 'both';
+}
+
 export function inlineBodiesBlockedBy(
 	settings: AnnotecaSettings,
 ): InlineBodiesBlocker | null {
 	if (isHideAllComments()) return 'hide-all';
-	const style = settings.indicatorStyle;
-	if (style !== 'icon' && style !== 'both') return 'no-icon';
+	if (!stylesShowIcon(settings.indicatorStyle)) return 'no-icon';
 	return null;
 }
 
@@ -521,9 +527,7 @@ function decorationsCompute(
 
 		const showBodies = state.field(showBodiesField);
 
-		const showIcon =
-			settings.indicatorStyle === 'icon' ||
-			settings.indicatorStyle === 'both';
+		const showIcon = stylesShowIcon(settings.indicatorStyle);
 		const showUnderline =
 			settings.indicatorStyle === 'underline' ||
 			settings.indicatorStyle === 'both';

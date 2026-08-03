@@ -14,36 +14,12 @@ import {
 	type DecorationContext,
 } from '../decorations';
 import { DEFAULT_SETTINGS } from '../settings';
-import type { AnnotecaSettings, CategoryDefinition } from '../types';
+import type { AnnotecaSettings } from '../types';
+import { stubDecorationContext } from './stub-context';
 
 function stubCtx(overrides: Partial<AnnotecaSettings> = {}): DecorationContext {
-	const noop = () => undefined;
 	const settings: AnnotecaSettings = { ...DEFAULT_SETTINGS, ...overrides };
-	return {
-		getSettings: () => settings,
-		onMarkerClick: noop,
-		openInReviewer: noop,
-		addCommentForSelection: noop,
-		categoryFor: (id: string): CategoryDefinition => ({
-			id,
-			displayName: id,
-		}),
-		toggleResolution: noop,
-		resolveAndRemove: noop,
-		acceptAddressed: noop,
-		reviseAddressed: noop,
-		rejectAddressed: noop,
-		copyPermalink: noop,
-		submitReply: noop,
-		getAuthorTag: () => 'ck',
-		getAuthorOptions: () => ['ck'],
-		authorColor: () => undefined,
-		isStarred: () => false,
-		toggleStarred: noop,
-		loadDraft: () => '',
-		saveDraft: noop,
-		clearDraft: noop,
-	};
+	return stubDecorationContext(() => settings);
 }
 
 const DOC = 'Prose before. <!-- annoteca/clarify: needs a source --> after.';
