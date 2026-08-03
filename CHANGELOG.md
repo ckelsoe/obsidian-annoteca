@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- "Hide all comments" now takes effect immediately instead of waiting for the next edit. Running the command flipped the setting but did not repaint the document, so the markers stayed on screen until you happened to type something or move the cursor, at which point they vanished. Turning them back on had the same delay. The visibility state is now something the editor tracks directly, so the toggle redraws on its own.
+- "Hide all comments" now applies to every open editor at once. It has always been described as one switch for the whole vault rather than a per-pane setting, but with the document split it only reached the pane you ran it from, so the other side could still be showing markers while the notice said they were hidden.
+
 ## [1.12.0] - 2026-08-02
 
 ### Added
