@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-08-03
+
 ### Added
 - Markers show how many replies a thread has. The marker icon was a single glyph whatever was behind it, so a one-line note and a twelve-message conversation looked identical until you hovered or clicked. The count now sits beside the icon as a small superscript, and the tooltip spells it out in words. It counts replies, matching the badge on the Hub panel card, and a comment with no replies is unchanged. There is a "Reply count on markers" setting under Editor indicators to turn it off.
 - New command, "Toggle inline comment bodies", prints every comment in the document beside the passage it is about. Reading a chapter's feedback previously meant hovering each marker one at a time, or working in the side panel where the comments sit in a separate column from the prose. Bodies are trimmed to a single line so they cannot push the document around, only the first comment is shown and never its replies, and pressing the command again clears them. Both halves of a split view follow the toggle together, the same way "Hide all comments" already does.
