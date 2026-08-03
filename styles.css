@@ -2221,13 +2221,13 @@ settings:
 }
 
 .annoteca-md code {
-	word-break: break-word;
+	overflow-wrap: anywhere;
 	font-size: 0.9em;
 }
 
 .annoteca-md pre code {
 	white-space: pre;
-	word-break: normal;
+	overflow-wrap: normal;
 }
 
 /* Tables have no natural maximum width, so the wrapper scrolls rather than
@@ -2264,7 +2264,7 @@ settings:
 /* A pasted URL has no break opportunities, so it would set the surface's
    minimum width all by itself. */
 .annoteca-md a {
-	word-break: break-word;
+	overflow-wrap: anywhere;
 }
 
 .annoteca-md hr {

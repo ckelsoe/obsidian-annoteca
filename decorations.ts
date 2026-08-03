@@ -1247,12 +1247,18 @@ function buildReplyComposerDom(
 		// Read-only rather than merely ignored, so the user is not typing into a
 		// field whose contents are about to be discarded.
 		textarea.readOnly = true;
-		// A save queued from the last keystroke would otherwise land after
-		// clearDraft and bring the sent text back on next open.
+		// Flush the debounced draft save rather than cancelling it. Cancelling
+		// alone fixed the resurrection problem (a queued save landing after
+		// clearDraft and bringing the sent text back) but created a worse one:
+		// submitting within the 300ms debounce meant the newest text had never
+		// been stored, so a refused or failed write left it only in a textarea
+		// that closing the composer discards. Saving now, clearing only on
+		// success, is correct in both directions.
 		if (saveTimer !== undefined) {
 			window.clearTimeout(saveTimer);
 			saveTimer = undefined;
 		}
+		if (draftKey) ctx.saveDraft(draftKey, textarea.value);
 		const release = (): void => {
 			pending = false;
 			send.disabled = false;

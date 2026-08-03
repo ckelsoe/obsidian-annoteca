@@ -44,7 +44,13 @@ export class CommentService {
 			// The toggle is the opt-in for destructive resolve; no per-action
 			// confirmation here. The explicit "Resolve and remove" action keeps
 			// its own confirmation for users who have NOT opted in globally.
-			await this.resolveAndRemoveComment(path, comment);
+			// Guarded on the CURRENT state, matching the branch below.
+			const outcome = await this.resolveAndRemoveComment(
+				path,
+				comment,
+				(c) => !c.resolution,
+			);
+			if (outcome === 'declined') new Notice('Already resolved.');
 			return;
 		}
 		const author = this.resolvedAuthor();
@@ -64,12 +70,24 @@ export class CommentService {
 	// writing a [resolved ...] line. The thread leaves the file; history, when
 	// wanted, lives in git. Reached from the explicit "Resolve and remove"
 	// action and from resolveComment when deleteOnResolve is enabled.
+	// `stillApplies` is the freshness guard the delegating callers need. This is
+	// the DESTRUCTIVE branch of resolve and accept, and it was the only lifecycle
+	// path that re-resolved the marker's offsets without re-checking the state
+	// the action was aimed at: with deleteOnResolve on, Accept deleted the
+	// marker, its body and its whole thread even when another writer had already
+	// revised or rejected the pending edit. The non-destructive branches decline
+	// through replaceMarker's transition; this one skipped the check entirely.
+	//
+	// Omitted by the explicit "Resolve and remove" action, which is a deliberate
+	// destructive choice with its own confirmation, so it keeps acting on
+	// whatever is currently there.
 	async resolveAndRemoveComment(
 		path: string,
 		comment: Comment,
-	): Promise<void> {
+		stillApplies?: (current: Comment) => boolean,
+	): Promise<WriteOutcome> {
 		const file = this.plugin.app.vault.getAbstractFileByPath(path);
-		if (!(file instanceof TFile)) return;
+		if (!(file instanceof TFile)) return 'missing';
 		const content = await this.readCurrentContent(file, path);
 		// Removing a range is the least forgiving thing this service does, so a
 		// marker it cannot identify aborts rather than deleting whatever now
@@ -77,12 +95,14 @@ export class CommentService {
 		const current = this.freshComment(content, comment);
 		if (!current) {
 			this.noticeVanished();
-			return;
+			return 'missing';
 		}
+		if (stillApplies && !stillApplies(current)) return 'declined';
 		const { start, end } = current.marker;
 		const splice = this.buildDeleteSplice(content, start, end);
 		await this.applySplices(path, file, [splice]);
 		new Notice('Resolved and removed.');
+		return 'written';
 	}
 
 	async reopenComment(path: string, comment: Comment): Promise<void> {
@@ -164,7 +184,16 @@ export class CommentService {
 	async acceptAddressed(path: string, comment: Comment): Promise<void> {
 		if (!comment.addressed) return;
 		if (this.plugin.settings.deleteOnResolve) {
-			await this.resolveAndRemoveComment(path, comment);
+			// Refuse when the edit is no longer awaiting review. This branch
+			// deletes the marker and its whole thread, so acting on a snapshot
+			// here destroys more than any other path in this service.
+			const outcome = await this.resolveAndRemoveComment(
+				path,
+				comment,
+				(c) => Boolean(c.addressed),
+			);
+			if (outcome === 'declined')
+				new Notice('This edit is no longer awaiting review.');
 			return;
 		}
 		const author = this.resolvedAuthor();

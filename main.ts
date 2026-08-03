@@ -960,9 +960,12 @@ export default class AnnotecaPlugin extends Plugin {
 				this.settings,
 				comment,
 				() => {
+					// No freshness guard: this is the explicit destructive
+					// action, already confirmed by the modal above, so it acts
+					// on whatever is currently at the marker.
 					void this.comments
 						.resolveAndRemoveComment(path, comment)
-						.then(resolve);
+						.then(() => resolve());
 				},
 				{
 					title: 'Resolve and remove comment',

@@ -61,13 +61,25 @@ export function renderCommentMarkdown(
 		el,
 		host.sourcePath,
 		host.component,
-	).then(() => {
-		// The surface can be gone by now: a hover tooltip dismisses on mouse-out
-		// and a panel re-render empties its container, either of which can happen
-		// while the render is still in flight.
-		if (!el.isConnected) return;
-		host.onRendered?.();
-	});
+	)
+		.then(() => {
+			// The surface can be gone by now: a hover tooltip dismisses on
+			// mouse-out and a panel re-render empties its container, either of
+			// which can happen while the render is still in flight.
+			if (!el.isConnected) return;
+			host.onRendered?.();
+		})
+		.catch(() => {
+			// A render can throw on malformed input or inside another plugin's
+			// post-processor. Without this it is an unhandled rejection and the
+			// user is left looking at an empty box where their comment was.
+			// Falling back to the source text keeps the comment readable, which
+			// is exactly the pre-1.14 behaviour.
+			if (!el.isConnected) return;
+			el.classList.remove('annoteca-md');
+			el.textContent = markdown;
+			host.onRendered?.();
+		});
 	return el;
 }
 

@@ -517,3 +517,64 @@ describe('#12: a vanished marker aborts instead of writing at stale offsets', ()
 		expect(h.content).not.toContain('and mine');
 	});
 });
+
+// The deleteOnResolve shortcut was the one lifecycle path that re-resolved the
+// marker's OFFSETS without re-checking the STATE the action was aimed at, and it
+// is the destructive one: it removes the marker, its body, and its whole thread.
+describe('#12: the destructive deleteOnResolve branch checks current state too', () => {
+	const ADDRESSED = [
+		'Prose. <!-- annoteca/clarify: tighten this',
+		'[id=delres01]',
+		'[reply bob 2026-06-20]: a reply worth keeping',
+		'[addressed claude 2026-06-20]: cut the framing',
+		'--> The new sentence.',
+	].join('\n');
+
+	it('acceptAddressed refuses when the edit is no longer awaiting review', async () => {
+		const h = makeHarnessWith(ADDRESSED, true);
+		const snapshot = firstComment(h.content);
+		// Someone revises it while the card sits on screen.
+		await h.service.reviseAddressed('note.md', firstComment(h.content));
+		const afterRevise = h.content;
+
+		await h.service.acceptAddressed('note.md', snapshot);
+
+		// The marker, its body, and the reply all survive.
+		expect(h.content).toBe(afterRevise);
+		expect(parseAll(h.content)).toHaveLength(1);
+		expect(firstComment(h.content).replies.map((r) => r.body)).toEqual([
+			'a reply worth keeping',
+		]);
+	});
+
+	it('resolveComment refuses when a resolution landed in the meantime', async () => {
+		const doc = [
+			'Prose. <!-- annoteca/clarify: which products?',
+			'[id=delres02]',
+			'-->',
+		].join('\n');
+		const h = makeHarnessWith(doc, true);
+		const snapshot = firstComment(h.content);
+		h.content = h.content.replace(
+			'-->',
+			'[resolved someone-else 2026-06-21]: handled\n-->',
+		);
+		const before = h.content;
+
+		await h.service.resolveComment('note.md', snapshot);
+
+		expect(h.content).toBe(before);
+		expect(firstComment(h.content).resolution?.author).toBe('someone-else');
+	});
+
+	// The explicit action passes no guard, so it still removes whatever is there.
+	it('the explicit resolve-and-remove is unguarded and still removes', async () => {
+		const h = makeHarnessWith(ADDRESSED, true);
+		await h.service.resolveAndRemoveComment(
+			'note.md',
+			firstComment(h.content),
+		);
+		expect(parseAll(h.content)).toHaveLength(0);
+		expect(h.content).toContain('The new sentence.');
+	});
+});

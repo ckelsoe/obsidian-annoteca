@@ -722,6 +722,19 @@ export class ThreadTabRenderer {
 			pending = true;
 			submitBtn.disabled = true;
 			textarea.readOnly = true;
+			// Flush the debounced draft save rather than cancelling it. Cancelling
+			// alone fixed the resurrection problem (a queued save landing after
+			// clearDraft and bringing the sent text back) but created a worse
+			// one: submitting within the 300ms debounce meant the newest text
+			// had never been stored, so a refused or failed write left it only
+			// in a textarea the next panel re-render rebuilds from the draft.
+			// Saving now, clearing only on success, is correct in both
+			// directions.
+			if (saveTimer !== undefined) {
+				window.clearTimeout(saveTimer);
+				saveTimer = undefined;
+			}
+			if (c.id) this.plugin.saveDraft(c.id, textarea.value);
 			const release = (): void => {
 				pending = false;
 				submitBtn.disabled = false;
