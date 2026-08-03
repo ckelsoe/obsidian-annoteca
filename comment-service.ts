@@ -140,8 +140,17 @@ export class CommentService {
 	// underneath), and the reply is text the user just typed. Reporting success
 	// and clearing the composer on a refusal would destroy it, which is the same
 	// class of loss this whole change is about.
-	async appendReply(comment: Comment, reply: Reply): Promise<boolean> {
-		const path = this.plugin.app.workspace.getActiveFile()?.path;
+	//
+	// `path` is passed in rather than read from the active file. Replies come
+	// from surfaces that are not tied to whatever is focused: a Hub card in a
+	// folder or vault scope belongs to another note entirely, and a popover can
+	// be open in a non-active split pane. Resolving the active file instead sent
+	// the write at the wrong document.
+	async appendReply(
+		path: string,
+		comment: Comment,
+		reply: Reply,
+	): Promise<boolean> {
 		if (!path) return false;
 		const outcome = await this.replaceMarker(path, comment, (current) => ({
 			...current,

@@ -77,6 +77,9 @@ export interface DecorationContext {
 		marker: Comment,
 		body: string,
 		author: string,
+		// The file THIS editor holds. A popover in a non-active split pane must
+		// write to its own note, not to whatever is focused.
+		sourcePath: string,
 	): Promise<boolean>;
 	getAuthorTag(): string;
 	getAuthorOptions(): string[];
@@ -1265,7 +1268,7 @@ function buildReplyComposerDom(
 			textarea.readOnly = false;
 		};
 		void ctx
-			.submitReply(m, body, authorSelect.value)
+			.submitReply(m, body, authorSelect.value, sourcePathFor(ctx, view))
 			.then((wrote) => {
 				if (!wrote) {
 					// Leave the composer open with the text still in it. The

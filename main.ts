@@ -135,8 +135,8 @@ export default class AnnotecaPlugin extends Plugin {
 				copyPermalink: (m) => {
 					void this.copyCommentId(m);
 				},
-				submitReply: (m, body, author) =>
-					this.submitReplyFromPopup(m, body, author),
+				submitReply: (m, body, author, sourcePath) =>
+					this.submitReplyFromPopup(m, body, author, sourcePath),
 				getAuthorTag: () => this.comments.resolvedAuthor(),
 				getAuthorOptions: () => this.authorPickerOptions([]),
 				authorColor: (tag) => this.authorColor(tag),
@@ -983,8 +983,12 @@ export default class AnnotecaPlugin extends Plugin {
 		return this.comments.deleteAllResolvedInFile(path);
 	}
 
-	async appendReply(comment: Comment, reply: Reply): Promise<boolean> {
-		return this.comments.appendReply(comment, reply);
+	async appendReply(
+		path: string,
+		comment: Comment,
+		reply: Reply,
+	): Promise<boolean> {
+		return this.comments.appendReply(path, comment, reply);
 	}
 
 	async toggleResolutionFromPopup(comment: Comment): Promise<void> {
@@ -1052,7 +1056,11 @@ export default class AnnotecaPlugin extends Plugin {
 	async submitReplyFromPopup(
 		comment: Comment,
 		body: string,
-		author?: string,
+		author: string | undefined,
+		// The file the popover's own editor holds. Falls back to the active file
+		// only when the editor cannot say, which is the same rule the popover
+		// uses to resolve links in a rendered body.
+		sourcePath?: string,
 	): Promise<boolean> {
 		const trimmed = body.trim();
 		if (trimmed.length === 0) return false;
@@ -1065,7 +1073,12 @@ export default class AnnotecaPlugin extends Plugin {
 		// Only claim success when something was written. A refused write has
 		// already explained itself with its own notice, and the composer keeps
 		// the text so the user can retry once the note catches up.
-		const wrote = await this.comments.appendReply(comment, reply);
+		const path =
+			sourcePath && sourcePath !== ''
+				? sourcePath
+				: this.app.workspace.getActiveFile()?.path;
+		if (!path) return false;
+		const wrote = await this.comments.appendReply(path, comment, reply);
 		if (wrote) new Notice('Reply added.');
 		return wrote;
 	}

@@ -61,7 +61,12 @@ function makeHarnessWith(initial: string, deleteOnResolve = false) {
 		},
 		app: {
 			vault: {
-				getAbstractFileByPath: () => file,
+				// Path-aware on purpose. A harness that hands back the same file
+				// whatever it is asked for cannot tell "wrote to the file it was
+				// given" from "wrote to whatever was focused", which is exactly
+				// the bug the appendReply path tests are about.
+				getAbstractFileByPath: (p: string) =>
+					p === 'note.md' ? file : null,
 				read: () => Promise.resolve(content),
 				modify: (_file: TFile, updated: string) => {
 					content = updated;
@@ -70,10 +75,9 @@ function makeHarnessWith(initial: string, deleteOnResolve = false) {
 			},
 			workspace: {
 				getLeavesOfType: () => [],
-				// appendReply resolves its own path from the active file, unlike
-				// every other verb which is handed one. Without this it returns
-				// early and the test silently exercises nothing.
-				getActiveFile: () => ({ path: 'note.md' }),
+				// Deliberately NOT the file under test, standing in for a Hub
+				// card in a folder scope whose note is not the active one.
+				getActiveFile: () => ({ path: 'some/other-note.md' }),
 			},
 		},
 		commentIndex: { rebuild: () => undefined },
@@ -312,7 +316,7 @@ describe('#12: actions build from current file state, not a cached snapshot', ()
 		const snapshot = firstComment(h.content);
 		h.content = withSecondReply(h.content);
 
-		const wrote = await h.service.appendReply(snapshot, {
+		const wrote = await h.service.appendReply('note.md', snapshot, {
 			author: 'charles',
 			date: '2026-06-22',
 			body: 'and mine',
@@ -504,7 +508,7 @@ describe('#12: a vanished marker aborts instead of writing at stale offsets', ()
 		h.content = withMarkerRemoved(h.content);
 		const before = h.content;
 
-		const wrote = await h.service.appendReply(snapshot, {
+		const wrote = await h.service.appendReply('note.md', snapshot, {
 			author: 'charles',
 			date: '2026-06-22',
 			body: 'and mine',
@@ -576,5 +580,43 @@ describe('#12: the destructive deleteOnResolve branch checks current state too',
 		);
 		expect(parseAll(h.content)).toHaveLength(0);
 		expect(h.content).toContain('The new sentence.');
+	});
+});
+
+// A Hub card in a folder or vault scope belongs to a note that is not
+// necessarily the active one. appendReply used to resolve the target from
+// workspace.getActiveFile(), so replying from such a card aimed the write at
+// whatever happened to be focused.
+describe('#12: appendReply writes to the file it was given', () => {
+	const DOC = [
+		'Prose. <!-- annoteca/clarify: which products?',
+		'[id=pathchk1]',
+		'-->',
+	].join('\n');
+
+	it('uses the caller path, not the active file', async () => {
+		const h = makeHarnessWith(DOC);
+		// The harness reports some/other-note.md as active and only resolves
+		// note.md, so a write aimed at the active file finds nothing.
+		const wrote = await h.service.appendReply(
+			'note.md',
+			firstComment(h.content),
+			{ author: 'charles', date: '2026-06-22', body: 'from the panel' },
+		);
+		expect(wrote).toBe(true);
+		expect(firstComment(h.content).replies.map((r) => r.body)).toEqual([
+			'from the panel',
+		]);
+	});
+
+	it('refuses an empty path rather than guessing', async () => {
+		const h = makeHarnessWith(DOC);
+		const wrote = await h.service.appendReply('', firstComment(h.content), {
+			author: 'charles',
+			date: '2026-06-22',
+			body: 'nowhere',
+		});
+		expect(wrote).toBe(false);
+		expect(firstComment(h.content).replies).toHaveLength(0);
 	});
 });

@@ -655,11 +655,18 @@ export class ThreadTabRenderer {
 			}
 		}
 
-		this.renderReplyInput(expandedSection, c);
+		this.renderReplyInput(expandedSection, c, path);
 		this.renderActions(expandedSection, c, path);
 	}
 
-	private renderReplyInput(container: HTMLElement, c: Comment): void {
+	// `path` is the CARD's file, which in a folder or vault scope is not
+	// necessarily the active one. Dropping it here sent the reply at whatever
+	// note was focused.
+	private renderReplyInput(
+		container: HTMLElement,
+		c: Comment,
+		path: string,
+	): void {
 		const wrap = container.createDiv({ cls: 'annoteca-reply-input-wrap' });
 		const textarea = wrap.createEl('textarea', {
 			cls: 'annoteca-reply-input',
@@ -741,7 +748,7 @@ export class ThreadTabRenderer {
 				textarea.readOnly = false;
 			};
 			void this.plugin
-				.appendReply(c, { author, date: nowISO(), body })
+				.appendReply(path, c, { author, date: nowISO(), body })
 				.then((wrote) => {
 					// Keep what the user typed when the write was refused. The
 					// draft is the only copy of it at that point.
