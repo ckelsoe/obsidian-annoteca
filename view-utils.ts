@@ -322,3 +322,9 @@ export function resolveMarkerClickAction(
 	if (stored === 'panel' || stored === 'popover') return stored;
 	return isMobilePlatform ? 'popover' : 'panel';
 }
+
+// Pluralized reply count. Shared so the Hub panel badge and the marker tooltip
+// cannot drift into describing the same number two different ways.
+export function replyCountLabel(count: number): string {
+	return `${count} repl${count === 1 ? 'y' : 'ies'}`;
+}

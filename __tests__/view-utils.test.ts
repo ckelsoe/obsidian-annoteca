@@ -1,4 +1,9 @@
-import { formatStamp, truncate, resolveMarkerClickAction } from '../view-utils';
+import {
+	formatStamp,
+	truncate,
+	resolveMarkerClickAction,
+	replyCountLabel,
+} from '../view-utils';
 
 describe('view-utils: formatStamp', () => {
 	it('renders a full timestamp as date and time, keeping seconds', () => {
@@ -56,5 +61,20 @@ describe('view-utils: resolveMarkerClickAction', () => {
 		expect(resolveMarkerClickAction(null, true)).toBe('popover');
 		expect(resolveMarkerClickAction(42, false)).toBe('panel');
 		expect(resolveMarkerClickAction('', true)).toBe('popover');
+	});
+});
+
+describe('view-utils: replyCountLabel', () => {
+	// Shared by the Hub panel badge and the marker tooltip. If these two ever
+	// need to differ, that is a product decision, not something a second copy
+	// of the ternary should decide by drifting.
+	it('singularizes exactly one reply', () => {
+		expect(replyCountLabel(1)).toBe('1 reply');
+	});
+
+	it('pluralizes every other count', () => {
+		expect(replyCountLabel(0)).toBe('0 replies');
+		expect(replyCountLabel(2)).toBe('2 replies');
+		expect(replyCountLabel(12)).toBe('12 replies');
 	});
 });

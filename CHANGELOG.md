@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Markers show how many replies a thread has. The marker icon was a single glyph whatever was behind it, so a one-line note and a twelve-message conversation looked identical until you hovered or clicked. The count now sits beside the icon as a small superscript, and the tooltip spells it out in words. It counts replies, matching the badge on the Hub panel card, and a comment with no replies is unchanged. There is a "Reply count on markers" setting under Editor indicators to turn it off.
+- New command, "Toggle inline comment bodies", prints every comment in the document beside the passage it is about. Reading a chapter's feedback previously meant hovering each marker one at a time, or working in the side panel where the comments sit in a separate column from the prose. Bodies are trimmed to a single line so they cannot push the document around, only the first comment is shown and never its replies, and pressing the command again clears them. Both halves of a split view follow the toggle together, the same way "Hide all comments" already does.
+
 ### Fixed
+- Editor indicator settings now take effect the moment you change them. Indicator style, size, underline style and thickness, resolved-comment display, and the new reply count all wrote the new value correctly but left every open editor drawing the old one, until you happened to click or type in the document. Closing settings and looking at the note was not enough. This was the same underlying cause as the "Hide all comments" delay below, on a wider surface.
 - "Hide all comments" now takes effect immediately instead of waiting for the next edit. Running the command flipped the setting but did not repaint the document, so the markers stayed on screen until you happened to type something or move the cursor, at which point they vanished. Turning them back on had the same delay. The visibility state is now something the editor tracks directly, so the toggle redraws on its own.
 - "Hide all comments" now applies to every open editor at once. It has always been described as one switch for the whole vault rather than a per-pane setting, but with the document split it only reached the pane you ran it from, so the other side could still be showing markers while the notice said they were hidden.
 

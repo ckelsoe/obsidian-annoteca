@@ -17,6 +17,7 @@ import {
 	authorPickerOptions,
 	formatStamp,
 	truncate,
+	replyCountLabel,
 } from './view-utils';
 import {
 	renderReplyRow,
@@ -530,7 +531,7 @@ export class ThreadTabRenderer {
 		if (c.replies.length > 0) {
 			compact.createSpan({
 				cls: 'annoteca-reviewer-replies-badge',
-				text: `${c.replies.length} repl${c.replies.length === 1 ? 'y' : 'ies'}`,
+				text: replyCountLabel(c.replies.length),
 			});
 		}
 
