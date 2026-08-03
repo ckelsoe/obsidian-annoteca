@@ -64,9 +64,12 @@ export class ThreadTabRenderer {
 	// children would stay loaded for the life of the vault.
 	private markdownLifetime: MarkdownLifetime | undefined;
 
-	// Pending debounced draft saves across every reply composer this renderer
-	// has built, so dispose() can cancel the ones a repaint detached.
-	private readonly draftSaveTimers = new Set<number>();
+	// Pending debounced draft saves, keyed by comment id, across every reply
+	// composer this renderer has built. dispose() cancels the ones a repaint
+	// detached, and submitting cancels every timer for that comment rather than
+	// only the current closure's, so no orphan can write the draft back after
+	// clearDraft and resurrect a reply that was already sent.
+	private readonly draftSaveTimers = new Map<string, Set<number>>();
 
 	constructor(
 		private readonly plugin: AnnotecaPlugin,
@@ -82,7 +85,8 @@ export class ThreadTabRenderer {
 		// Debounced draft saves are the other thing that outlives this DOM. See
 		// renderReplyInput: an orphan that fires after a submit cleared the
 		// draft resurrects the reply that was just sent.
-		for (const timer of this.draftSaveTimers) window.clearTimeout(timer);
+		for (const timers of this.draftSaveTimers.values())
+			for (const timer of timers) window.clearTimeout(timer);
 		this.draftSaveTimers.clear();
 	}
 
@@ -686,28 +690,39 @@ export class ThreadTabRenderer {
 			const draft = this.plugin.loadDraft(c.id);
 			if (draft.length > 0) textarea.value = draft;
 		}
-		// Tracked on the renderer, not just in this closure, because a repaint
-		// detaches this composer without cancelling its pending save. An orphan
-		// firing after a later submit cleared the draft writes the old text
-		// straight back, and the sent reply reappears on the next render. The
-		// timer outlives the DOM, so it has to be cancelled with it in dispose().
-		let saveTimer: number | undefined;
-		const cancelSave = (): void => {
-			if (saveTimer === undefined) return;
-			window.clearTimeout(saveTimer);
-			this.draftSaveTimers.delete(saveTimer);
-			saveTimer = undefined;
+		// Tracked on the renderer and keyed by comment id, not just held in this
+		// closure, because a repaint detaches this composer without cancelling
+		// its pending save. An orphan firing after a later submit cleared the
+		// draft writes the old text straight back, and the sent reply reappears
+		// on the next render. Cancelling by id rather than by closure means the
+		// submit path kills every timer for the comment, including one left by a
+		// composer this render replaced.
+		const forgetTimer = (id: string, timer: number): void => {
+			const timers = this.draftSaveTimers.get(id);
+			if (!timers) return;
+			timers.delete(timer);
+			if (timers.size === 0) this.draftSaveTimers.delete(id);
+		};
+		const cancelSavesFor = (id: string): void => {
+			const timers = this.draftSaveTimers.get(id);
+			if (!timers) return;
+			for (const timer of timers) window.clearTimeout(timer);
+			this.draftSaveTimers.delete(id);
 		};
 		textarea.addEventListener('input', () => {
-			if (!c.id) return;
-			cancelSave();
+			const id = c.id;
+			if (id === undefined) return;
+			cancelSavesFor(id);
 			const timer = window.setTimeout(() => {
-				this.draftSaveTimers.delete(timer);
-				saveTimer = undefined;
-				if (c.id) this.plugin.saveDraft(c.id, textarea.value);
+				forgetTimer(id, timer);
+				this.plugin.saveDraft(id, textarea.value);
 			}, 300);
-			saveTimer = timer;
-			this.draftSaveTimers.add(timer);
+			let timers = this.draftSaveTimers.get(id);
+			if (!timers) {
+				timers = new Set<number>();
+				this.draftSaveTimers.set(id, timers);
+			}
+			timers.add(timer);
 		});
 
 		// F-274: per-reply author picker. Default plus configured collaborators
@@ -767,11 +782,10 @@ export class ThreadTabRenderer {
 			// 300ms debounce meant the newest text had never been stored at all.
 			// Restoring it on the two failure branches keeps that property
 			// without leaving a copy in place across the re-render.
-			if (saveTimer !== undefined) {
-				window.clearTimeout(saveTimer);
-				saveTimer = undefined;
+			if (c.id) {
+				cancelSavesFor(c.id);
+				this.plugin.clearDraft(c.id);
 			}
-			if (c.id) this.plugin.clearDraft(c.id);
 			const restoreDraft = (): void => {
 				if (c.id) this.plugin.saveDraft(c.id, textarea.value);
 				// Storage alone is not enough if something repainted the panel
