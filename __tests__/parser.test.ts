@@ -929,3 +929,101 @@ describe('parser: legacy markers containing a literal --\\>', () => {
 		expect(text).toBe(legacy);
 	});
 });
+
+describe('parser: a newline in a single-line field cannot destroy the marker', () => {
+	const roundTrip = (
+		c: Parameters<typeof serialize>[0],
+	): Comment | undefined => parseAll(serialize(c))[0];
+
+	// Every bracketed trailing line is matched per line, so a raw newline in one
+	// of these fields used to end the backward walk on the continuation line and
+	// absorb the whole trailing block, the [id=...] included, into the body.
+	it('keeps the id, the thread and the body when a reply spans lines', () => {
+		const c = roundTrip({
+			category: 'note',
+			body: 'the body',
+			id: 'abcd1234',
+			date: '2024-01-01',
+			replies: [
+				{
+					author: 'amy',
+					date: '2024-01-02',
+					body: '- first point\n- second point',
+				},
+			],
+		});
+		expect(c?.id).toBe('abcd1234');
+		expect(c?.body).toBe('the body');
+		expect(c?.replies).toHaveLength(1);
+		expect(c?.replies[0]?.body).toBe('- first point - second point');
+	});
+
+	it('collapses a newline in a resolution note', () => {
+		const c = roundTrip({
+			category: 'note',
+			body: 'body',
+			id: 'abcd1234',
+			resolution: { author: 'bob', date: '2026-06-20', note: 'a\nb' },
+		});
+		expect(c?.id).toBe('abcd1234');
+		expect(c?.resolution?.note).toBe('a b');
+	});
+
+	it('collapses a newline in an addressed note, leaving the fence alone', () => {
+		const c = roundTrip({
+			category: 'note',
+			body: 'body',
+			id: 'abcd1234',
+			addressed: {
+				author: 'claude',
+				date: '2026-06-20',
+				note: 'first\nsecond',
+				original: 'kept\nacross\nlines',
+			},
+		});
+		expect(c?.id).toBe('abcd1234');
+		expect(c?.addressed?.note).toBe('first second');
+		// The fence is delimited, not line-oriented, so it must stay multi-line.
+		expect(c?.addressed?.original).toBe('kept\nacross\nlines');
+	});
+
+	it('collapses a newline in an anchor', () => {
+		const c = roundTrip({
+			category: 'note',
+			body: 'body',
+			id: 'abcd1234',
+			anchor: { text: 'which\nproducts', truncated: false },
+		});
+		expect(c?.id).toBe('abcd1234');
+		expect(c?.anchor?.text).toBe('which products');
+	});
+
+	it('leaves a multi-line body multi-line', () => {
+		const c = roundTrip({
+			category: 'note',
+			body: 'line one\nline two',
+			id: 'abcd1234',
+		});
+		expect(c?.body).toBe('line one\nline two');
+	});
+
+	it('collapses a run of blank lines to one space, and handles CRLF', () => {
+		const c = roundTrip({
+			category: 'note',
+			body: 'body',
+			replies: [
+				{ author: 'amy', date: '2024-01-02', body: 'a\r\n\n\nb' },
+			],
+		});
+		expect(c?.replies[0]?.body).toBe('a b');
+	});
+
+	it('still escapes the terminator in a field it also collapses', () => {
+		const c = roundTrip({
+			category: 'note',
+			body: 'body',
+			replies: [{ author: 'amy', date: '2024-01-02', body: 'a -->\nb' }],
+		});
+		expect(c?.replies[0]?.body).toBe('a --> b');
+	});
+});

@@ -146,6 +146,32 @@ function unescapeTerminator(text: string): string {
 	);
 }
 
+// `-->` is not the only sequence that can break a marker. Every bracketed
+// trailing line is a SINGLE-LINE grammar: parseInnerContent splits the inner
+// content on `\n` and matches each line against one pattern. A newline anywhere
+// in a reply body, an anchor, or an addressed/resolution note therefore emits a
+// continuation line that matches nothing, the backward walk breaks on it
+// immediately, and every structured line above it, the `[reply ...]` itself and
+// the `[id=...]` with it, is absorbed into the body. The comment loses its
+// thread and its identity, which breaks starring, drafts, Copy ID, and the
+// freshComment re-lookup this change relies on.
+//
+// Nothing upstream prevents it: the Hub's reply box is a rows=3 textarea with no
+// keydown handler, so Enter inserts a newline, and rendering replies as markdown
+// makes a multi-line reply the invited usage rather than an odd one.
+//
+// Collapsing a run of line breaks to a single space keeps every word the user
+// wrote and costs only the line break, which the format has never been able to
+// store in these fields anyway. The body and the annoteca-original fence are
+// deliberately NOT collapsed: both are multi-line by contract, the body because
+// bodyMultiline re-emits it and the fence because it is delimited rather than
+// line-oriented.
+const LINE_BREAK_RUN_RE = /[\r\n]+/g;
+
+function escapeInline(text: string): string {
+	return escapeTerminator(text).replace(LINE_BREAK_RUN_RE, ' ');
+}
+
 interface RawMarker {
 	start: number;
 	end: number;
@@ -420,14 +446,12 @@ export function serialize(c: SerializeInput): string {
 	if (c.date !== undefined) lines.push(`[date=${c.date}]`);
 	if (c.author !== undefined) lines.push(`[author=${c.author}]`);
 	if (c.anchor !== undefined)
-		lines.push(`[anchor=${escapeTerminator(c.anchor.text)}]`);
+		lines.push(`[anchor=${escapeInline(c.anchor.text)}]`);
 	for (const r of c.replies ?? []) {
-		lines.push(
-			`[reply ${r.author} ${r.date}]: ${escapeTerminator(r.body)}`,
-		);
+		lines.push(`[reply ${r.author} ${r.date}]: ${escapeInline(r.body)}`);
 	}
 	if (c.addressed) {
-		const rawNote = escapeTerminator(c.addressed.note);
+		const rawNote = escapeInline(c.addressed.note);
 		const note = rawNote.length > 0 ? ` ${rawNote}` : '';
 		lines.push(
 			`[addressed ${c.addressed.author} ${c.addressed.date}]:${note}`,
@@ -444,7 +468,7 @@ export function serialize(c: SerializeInput): string {
 		}
 	}
 	if (c.resolution) {
-		const rawNote = escapeTerminator(c.resolution.note);
+		const rawNote = escapeInline(c.resolution.note);
 		const note = rawNote.length > 0 ? ` ${rawNote}` : '';
 		lines.push(
 			`[resolved ${c.resolution.author} ${c.resolution.date}]:${note}`,

@@ -64,6 +64,10 @@ export class ThreadTabRenderer {
 	// children would stay loaded for the life of the vault.
 	private markdownLifetime: MarkdownLifetime | undefined;
 
+	// Pending debounced draft saves across every reply composer this renderer
+	// has built, so dispose() can cancel the ones a repaint detached.
+	private readonly draftSaveTimers = new Set<number>();
+
 	constructor(
 		private readonly plugin: AnnotecaPlugin,
 		private readonly app: App,
@@ -75,6 +79,11 @@ export class ThreadTabRenderer {
 	dispose(): void {
 		this.markdownLifetime?.unload();
 		this.markdownLifetime = undefined;
+		// Debounced draft saves are the other thing that outlives this DOM. See
+		// renderReplyInput: an orphan that fires after a submit cleared the
+		// draft resurrects the reply that was just sent.
+		for (const timer of this.draftSaveTimers) window.clearTimeout(timer);
+		this.draftSaveTimers.clear();
 	}
 
 	// A render host bound to one card's file. Built per card rather than per
@@ -677,14 +686,28 @@ export class ThreadTabRenderer {
 			const draft = this.plugin.loadDraft(c.id);
 			if (draft.length > 0) textarea.value = draft;
 		}
+		// Tracked on the renderer, not just in this closure, because a repaint
+		// detaches this composer without cancelling its pending save. An orphan
+		// firing after a later submit cleared the draft writes the old text
+		// straight back, and the sent reply reappears on the next render. The
+		// timer outlives the DOM, so it has to be cancelled with it in dispose().
 		let saveTimer: number | undefined;
+		const cancelSave = (): void => {
+			if (saveTimer === undefined) return;
+			window.clearTimeout(saveTimer);
+			this.draftSaveTimers.delete(saveTimer);
+			saveTimer = undefined;
+		};
 		textarea.addEventListener('input', () => {
 			if (!c.id) return;
-			if (saveTimer !== undefined) window.clearTimeout(saveTimer);
-			saveTimer = window.setTimeout(() => {
-				if (c.id) this.plugin.saveDraft(c.id, textarea.value);
+			cancelSave();
+			const timer = window.setTimeout(() => {
+				this.draftSaveTimers.delete(timer);
 				saveTimer = undefined;
+				if (c.id) this.plugin.saveDraft(c.id, textarea.value);
 			}, 300);
+			saveTimer = timer;
+			this.draftSaveTimers.add(timer);
 		});
 
 		// F-274: per-reply author picker. Default plus configured collaborators
@@ -729,19 +752,38 @@ export class ThreadTabRenderer {
 			pending = true;
 			submitBtn.disabled = true;
 			textarea.readOnly = true;
-			// Flush the debounced draft save rather than cancelling it. Cancelling
-			// alone fixed the resurrection problem (a queued save landing after
-			// clearDraft and bringing the sent text back) but created a worse
-			// one: submitting within the 300ms debounce meant the newest text
-			// had never been stored, so a refused or failed write left it only
-			// in a textarea the next panel re-render rebuilds from the draft.
-			// Saving now, clearing only on success, is correct in both
-			// directions.
+			// Drop the debounced save, then clear the stored draft BEFORE the
+			// write rather than after it. A successful write triggers
+			// 'index-changed' synchronously from applySplices, and this panel
+			// rebuilds the card from that event while appendReply is still
+			// unresolved. Anything left in draft storage at that instant is read
+			// straight back into the freshly built textarea, so the composer
+			// redisplays the reply that was just posted and a second press sends
+			// it twice. Clearing afterwards is too late: it lands on a textarea
+			// that has already been detached.
+			//
+			// The draft still has to survive a refusal, which is why the save
+			// was moved to submit time in the first place: submitting inside the
+			// 300ms debounce meant the newest text had never been stored at all.
+			// Restoring it on the two failure branches keeps that property
+			// without leaving a copy in place across the re-render.
 			if (saveTimer !== undefined) {
 				window.clearTimeout(saveTimer);
 				saveTimer = undefined;
 			}
-			if (c.id) this.plugin.saveDraft(c.id, textarea.value);
+			if (c.id) this.plugin.clearDraft(c.id);
+			const restoreDraft = (): void => {
+				if (c.id) this.plugin.saveDraft(c.id, textarea.value);
+				// Storage alone is not enough if something repainted the panel
+				// while the write was in flight: the rebuilt composer read the
+				// draft we had just cleared, so it is on screen empty, and the
+				// text now in storage is invisible until some later render
+				// happens to pick it up. Worse, the next keystroke's debounced
+				// save would overwrite it. Repaint so the restored draft is
+				// actually in front of the user. In the ordinary case nothing
+				// detached this textarea and no second render is needed.
+				if (!textarea.isConnected) this.refresh();
+			};
 			const release = (): void => {
 				pending = false;
 				submitBtn.disabled = false;
@@ -750,14 +792,15 @@ export class ThreadTabRenderer {
 			void this.plugin
 				.appendReply(path, c, { author, date: nowISO(), body })
 				.then((wrote) => {
-					// Keep what the user typed when the write was refused. The
-					// draft is the only copy of it at that point.
+					// Keep what the user typed when the write was refused. A
+					// refusal returns before applySplices, so no re-render has
+					// happened and this textarea is still the visible one.
 					if (!wrote) {
 						release();
+						restoreDraft();
 						return;
 					}
 					textarea.value = '';
-					if (c.id) this.plugin.clearDraft(c.id);
 					release();
 				})
 				.catch(() => {
@@ -767,6 +810,7 @@ export class ThreadTabRenderer {
 					// an unhandled promise.
 					release();
 					new Notice('Could not save the reply. Try again.');
+					restoreDraft();
 				});
 		});
 	}

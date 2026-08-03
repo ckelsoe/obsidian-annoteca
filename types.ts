@@ -3,6 +3,9 @@
 export interface Reply {
 	author: string;
 	date: string; // ISO date (YYYY-MM-DD) or full timestamp (YYYY-MM-DDTHH:MM:SS)
+	// Stored on one line. serialize() folds any line break to a space, because
+	// `[reply ...]` is matched line by line and a continuation line ends the
+	// marker's structured section. See escapeInline in parser.ts.
 	body: string;
 }
 
