@@ -620,3 +620,90 @@ describe('#12: appendReply writes to the file it was given', () => {
 		expect(firstComment(h.content).replies).toHaveLength(0);
 	});
 });
+
+// A Hub card can outlive its note: folder and vault scopes render cards for
+// files the user is not looking at, and one can be renamed or deleted between
+// the render and the button press. Every write path used to return silently.
+describe('#12: a write aimed at a missing file reports instead of no-oping', () => {
+	function makeHarnessWithNoFile() {
+		const plugin = {
+			settings: {
+				enableAuthorTag: true,
+				authorTag: 'charles',
+				deleteOnResolve: false,
+			},
+			app: {
+				vault: {
+					getAbstractFileByPath: () => null,
+					read: () => Promise.resolve(''),
+					modify: () => Promise.resolve(),
+				},
+				workspace: {
+					getLeavesOfType: () => [],
+					getActiveFile: () => ({ path: 'gone.md' }),
+				},
+			},
+			commentIndex: { rebuild: () => undefined },
+			events: { trigger: () => undefined },
+		} as unknown as AnnotecaPlugin;
+		return new CommentService(plugin);
+	}
+
+	const snapshot = firstComment(
+		'<!-- annoteca/clarify: which products?\n[id=gonefile]\n-->',
+	);
+
+	// The Notice text itself is not asserted here. jest.spyOn cannot call through
+	// to an ES class constructor ("cannot be invoked without 'new'"), and the
+	// ways around that are a type assertion on the mock or a recording member on
+	// the Obsidian stub that the real obsidian.d.ts does not have, which would
+	// compile under Jest and fail `npm run build`. What IS asserted is the
+	// contract the caller depends on, which is the part that can silently rot.
+	it('appendReply refuses rather than reporting a write it did not do', async () => {
+		const service = makeHarnessWithNoFile();
+		const wrote = await service.appendReply('gone.md', snapshot, {
+			author: 'charles',
+			date: '2026-06-22',
+			body: 'into the void',
+		});
+		expect(wrote).toBe(false);
+	});
+
+	// The confirmation modal sits between the resolved-count check and the write,
+	// so the note can go away in between. Returning 0 made the caller announce
+	// "Deleted 0 resolved comments", which reads as "there were none".
+	it('deleteAllResolvedInFile returns null rather than a misleading 0', async () => {
+		const service = makeHarnessWithNoFile();
+		await expect(
+			service.deleteAllResolvedInFile('gone.md'),
+		).resolves.toBeNull();
+	});
+
+	it('deleteAllResolvedInFile still returns a count when the file is there', async () => {
+		const h = makeHarnessWith(
+			[
+				'<!-- annoteca/clarify: done with this',
+				'[id=bulk0001]',
+				'[resolved charles 2026-06-20]: handled',
+				'-->',
+			].join('\n'),
+		);
+		await expect(
+			h.service.deleteAllResolvedInFile('note.md'),
+		).resolves.toBe(1);
+	});
+
+	it('resolveComment does not throw when the file is gone', async () => {
+		const service = makeHarnessWithNoFile();
+		await expect(
+			service.resolveComment('gone.md', snapshot),
+		).resolves.toBeUndefined();
+	});
+
+	it('deleteComment does not throw when the file is gone', async () => {
+		const service = makeHarnessWithNoFile();
+		await expect(
+			service.deleteComment('gone.md', snapshot),
+		).resolves.toBeUndefined();
+	});
+});

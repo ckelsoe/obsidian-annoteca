@@ -87,7 +87,10 @@ export class CommentService {
 		stillApplies?: (current: Comment) => boolean,
 	): Promise<WriteOutcome> {
 		const file = this.plugin.app.vault.getAbstractFileByPath(path);
-		if (!(file instanceof TFile)) return 'missing';
+		if (!(file instanceof TFile)) {
+			this.noticeFileGone(path);
+			return 'missing';
+		}
 		const content = await this.readCurrentContent(file, path);
 		// Removing a range is the least forgiving thing this service does, so a
 		// marker it cannot identify aborts rather than deleting whatever now
@@ -117,7 +120,10 @@ export class CommentService {
 
 	async deleteComment(path: string, comment: Comment): Promise<void> {
 		const file = this.plugin.app.vault.getAbstractFileByPath(path);
-		if (!(file instanceof TFile)) return;
+		if (!(file instanceof TFile)) {
+			this.noticeFileGone(path);
+			return;
+		}
 		const content = await this.readCurrentContent(file, path);
 		const current = this.freshComment(content, comment);
 		if (!current) {
@@ -255,7 +261,10 @@ export class CommentService {
 		}
 
 		const file = this.plugin.app.vault.getAbstractFileByPath(path);
-		if (!(file instanceof TFile)) return;
+		if (!(file instanceof TFile)) {
+			this.noticeFileGone(path);
+			return;
+		}
 		const content = await this.readCurrentContent(file, path);
 
 		// This method splices directly instead of going through replaceMarker,
@@ -332,11 +341,21 @@ export class CommentService {
 	}
 
 	// Strips every resolved marker from `path` in a single file write. Returns
-	// the number of markers removed. Caller is responsible for confirmation
-	// and for showing a user-facing Notice.
-	async deleteAllResolvedInFile(path: string): Promise<number> {
+	// the number of markers removed, or `null` when the file could not be
+	// opened at all. Caller is responsible for confirmation and for showing a
+	// user-facing Notice on success.
+	//
+	// `null` rather than 0 because the two mean different things and the caller
+	// reports the number: the note being renamed or deleted between the
+	// confirmation and the write announced "Deleted 0 resolved comments", which
+	// reads as "there were none" rather than "the file is gone". This path is
+	// reachable, the modal sits between the check and the write.
+	async deleteAllResolvedInFile(path: string): Promise<number | null> {
 		const file = this.plugin.app.vault.getAbstractFileByPath(path);
-		if (!(file instanceof TFile)) return 0;
+		if (!(file instanceof TFile)) {
+			this.noticeFileGone(path);
+			return null;
+		}
 		const content = await this.readCurrentContent(file, path);
 		const resolved = parseAll(content).filter(
 			(c) => c.resolution !== undefined,
@@ -391,7 +410,10 @@ export class CommentService {
 		apply: (current: Comment) => Comment | undefined,
 	): Promise<WriteOutcome> {
 		const file = this.plugin.app.vault.getAbstractFileByPath(path);
-		if (!(file instanceof TFile)) return 'missing';
+		if (!(file instanceof TFile)) {
+			this.noticeFileGone(path);
+			return 'missing';
+		}
 		const content = await this.readCurrentContent(file, path);
 		const current = this.freshComment(content, prev);
 		if (!current) {
@@ -487,6 +509,17 @@ export class CommentService {
 				c.marker.end === comment.marker.end &&
 				c.category === comment.category &&
 				c.body === comment.body,
+		);
+	}
+
+	// One message for "the file this action was aimed at is gone". A Hub card can
+	// outlive its note: folder and vault scopes render cards for files the user
+	// is not looking at, and one of those can be renamed or deleted between the
+	// render and the button press. Every write path used to return silently here,
+	// so the button simply did nothing.
+	private noticeFileGone(path: string): void {
+		new Notice(
+			`Could not open ${path}. It may have been renamed or deleted.`,
 		);
 	}
 

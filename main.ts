@@ -573,6 +573,11 @@ export default class AnnotecaPlugin extends Plugin {
 									await this.deleteAllResolvedInFile(
 										file.path,
 									);
+								// null means the file could not be opened and
+								// the service has already said so. Reporting a
+								// count here would claim a deletion that did
+								// not happen.
+								if (removed === null) return;
 								const noun =
 									removed === 1 ? 'comment' : 'comments';
 								new Notice(
@@ -979,7 +984,7 @@ export default class AnnotecaPlugin extends Plugin {
 		return this.comments.listResolvedInFile(path);
 	}
 
-	async deleteAllResolvedInFile(path: string): Promise<number> {
+	async deleteAllResolvedInFile(path: string): Promise<number | null> {
 		return this.comments.deleteAllResolvedInFile(path);
 	}
 

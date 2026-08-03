@@ -163,6 +163,33 @@ describe('renderCommentMarkdown: the post-render callback', () => {
 		expect(onRendered).not.toHaveBeenCalled();
 	});
 
+	// The .catch fallback exists so a throw inside another plugin's
+	// post-processor does not leave an empty box where the comment was.
+	it('falls back to the source text when the render rejects', async () => {
+		renderSpy.mockRejectedValueOnce(new Error('post-processor blew up'));
+		const el = div();
+		const onRendered = jest.fn();
+		renderCommentMarkdown(el, '**bold**', makeHost({ onRendered }));
+
+		await flush();
+		await flush();
+		expect(el.textContent).toBe('**bold**');
+		expect(el.classList.contains('annoteca-md')).toBe(false);
+		expect(onRendered).toHaveBeenCalledTimes(1);
+	});
+
+	it('does not fall back into an element that already left the document', async () => {
+		renderSpy.mockRejectedValueOnce(new Error('post-processor blew up'));
+		const el = div();
+		const onRendered = jest.fn();
+		renderCommentMarkdown(el, '**bold**', makeHost({ onRendered }));
+
+		el.remove();
+		await flush();
+		await flush();
+		expect(onRendered).not.toHaveBeenCalled();
+	});
+
 	it('is optional', async () => {
 		const el = div();
 		renderCommentMarkdown(el, 'text', makeHost());
