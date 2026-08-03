@@ -39,6 +39,10 @@ import {
 	buildAnnotecaExtension,
 	setHideAllCommentsEverywhere,
 	isHideAllComments,
+	setShowCommentBodiesEverywhere,
+	isShowingCommentBodies,
+	inlineBodiesBlockedBy,
+	refreshDecorationsEverywhere,
 	setActiveComment,
 } from './decorations';
 import {
@@ -310,6 +314,10 @@ export default class AnnotecaPlugin extends Plugin {
 
 	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
+		// Editor decorations read settings through a closure CodeMirror cannot
+		// watch, so a saved change has to be announced or every open editor
+		// keeps drawing the old one until the next click or keystroke.
+		refreshDecorationsEverywhere();
 		this.events.trigger('settings-changed');
 	}
 
@@ -625,6 +633,39 @@ export default class AnnotecaPlugin extends Plugin {
 				const currentlyHidden = this.toggleHideAll();
 				new Notice(
 					currentlyHidden ? 'Comments hidden.' : 'Comments visible.',
+				);
+			},
+		});
+		this.addCommand({
+			id: 'toggle-inline-comment-bodies',
+			name: 'Toggle inline comment bodies',
+			editorCallback: (editor: Editor) => {
+				// Same guard as hide-all: nothing to toggle from a surface the
+				// extension was never installed into.
+				if (!editor.cm) return;
+				// Refuse to turn bodies ON when nothing would appear, and say
+				// which switch is in the way. Flipping a flag nothing draws
+				// would be worse than a no-op: the press looks broken, and the
+				// NEXT press is then the one that appears to do nothing.
+				//
+				// Turning bodies OFF is always allowed, whatever is blocking
+				// them. Refusing there would strand the flag on where nothing
+				// is drawn to reveal it is still set, so the bodies would
+				// spring back the moment the block cleared.
+				const blocker = inlineBodiesBlockedBy(this.settings);
+				if (blocker !== null && !isShowingCommentBodies()) {
+					new Notice(
+						blocker === 'hide-all'
+							? 'Comments are hidden. Turn off hide-all-comments mode to show comment bodies.'
+							: 'Inline comment bodies need the marker icon. Change the indicator style setting to show icons.',
+					);
+					return;
+				}
+				const showing = this.toggleShowCommentBodies();
+				new Notice(
+					showing
+						? 'Comment bodies shown inline.'
+						: 'Comment bodies hidden.',
 				);
 			},
 		});
@@ -1469,6 +1510,17 @@ export default class AnnotecaPlugin extends Plugin {
 	private toggleHideAll(): boolean {
 		const next = !isHideAllComments();
 		setHideAllCommentsEverywhere(next);
+		return next;
+	}
+
+	// Inline comment bodies are one switch for every editor too, for the same
+	// reason: hide-all and show-bodies are opposites, so a reader with a split
+	// pane would find it arbitrary that one reaches both panes and the other
+	// does not. State is transient by design and does not survive a reload;
+	// a bird's-eye view is something you turn on to scan and turn off again.
+	private toggleShowCommentBodies(): boolean {
+		const next = !isShowingCommentBodies();
+		setShowCommentBodiesEverywhere(next);
 		return next;
 	}
 

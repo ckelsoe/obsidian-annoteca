@@ -37,6 +37,8 @@ import {
 	ANCHOR_WINDOW,
 	shouldSubmitOnKeydown,
 	formatStamp,
+	truncate,
+	replyCountLabel,
 } from './view-utils';
 
 export interface DecorationContext {
@@ -90,6 +92,60 @@ const hideAllField = StateField.define<boolean>({
 		// consult the module flag.
 		for (const e of tr.effects) {
 			if (e.is(setHideAllCommentsEffect)) return e.value;
+		}
+		return value;
+	},
+});
+
+// Inline comment bodies (#4). Deliberately the exact mirror of the hide-all
+// pair above, including being module-global rather than per-view: the two
+// commands are opposites, and scoping one per-pane while the other reaches
+// every pane would give the user two adjacent toggles with different blast
+// radius. Global also means a second pane on the same file shows bodies too,
+// which is the behaviour a split-pane reader wants from a bird's-eye view.
+const showBodiesFlag = { value: false };
+
+export const setShowCommentBodiesEffect = StateEffect.define<boolean>();
+
+// Same reasoning as `hideAllField`, and the same rule: the drawing code reads
+// this field, never `showBodiesFlag`. A decoration source that reads a
+// module-level global is invisible to CodeMirror's dependency tracking, so the
+// toggle would appear to do nothing until an unrelated edit or click happened
+// to recompute the facet for some other reason.
+const showBodiesField = StateField.define<boolean>({
+	create() {
+		return showBodiesFlag.value;
+	},
+	update(value, tr) {
+		for (const e of tr.effects) {
+			if (e.is(setShowCommentBodiesEffect)) return e.value;
+		}
+		return value;
+	},
+});
+
+// Settings epoch. Decoration drawing reads a lot of settings through
+// `ctx.getSettings()`, which is a closure over the plugin's live object:
+// CodeMirror cannot see when its contents change, so changing an editor
+// indicator setting used to leave every open editor drawing the old one until
+// an unrelated edit or click happened to recompute the facet. Measured in
+// Obsidian 1.13.4: after saving, focusing the editor was not enough, only a
+// click or a keystroke brought the new setting in.
+//
+// Bumping a counter that IS a declared dependency makes any settings change a
+// real repaint trigger. The value is never read for its own sake; only its
+// identity matters.
+const settingsEpoch = { value: 0 };
+
+export const bumpSettingsEpochEffect = StateEffect.define<number>();
+
+const settingsEpochField = StateField.define<number>({
+	create() {
+		return settingsEpoch.value;
+	},
+	update(value, tr) {
+		for (const e of tr.effects) {
+			if (e.is(bumpSettingsEpochEffect)) return e.value;
 		}
 		return value;
 	},
@@ -164,6 +220,58 @@ export function isHideAllComments(): boolean {
 	return hideAllFlag.value;
 }
 
+// Inline bodies are one switch for every editor too, for the reasons on
+// `showBodiesFlag`. Same copy-the-set guard as hide-all: dispatching can in
+// principle tear a view down, which would mutate the set mid-iteration.
+export function setShowCommentBodiesEverywhere(show: boolean): void {
+	showBodiesFlag.value = show;
+	for (const view of [...liveViews]) {
+		view.dispatch({ effects: setShowCommentBodiesEffect.of(show) });
+	}
+}
+
+export function isShowingCommentBodies(): boolean {
+	return showBodiesFlag.value;
+}
+
+// Why inline comment bodies would not be drawn right now, or `null` if they
+// would be.
+//
+// This lives beside `decorationsCompute` on purpose. The toggle command has to
+// know whether pressing it would produce anything visible, and the first two
+// attempts had the command enumerate the drawing code's gates for itself. That
+// list grew twice in review (indicator style, then hide-all) and would have
+// kept growing, because nothing tied the two copies together. Answering the
+// question here means a new early return in the compute cannot be added
+// without this moving with it.
+//
+// Per-marker conditions (a resolved comment the user hides, an empty body) are
+// deliberately NOT here: a document can hold a mix, so they are not something
+// a document-wide command can refuse on.
+export type InlineBodiesBlocker = 'hide-all' | 'no-icon';
+
+export function inlineBodiesBlockedBy(
+	settings: AnnotecaSettings,
+): InlineBodiesBlocker | null {
+	if (isHideAllComments()) return 'hide-all';
+	const style = settings.indicatorStyle;
+	if (style !== 'icon' && style !== 'both') return 'no-icon';
+	return null;
+}
+
+// Called from `saveSettings`, so every editor picks up a settings change at the
+// moment it is made rather than at the next unrelated interaction. See
+// `settingsEpochField` for why a plain settings write is invisible to
+// CodeMirror.
+export function refreshDecorationsEverywhere(): void {
+	settingsEpoch.value += 1;
+	for (const view of [...liveViews]) {
+		view.dispatch({
+			effects: bumpSettingsEpochEffect.of(settingsEpoch.value),
+		});
+	}
+}
+
 const markerStateField = (_ctx: DecorationContext) =>
 	StateField.define<Comment[]>({
 		create(state) {
@@ -184,6 +292,7 @@ class MarkerIconWidget extends WidgetType {
 	constructor(
 		private readonly marker: Comment,
 		private readonly hidden: boolean,
+		private readonly showReplyCount: boolean,
 		// Takes the view because the click may need to dispatch an effect into
 		// it (pinning the tap popover) rather than only calling out to the
 		// plugin. toDOM receives the view, so it is available at bind time.
@@ -201,9 +310,19 @@ class MarkerIconWidget extends WidgetType {
 			o.marker.end === m.marker.end &&
 			o.category === m.category &&
 			o.body === m.body &&
+			// Defence in depth, not a bug fix. Replies are serialized INTO the
+			// marker (parser.ts), so adding one grows the marker text and
+			// `end` above already differs; a widget carrying a stale count
+			// cannot survive a repaint today. Comparing the count directly
+			// stops that from resting on a coincidence of the file format.
+			o.replies.length === m.replies.length &&
 			o.resolution === m.resolution &&
 			o.addressed === m.addressed &&
-			other.hidden === this.hidden
+			other.hidden === this.hidden &&
+			// This one IS load-bearing: turning the setting off changes what
+			// the widget draws while every marker range stays identical, so
+			// without it the badge survives its own setting.
+			other.showReplyCount === this.showReplyCount
 		);
 	}
 
@@ -225,14 +344,37 @@ class MarkerIconWidget extends WidgetType {
 		if (this.marker.addressed && !this.marker.resolution)
 			el.classList.add('annoteca-addressed');
 		if (this.hidden) el.classList.add('annoteca-resolved-hidden');
-		if (this.marker.replies.length > 0)
-			el.classList.add('annoteca-has-replies');
-		el.title = `${this.marker.category}: ${this.marker.body.slice(0, 80)}`;
-		// Single character for all marker states. Resolved status is conveyed
+		const replies = this.marker.replies.length;
+		if (replies > 0) el.classList.add('annoteca-has-replies');
+		const countSuffix =
+			replies > 0 && this.showReplyCount
+				? ` (${replyCountLabel(replies)})`
+				: '';
+		el.title = `${this.marker.category}: ${this.marker.body.slice(0, 80)}${countSuffix}`;
+		// The same glyph for every marker STATE. Resolved status is conveyed
 		// via the annoteca-resolved CSS class (opacity + strikethrough), not
 		// a different character — switching shapes (◆ vs ●) at small font
-		// sizes reads as visual noise rather than meaningful state.
+		// sizes reads as visual noise rather than meaningful state. The reply
+		// count below appends to this rather than varying it, which is the
+		// same rule and not an exception to it.
 		el.textContent = '◆';
+		// Thread size on the marker. Appended AFTER textContent, which
+		// replaces children. Honors the single-glyph reasoning above by
+		// staying a superscript digit rather than a pill badge, and by
+		// rendering nothing at zero replies, since a "0" on every solitary
+		// comment is exactly the visual noise that rule exists to prevent.
+		//
+		// aria-hidden because it is a compact restatement of the count the
+		// title above already gives in words; a screen reader announcing
+		// "◆2" is worse than announcing "clarify: ... (2 replies)".
+		if (replies > 0 && this.showReplyCount) {
+			el.classList.add('annoteca-has-reply-count');
+			el.createSpan({
+				cls: 'annoteca-reply-count',
+				text: String(replies),
+				attr: { 'aria-hidden': 'true' },
+			});
+		}
 		// Handle the click on the widget directly. A replaced widget that returns
 		// true from ignoreEvent does NOT route its clicks to the editor's
 		// domEventHandlers, so the icon would otherwise be unclickable (point
@@ -255,6 +397,51 @@ class MarkerIconWidget extends WidgetType {
 		// click to domEventHandlers (it does not, for a widget that ignores it).
 		if (event.type === 'mousedown' || event.type === 'click') return true;
 		return false;
+	}
+}
+
+// Cap for the inline body (#4). A body can run to many paragraphs, and what
+// was asked for is a bird's-eye view, so an untruncated body inline would
+// wreck the layout of the document it is meant to annotate. 80 matches the
+// slice the marker tooltip already uses, so the two surfaces agree on how much
+// of a body is "enough".
+const INLINE_BODY_MAX = 80;
+
+// One line of plain text for an inline body. Whitespace is collapsed BEFORE
+// truncating, so the cap counts characters the reader actually sees and a
+// multi-line body cannot push the surrounding prose around.
+function inlineBodyText(body: string): string {
+	return truncate(body.replace(/\s+/g, ' ').trim(), INLINE_BODY_MAX);
+}
+
+// The comment body drawn beside its marker when show-all is on (#4). Plain
+// text on purpose, and it must STAY plain when markdown rendering lands:
+// headings and lists repeated at every marker would destroy the document view,
+// which is the opposite of the bird's-eye view being asked for.
+class InlineBodyWidget extends WidgetType {
+	constructor(
+		private readonly text: string,
+		private readonly category: string,
+		private readonly resolved: boolean,
+	) {
+		super();
+	}
+
+	override eq(other: WidgetType): boolean {
+		return (
+			other instanceof InlineBodyWidget &&
+			other.text === this.text &&
+			other.category === this.category &&
+			other.resolved === this.resolved
+		);
+	}
+
+	override toDOM(view: EditorView): HTMLElement {
+		const el = view.dom.ownerDocument.win.createSpan();
+		el.className = `annoteca-inline-body annoteca-cat-${this.category}`;
+		if (this.resolved) el.classList.add('annoteca-resolved');
+		el.textContent = this.text;
+		return el;
 	}
 }
 
@@ -319,12 +506,20 @@ function decorationsCompute(
 	ctx: DecorationContext,
 	field: StateField<Comment[]>,
 ): Extension {
-	const deps = [field, hideAllField, 'selection' as const];
+	const deps = [
+		field,
+		hideAllField,
+		showBodiesField,
+		settingsEpochField,
+		'selection' as const,
+	];
 	return EditorView.decorations.compute(deps, (state) => {
 		if (state.field(hideAllField)) return Decoration.none;
 		const markers = state.field(field);
 		const settings = ctx.getSettings();
 		if (settings.indicatorStyle === 'none') return Decoration.none;
+
+		const showBodies = state.field(showBodiesField);
 
 		const showIcon =
 			settings.indicatorStyle === 'icon' ||
@@ -381,12 +576,43 @@ function decorationsCompute(
 			// raw HTML doesn't leak) but renders display: none.
 			decorations.push(
 				Decoration.replace({
-					widget: new MarkerIconWidget(m, isHidden, (marker, view) =>
-						activateMarker(ctx, view, marker),
+					widget: new MarkerIconWidget(
+						m,
+						isHidden,
+						settings.markerReplyCount,
+						(marker, view) => activateMarker(ctx, view, marker),
 					),
 					inclusive: false,
 				}).range(m.marker.start, m.marker.end),
 			);
+
+			// Inline body (#4), drawn immediately after the icon it belongs
+			// to. Reached only when the icon is drawn, which is why the
+			// command refuses to toggle in the two styles that skip it. In
+			// "underline" style the marker range is never replaced, so its raw
+			// `<!-- annoteca/... -->` text, which contains the body, is
+			// already on screen (measured in Obsidian 1.13.4) and a truncated
+			// second copy beside it would be pure noise. In "none" style
+			// nothing is drawn at all.
+			//
+			// Skipped for a resolved comment the user has chosen to hide: the
+			// icon is rendered display:none in that case, and a body floating
+			// beside an invisible marker is worse than nothing.
+			if (showBodies && !isHidden) {
+				const text = inlineBodyText(m.body);
+				if (text.length > 0) {
+					decorations.push(
+						Decoration.widget({
+							widget: new InlineBodyWidget(
+								text,
+								m.category,
+								m.resolution !== undefined,
+							),
+							side: 1,
+						}).range(m.marker.end),
+					);
+				}
+			}
 		}
 		return Decoration.set(decorations, true);
 	});
@@ -1262,6 +1488,8 @@ export function buildMarkerDecorations(ctx: DecorationContext): {
 		extension: [
 			field,
 			hideAllField,
+			showBodiesField,
+			settingsEpochField,
 			activeField,
 			activeCommentDecorations(field, activeField),
 			decorationsCompute(ctx, field),

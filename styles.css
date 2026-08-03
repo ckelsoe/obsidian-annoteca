@@ -155,10 +155,73 @@ settings:
 	transform: scale(1.15);
 }
 
-.annoteca-icon.annoteca-has-replies::after {
+/* The long-standing "this thread has replies" signal. Suppressed when the
+ * numeric count is rendered, because the number says the same thing with more
+ * information. Written as :not() rather than as a later `content: none`
+ * override so the two rules do not depend on source order. */
+.annoteca-icon.annoteca-has-replies:not(.annoteca-has-reply-count)::after {
 	content: "·";
 	font-weight: bold;
 	margin-left: 1px;
+}
+
+/* Reply count on the marker.
+ *
+ * A superscript digit rather than a filled pill: the marker is deliberately a
+ * single character in every other state (see the glyph note in decorations.ts),
+ * and a badge at editor font size reads as visual noise rather than as a count.
+ */
+.annoteca-icon.annoteca-has-reply-count {
+	/* .annoteca-icon is a 1em centred box sized for one glyph. The count is a
+	   second character, so the box has to grow or the digit overhangs the word
+	   after it. */
+	width: auto;
+}
+
+.annoteca-reply-count {
+	font-size: 0.7em;
+	font-weight: bold;
+	vertical-align: super;
+	line-height: 1;
+	margin-left: 1px;
+}
+
+/* Inline comment body: the truncated first comment drawn beside its marker
+ * while "Toggle inline comment bodies" is on. It sits in the text flow, so
+ * every rule here is about staying subordinate to the prose it annotates.
+ * Category tint comes from the annoteca-cat-* class the widget also carries,
+ * so a reader can scan for one kind of comment at a glance. */
+.annoteca-inline-body {
+	font-size: 0.85em;
+	font-style: italic;
+	opacity: 0.75;
+	/* Margin on BOTH sides. A cursor-position comment is inserted with no
+	   trailing space (composer.ts), so without the right margin the last word
+	   of the body runs straight into the next word of the document. */
+	margin-left: 0.35em;
+	margin-right: 0.35em;
+	/* Not document text. Excluding it from selection keeps a copied paragraph
+	   free of comment bodies that were only turned on to scan with. */
+	user-select: none;
+	/* One visual line, guaranteed. Collapsing whitespace in the string is not
+	   enough on its own: the browser still breaks at spaces, so a long body
+	   near the end of a line or in a narrow split pane would occupy several
+	   lines and reflow the prose it is annotating. Clipped with an ellipsis
+	   rather than allowed to overflow, so the editor never scrolls sideways. */
+	display: inline-block;
+	max-width: 100%;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	/* overflow: hidden moves an inline-block's baseline to its bottom edge,
+	   which would drop the body below the line it sits on. */
+	vertical-align: bottom;
+}
+
+/* Explicit rather than relying on source order: .annoteca-resolved sets the
+   same property at equal specificity. */
+.annoteca-inline-body.annoteca-resolved {
+	opacity: var(--annoteca-resolved-opacity, 0.5);
 }
 
 .annoteca-cat-tone { color: var(--annoteca-color-tone, var(--color-purple)); }

@@ -112,6 +112,12 @@ export interface AnnotecaSettings {
 	// and every glance would cost a sidebar. See resolveMarkerClickAction.
 	markerClickAction: 'panel' | 'popover';
 
+	// When true (default), a marker with replies shows how many next to its
+	// icon. Counts replies only, matching the Hub panel's badge, so the two
+	// surfaces never disagree about the size of a thread. A marker with no
+	// replies shows nothing either way: a "0" on the common case is noise.
+	markerReplyCount: boolean;
+
 	// Visual character of the anchor underline. Applies to every category;
 	// per-category urgency comes from the tier on each CategoryDefinition.
 	anchorStyle: 'solid' | 'wavy' | 'dotted' | 'dashed';

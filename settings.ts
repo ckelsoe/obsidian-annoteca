@@ -48,6 +48,7 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 	// module load is unreliable. 'panel' is the historical behaviour, so it is
 	// the safe literal to sit here.
 	markerClickAction: 'panel',
+	markerReplyCount: true,
 
 	anchorStyle: 'wavy',
 	anchorThickness: 'medium',
@@ -219,6 +220,11 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 								popover: 'Show popover',
 							},
 						},
+					},
+					{
+						name: 'Reply count on markers',
+						desc: 'Show how many replies a thread has next to its marker icon in the editor. Markers with no replies are unchanged.',
+						control: { type: 'toggle', key: 'markerReplyCount' },
 					},
 					{
 						name: 'Anchor underline style',
@@ -555,6 +561,12 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 				panel: 'Open in side panel',
 				popover: 'Show popover',
 			},
+		);
+		this.addToggleRow(
+			containerEl,
+			'Reply count on markers',
+			'Show how many replies a thread has next to its marker icon in the editor. Markers with no replies are unchanged.',
+			'markerReplyCount',
 		);
 		this.addDropdownRow(
 			containerEl,
