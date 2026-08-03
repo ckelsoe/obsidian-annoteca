@@ -70,9 +70,11 @@ function anchorCount(view: EditorView): number {
 }
 
 beforeAll(() => {
-	// `buildAnnotecaExtension` renders tooltips into `activeDocument.body`,
-	// which Obsidian defines as a global and jsdom does not.
-	(window as Window & { activeDocument: Document }).activeDocument = document;
+	// `buildAnnotecaExtension` renders tooltips into `activeDocument.body`.
+	// Obsidian sets that on every window at runtime; jsdom does not, so the
+	// test supplies it. The type already exists on Window via obsidian.d.ts,
+	// so this needs no assertion and no addition to globals.d.ts.
+	window.activeDocument = document;
 });
 
 beforeEach(() => {
