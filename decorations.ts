@@ -62,11 +62,38 @@ export interface DecorationContext {
 	clearDraft(commentId: string): void;
 }
 
-// Module-level transient state. Editor open/close re-evaluates these. Toggling
-// hide-all is a single global flag the StateField reads on every update.
+// Module-level transient state. Editor open/close re-evaluates these. This
+// stays the cross-editor source of truth (a newly opened editor adopts it in
+// `hideAllField.create`, and `isHideAllComments` reads it for the toggle), but
+// nothing that draws may read it directly. See `hideAllField`.
 const hideAllFlag = { value: false };
 
 export const setHideAllCommentsEffect = StateEffect.define<boolean>();
+
+// The drawing code reads hide-all from THIS field, never from `hideAllFlag`.
+// A CodeMirror facet only recomputes when one of its declared dependencies
+// changes identity, so a decoration source that reads a module-level global is
+// invisible to that machinery: flipping the global changed nothing CodeMirror
+// tracked, and the comments stayed on screen until an unrelated document edit
+// or selection move happened to recompute the facet for another reason.
+// Mirroring the flag into a StateField makes it a real dependency, so the
+// toggle repaints on its own transaction.
+const hideAllField = StateField.define<boolean>({
+	create() {
+		return hideAllFlag.value;
+	},
+	update(value, tr) {
+		// Effects only, so a state transition is a function of the transaction
+		// and nothing else. Every live editor receives the effect (see
+		// `setHideAllCommentsEverywhere`) and an editor opened later picks the
+		// current value up in `create`, so there is no path that needs this to
+		// consult the module flag.
+		for (const e of tr.effects) {
+			if (e.is(setHideAllCommentsEffect)) return e.value;
+		}
+		return value;
+	},
+});
 
 // Reply composer state. The pinned tooltip below uses this to render a textarea
 // at a specific marker. `null` means no composer is open.
@@ -105,9 +132,32 @@ export function setActiveComment(
 	view.dispatch({ effects: setActiveCommentEffect.of(markerStart) });
 }
 
-export function setHideAllComments(view: EditorView, hide: boolean): void {
+// Every editor this extension is currently installed in. The workspace can only
+// enumerate markdown leaves, which misses embedded editors such as Canvas
+// cards, so asking Obsidian for the inventory always undercounts. Each view
+// registers itself for its own lifetime instead, which is exact by
+// construction.
+const liveViews = new Set<EditorView>();
+
+const trackLiveView = ViewPlugin.fromClass(
+	class {
+		constructor(private readonly view: EditorView) {
+			liveViews.add(view);
+		}
+		destroy(): void {
+			liveViews.delete(this.view);
+		}
+	},
+);
+
+// Hide-all is one switch for every editor, so the toggle reaches all of them
+// rather than only the focused pane. Iterating a copy because dispatching can
+// in principle tear a view down, which would mutate the set mid-iteration.
+export function setHideAllCommentsEverywhere(hide: boolean): void {
 	hideAllFlag.value = hide;
-	view.dispatch({ effects: setHideAllCommentsEffect.of(hide) });
+	for (const view of [...liveViews]) {
+		view.dispatch({ effects: setHideAllCommentsEffect.of(hide) });
+	}
 }
 
 export function isHideAllComments(): boolean {
@@ -120,16 +170,13 @@ const markerStateField = (_ctx: DecorationContext) =>
 			return parseAll(state.doc.toString());
 		},
 		update(value, tr: Transaction) {
-			if (
-				!tr.docChanged &&
-				!tr.effects.some((e) => e.is(setHideAllCommentsEffect))
-			) {
-				return value;
-			}
-			if (tr.docChanged) {
-				return parseAll(tr.state.doc.toString());
-			}
-			return value;
+			// The parsed markers depend on the document and nothing else. This
+			// used to also branch on the hide-all effect, but both branches
+			// returned the existing value unchanged, so it read as if hide-all
+			// were handled here when it did nothing at all. Visibility is
+			// `hideAllField`'s job.
+			if (!tr.docChanged) return value;
+			return parseAll(tr.state.doc.toString());
 		},
 	});
 
@@ -272,8 +319,9 @@ function decorationsCompute(
 	ctx: DecorationContext,
 	field: StateField<Comment[]>,
 ): Extension {
-	return EditorView.decorations.compute([field, 'selection'], (state) => {
-		if (hideAllFlag.value) return Decoration.none;
+	const deps = [field, hideAllField, 'selection' as const];
+	return EditorView.decorations.compute(deps, (state) => {
+		if (state.field(hideAllField)) return Decoration.none;
 		const markers = state.field(field);
 		const settings = ctx.getSettings();
 		if (settings.indicatorStyle === 'none') return Decoration.none;
@@ -649,7 +697,7 @@ function hoverTooltipExtension(
 ): Extension {
 	return hoverTooltip(
 		(view, pos): Tooltip | null => {
-			if (hideAllFlag.value) return null;
+			if (view.state.field(hideAllField)) return null;
 			// In popover mode the hover preview is off, and not merely
 			// suppressed while one is pinned. The two render the identical
 			// surface, so on a pointer device a dwell followed by a click
@@ -1080,7 +1128,7 @@ function activeCommentDecorations(
 	activeField: StateField<number | null>,
 ): Extension {
 	return EditorView.decorations.compute(
-		[markersField, activeField],
+		[markersField, activeField, hideAllField],
 		(state) => {
 			const start = state.field(activeField);
 			const markers = state.field(markersField);
@@ -1093,7 +1141,7 @@ function activeCommentDecorations(
 				start,
 				markers,
 				anchorRange,
-				hideAllFlag.value,
+				state.field(hideAllField),
 			);
 			if (specs.length === 0) return Decoration.none;
 			return Decoration.set(
@@ -1112,7 +1160,7 @@ function clickHandlerExtension(
 ): Extension {
 	return EditorView.domEventHandlers({
 		click: (event, view) => {
-			if (hideAllFlag.value) return false;
+			if (view.state.field(hideAllField)) return false;
 			const target = event.target as HTMLElement | null;
 			if (!target) return false;
 			if (event.button !== 0) return false;
@@ -1195,26 +1243,52 @@ function buildSelectionPopupDom(ctx: DecorationContext): { dom: HTMLElement } {
 	return { dom };
 }
 
-export function buildAnnotecaExtension(ctx: DecorationContext): Extension {
+// The document-driven half of the extension: parsed markers, hide-all
+// visibility, and the decorations computed from them. Deliberately free of
+// tooltip and pointer wiring, because that half needs Obsidian's
+// `activeDocument` and a live DOM. Keeping the split lets the decoration
+// behaviour be exercised headlessly (see `__tests__/decorations.test.ts`),
+// which is the only way to catch a visibility change that fails to repaint.
+// Returns the fields as well, since the DOM half attaches to the same
+// instances.
+export function buildMarkerDecorations(ctx: DecorationContext): {
+	extension: Extension;
+	markerField: StateField<Comment[]>;
+	activeField: StateField<number | null>;
+} {
 	const field = markerStateField(ctx);
+	const activeField = activeCommentField(field);
+	return {
+		extension: [
+			field,
+			hideAllField,
+			activeField,
+			activeCommentDecorations(field, activeField),
+			decorationsCompute(ctx, field),
+		],
+		markerField: field,
+		activeField,
+	};
+}
+
+export function buildAnnotecaExtension(ctx: DecorationContext): Extension {
+	const { extension: markerDecorations, markerField: field } =
+		buildMarkerDecorations(ctx);
 	const replyField = replyComposerField(ctx, field);
 	replyComposerStateRef.field = replyField;
-	const activeField = activeCommentField(field);
 	const tapField = tapPopoverField(ctx, field);
 	tapPopoverStateRef.field = tapField;
 	return [
-		field,
+		markerDecorations,
+		trackLiveView,
 		replyField,
 		tapField,
-		activeField,
-		activeCommentDecorations(field, activeField),
 		// Render tooltips into document.body instead of the editor's DOM so
 		// they can escape the sidebar leaf bounds. Without this override,
 		// markers near the right edge of a narrow sidebar leaf produce a
 		// vertically tall, horizontally squeezed popup because CodeMirror
 		// shrinks the tooltip to fit available leaf width.
 		tooltips({ parent: activeDocument.body }),
-		decorationsCompute(ctx, field),
 		selectionPopupExtension(ctx),
 		hoverTooltipExtension(ctx, field),
 		clickHandlerExtension(ctx, field),

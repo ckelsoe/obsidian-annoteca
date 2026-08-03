@@ -18,6 +18,16 @@ export class Notice {
 }
 export class Menu {}
 export class Plugin {}
+// Needed so `settings.ts` can be imported for its DEFAULT_SETTINGS constant.
+// The settings tab class is never constructed in tests, but the module's
+// top-level `class AnnotecaSettingTab extends PluginSettingTab` is evaluated
+// on import, so the base class has to exist.
+export class PluginSettingTab {}
+export class Setting {}
+export class ButtonComponent {}
+export function requireApiVersion(_version: string): boolean {
+	return true;
+}
 export class Events {
 	on(_name: string, _cb: (...args: unknown[]) => void): { name: string } {
 		return { name: _name };

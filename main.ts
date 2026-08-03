@@ -37,7 +37,7 @@ import { registerReadingViewIndicator } from './reading-view';
 import { AddCommentModal } from './modal';
 import {
 	buildAnnotecaExtension,
-	setHideAllComments,
+	setHideAllCommentsEverywhere,
 	isHideAllComments,
 	setActiveComment,
 } from './decorations';
@@ -615,10 +615,14 @@ export default class AnnotecaPlugin extends Plugin {
 		this.addCommand({
 			id: 'toggle-hide-all-comments',
 			name: 'Toggle hide-all-comments mode',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				const cm = view.editor.cm;
-				if (!cm) return;
-				const currentlyHidden = this.toggleHideAllForActiveView(view);
+			editorCallback: (editor: Editor) => {
+				// Do nothing when the invoking editor has no CodeMirror view,
+				// matching the previous behaviour: there is nothing to toggle
+				// from a surface the extension was never installed into. The
+				// toggle itself is not scoped to this editor, it reaches every
+				// registered one.
+				if (!editor.cm) return;
+				const currentlyHidden = this.toggleHideAll();
 				new Notice(
 					currentlyHidden ? 'Comments hidden.' : 'Comments visible.',
 				);
@@ -1457,11 +1461,14 @@ export default class AnnotecaPlugin extends Plugin {
 
 	// Display toggles ----------------------------------------------------
 
-	private toggleHideAllForActiveView(view: MarkdownView): boolean {
-		const cmView = view.editor.cm;
-		if (!cmView) return isHideAllComments();
+	// Hide-all is one switch for every editor, not a per-pane setting. The
+	// extension keeps its own inventory of the editors it is installed in, so
+	// this does not sweep workspace leaves: that would miss embedded editors
+	// such as Canvas cards, which the workspace does not expose as markdown
+	// leaves.
+	private toggleHideAll(): boolean {
 		const next = !isHideAllComments();
-		setHideAllComments(cmView, next);
+		setHideAllCommentsEverywhere(next);
 		return next;
 	}
 
