@@ -18,6 +18,47 @@ export class Notice {
 }
 export class Menu {}
 export class Plugin {}
+
+// `markdown-render.ts` subclasses Component at module scope, so the base class
+// has to exist for anything importing it (ui-helpers, decorations) to load.
+//
+// Deliberately no `loaded` flag, though it would make the lifetime tests read
+// more naturally. Type-checking runs against the REAL obsidian.d.ts, where
+// Component has no such member, so a convenience added here would compile under
+// Jest and fail `npm run build`. The mock stays a subset of the real API; tests
+// observe lifetimes by spying on load/unload instead.
+export class Component {
+	load(): void {
+		// no-op
+	}
+	unload(): void {
+		// no-op
+	}
+	addChild<T>(child: T): T {
+		return child;
+	}
+	removeChild<T>(child: T): T {
+		return child;
+	}
+	register(_cb: () => void): void {
+		// no-op
+	}
+}
+
+// Resolves immediately without touching the element. Tests here assert which
+// surface asked for a render and that lifetimes are unloaded, never what
+// Obsidian's markdown pipeline produces, which is not ours to reimplement.
+export class MarkdownRenderer {
+	static render(
+		_app: unknown,
+		_markdown: string,
+		_el: HTMLElement,
+		_sourcePath: string,
+		_component: unknown,
+	): Promise<void> {
+		return Promise.resolve();
+	}
+}
 // Needed so `settings.ts` can be imported for its DEFAULT_SETTINGS constant.
 // The settings tab class is never constructed in tests, but the module's
 // top-level `class AnnotecaSettingTab extends PluginSettingTab` is evaluated
@@ -58,6 +99,12 @@ export const Platform = {
 	isDesktopApp: true,
 	isMobileApp: false,
 };
+
+// Obsidian installs this CodeMirror StateField on every markdown editor;
+// decorations.ts reads it to find which file an editor holds. The suites build
+// bare CodeMirror states without it and look it up with `field(..., false)`, so
+// the value is never dereferenced here. It exists only so the import resolves.
+export const editorInfoField = {};
 
 export function setIcon(_el: HTMLElement, _icon: string): void {
 	// no-op

@@ -2123,3 +2123,152 @@ settings:
 		max-height: 50vh;
 	}
 }
+
+/* CodeMirror puts `cm-tooltip` on the element the tooltip source RETURNS, so
+   for the comment popover the neutralizer above and .annoteca-hover-preview
+   match the same node, and the two-class selector wins on specificity. That
+   silently dropped the popover's own max-width.
+
+   It did not show while bodies were plain text, which wraps at any width. Once
+   a body renders as markdown it can contain a table, a fenced block, or a long
+   unbroken URL, and with no bound on the container those widen the popover
+   instead of scrolling inside it. Restated here at matching specificity, after
+   the neutralizer, so the popover keeps its own sizing while still giving up
+   the theme chrome the neutralizer is there to strip. */
+.cm-tooltip.annoteca-hover-preview {
+	max-width: min(420px, 92vw);
+}
+
+/* Rendered markdown inside comment surfaces (#6) -----------------------------
+   Scoped to .annoteca-md, which markdown-render.ts adds only when it actually
+   renders. The plain-text fallback keeps the pre-wrap rules above untouched.
+
+   Two problems this solves. Obsidian's markdown output carries the note-body
+   type scale, so a heading in a comment arrives at document size and dwarfs a
+   300px popover. And the surrounding rules set `white-space: pre-wrap` for
+   plain text, which is wrong once the source has become real block elements:
+   every newline in the source would render as an extra visible break on top of
+   the paragraph the parser already made. */
+.annoteca-md {
+	white-space: normal;
+}
+
+/* Obsidian wraps even a one-line body in a <p>, whose margins would otherwise
+   add a blank line at the top and bottom of every comment. */
+.annoteca-md > :first-child {
+	margin-top: 0;
+}
+
+.annoteca-md > :last-child {
+	margin-bottom: 0;
+}
+
+.annoteca-md p {
+	margin: 0 0 0.5em;
+}
+
+/* Headings keep their relative order but are pulled back to the surface's own
+   type scale. A comment is a remark about the note, not a document of its own,
+   so an h1 in one should not out-shout the note it annotates. */
+.annoteca-md h1,
+.annoteca-md h2,
+.annoteca-md h3,
+.annoteca-md h4,
+.annoteca-md h5,
+.annoteca-md h6 {
+	margin: 0.6em 0 0.3em;
+	line-height: 1.3;
+	font-weight: 600;
+}
+
+.annoteca-md h1 {
+	font-size: 1.3em;
+}
+
+.annoteca-md h2 {
+	font-size: 1.2em;
+}
+
+.annoteca-md h3 {
+	font-size: 1.1em;
+}
+
+.annoteca-md h4,
+.annoteca-md h5,
+.annoteca-md h6 {
+	font-size: 1em;
+}
+
+.annoteca-md ul,
+.annoteca-md ol {
+	margin: 0 0 0.5em;
+	padding-inline-start: 1.4em;
+}
+
+.annoteca-md li {
+	margin: 0.1em 0;
+}
+
+/* A long code span or a wide fenced block is the most likely thing to force the
+   popover wider than the viewport, so it scrolls within its own box instead. */
+.annoteca-md pre {
+	margin: 0 0 0.5em;
+	padding: 6px 8px;
+	overflow-x: auto;
+	max-width: 100%;
+	border-radius: var(--radius-s, 4px);
+	background-color: var(--background-primary-alt);
+}
+
+.annoteca-md code {
+	word-break: break-word;
+	font-size: 0.9em;
+}
+
+.annoteca-md pre code {
+	white-space: pre;
+	word-break: normal;
+}
+
+/* Tables have no natural maximum width, so the wrapper scrolls rather than
+   letting one push the whole surface sideways. */
+.annoteca-md table {
+	display: block;
+	width: fit-content;
+	max-width: 100%;
+	overflow-x: auto;
+	margin: 0 0 0.5em;
+	border-collapse: collapse;
+}
+
+.annoteca-md th,
+.annoteca-md td {
+	padding: 3px 6px;
+	border: 1px solid var(--background-modifier-border);
+}
+
+.annoteca-md blockquote {
+	margin: 0 0 0.5em;
+	padding-inline-start: 0.8em;
+	border-inline-start: 2px solid var(--background-modifier-border);
+	color: var(--text-muted);
+}
+
+/* An embedded image would otherwise render at intrinsic size and blow the
+   popover out well past the viewport. */
+.annoteca-md img {
+	max-width: 100%;
+	height: auto;
+}
+
+/* A pasted URL has no break opportunities, so it would set the surface's
+   minimum width all by itself. */
+.annoteca-md a {
+	word-break: break-word;
+}
+
+.annoteca-md hr {
+	margin: 0.5em 0;
+	border: none;
+	border-top: 1px solid var(--background-modifier-border);
+}

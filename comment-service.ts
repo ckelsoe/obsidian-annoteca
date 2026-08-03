@@ -22,6 +22,13 @@ import type AnnotecaPlugin from './main';
 import type { Addressed, Comment, Reply } from './types';
 import { parseAll, serialize, nowISO } from './parser';
 
+// What a lifecycle write actually did. Three outcomes rather than a boolean,
+// because the caller's message differs: "declined" means the transition looked
+// at the CURRENT state and chose not to act (already resolved, no longer
+// addressed), while "missing" means the marker is gone and replaceMarker has
+// already said so. Collapsing them produced two notices for one action.
+type WriteOutcome = 'written' | 'declined' | 'missing';
+
 interface SpliceRange {
 	from: number;
 	to: number;
@@ -41,12 +48,16 @@ export class CommentService {
 			return;
 		}
 		const author = this.resolvedAuthor();
-		const resolved: Comment = {
-			...comment,
-			resolution: { author, date: nowISO(), note: '' },
-		};
-		await this.replaceMarker(path, comment, resolved);
-		new Notice('Resolved.');
+		const outcome = await this.replaceMarker(path, comment, (current) =>
+			current.resolution
+				? undefined
+				: {
+						...current,
+						resolution: { author, date: nowISO(), note: '' },
+					},
+		);
+		if (outcome === 'written') new Notice('Resolved.');
+		else if (outcome === 'declined') new Notice('Already resolved.');
 	}
 
 	// Resolve with file cleanup: removes the marker entirely instead of
@@ -60,7 +71,15 @@ export class CommentService {
 		const file = this.plugin.app.vault.getAbstractFileByPath(path);
 		if (!(file instanceof TFile)) return;
 		const content = await this.readCurrentContent(file, path);
-		const { start, end } = this.freshOffsets(content, comment);
+		// Removing a range is the least forgiving thing this service does, so a
+		// marker it cannot identify aborts rather than deleting whatever now
+		// occupies the cached offsets.
+		const current = this.freshComment(content, comment);
+		if (!current) {
+			this.noticeVanished();
+			return;
+		}
+		const { start, end } = current.marker;
 		const splice = this.buildDeleteSplice(content, start, end);
 		await this.applySplices(path, file, [splice]);
 		new Notice('Resolved and removed.');
@@ -68,29 +87,47 @@ export class CommentService {
 
 	async reopenComment(path: string, comment: Comment): Promise<void> {
 		if (!comment.resolution) return;
-		const reopened: Comment = { ...comment, resolution: undefined };
-		await this.replaceMarker(path, comment, reopened);
-		new Notice('Reopened.');
+		const outcome = await this.replaceMarker(path, comment, (current) =>
+			current.resolution
+				? { ...current, resolution: undefined }
+				: undefined,
+		);
+		if (outcome === 'written') new Notice('Reopened.');
 	}
 
 	async deleteComment(path: string, comment: Comment): Promise<void> {
 		const file = this.plugin.app.vault.getAbstractFileByPath(path);
 		if (!(file instanceof TFile)) return;
 		const content = await this.readCurrentContent(file, path);
-		const { start, end } = this.freshOffsets(content, comment);
+		const current = this.freshComment(content, comment);
+		if (!current) {
+			this.noticeVanished();
+			return;
+		}
+		const { start, end } = current.marker;
 		const splice = this.buildDeleteSplice(content, start, end);
 		await this.applySplices(path, file, [splice]);
 		new Notice('Deleted.');
 	}
 
-	async appendReply(comment: Comment, reply: Reply): Promise<void> {
+	// Appends to whatever replies the marker currently holds, not to the ones the
+	// caller's snapshot was rendered with. This is the sharpest edge of #12: two
+	// replies landing close together (an assistant answering while the user is
+	// typing) would otherwise have the second write erase the first.
+	//
+	// Returns whether the reply actually landed. Callers MUST honour it: the
+	// write can now be refused (the marker was deleted, or an id-less one changed
+	// underneath), and the reply is text the user just typed. Reporting success
+	// and clearing the composer on a refusal would destroy it, which is the same
+	// class of loss this whole change is about.
+	async appendReply(comment: Comment, reply: Reply): Promise<boolean> {
 		const path = this.plugin.app.workspace.getActiveFile()?.path;
-		if (!path) return;
-		const updated: Comment = {
-			...comment,
-			replies: [...comment.replies, reply],
-		};
-		await this.replaceMarker(path, comment, updated);
+		if (!path) return false;
+		const outcome = await this.replaceMarker(path, comment, (current) => ({
+			...current,
+			replies: [...current.replies, reply],
+		}));
+		return outcome === 'written';
 	}
 
 	// ---- Addressed-state transitions (F-270) ---------------------------------
@@ -114,9 +151,11 @@ export class CommentService {
 			note,
 			original,
 		};
-		const next: Comment = { ...comment, addressed };
-		await this.replaceMarker(path, comment, next);
-		new Notice('Marked as addressed.');
+		const outcome = await this.replaceMarker(path, comment, (current) => ({
+			...current,
+			addressed,
+		}));
+		if (outcome === 'written') new Notice('Marked as addressed.');
 	}
 
 	// addressed → resolved. The reviewer keeps the applied edit. Honors
@@ -128,17 +167,23 @@ export class CommentService {
 			await this.resolveAndRemoveComment(path, comment);
 			return;
 		}
-		const next: Comment = {
-			...comment,
-			addressed: undefined,
-			resolution: {
-				author: this.resolvedAuthor(),
-				date: nowISO(),
-				note: 'accepted',
-			},
-		};
-		await this.replaceMarker(path, comment, next);
-		new Notice('Accepted.');
+		const author = this.resolvedAuthor();
+		const outcome = await this.replaceMarker(path, comment, (current) =>
+			current.addressed
+				? {
+						...current,
+						addressed: undefined,
+						resolution: {
+							author,
+							date: nowISO(),
+							note: 'accepted',
+						},
+					}
+				: undefined,
+		);
+		if (outcome === 'written') new Notice('Accepted.');
+		else if (outcome === 'declined')
+			new Notice('This edit is no longer awaiting review.');
 	}
 
 	// addressed → open. The reviewer wants to revise further: drop the
@@ -146,9 +191,14 @@ export class CommentService {
 	// queue. The applied prose is left in place for the reviewer to edit.
 	async reviseAddressed(path: string, comment: Comment): Promise<void> {
 		if (!comment.addressed) return;
-		const next: Comment = { ...comment, addressed: undefined };
-		await this.replaceMarker(path, comment, next);
-		new Notice('Reopened for revision.');
+		const outcome = await this.replaceMarker(path, comment, (current) =>
+			current.addressed
+				? { ...current, addressed: undefined }
+				: undefined,
+		);
+		if (outcome === 'written') new Notice('Reopened for revision.');
+		else if (outcome === 'declined')
+			new Notice('This edit is no longer awaiting review.');
 	}
 
 	// addressed → open, auto-reverting the prose. Restores the annoteca-original
@@ -171,47 +221,34 @@ export class CommentService {
 		const content = await this.readCurrentContent(file, path);
 
 		// This method splices directly instead of going through replaceMarker,
-		// so it has to re-resolve the marker itself. A cached comment from the
-		// Hub panel can carry stale offsets if the document changed since the
-		// card was rendered, and unlike every other action this one replaces a
-		// span of PROSE as well as the marker, so acting on a stale offset
-		// destroys the user's text rather than mangling a marker.
+		// so it re-resolves the marker itself. Reject is the only action that
+		// rewrites a span of PROSE as well as the marker, so acting on a stale
+		// offset destroys the user's text rather than mangling a marker. It is
+		// repeatable once the note catches up; overwritten prose is not.
 		//
-		// Identify by id, not by position. Checking merely that some marker sits
-		// at the cached offset is not enough: if this comment was deleted and a
-		// different one now occupies that spot, that check passes and the revert
-		// overwrites the wrong marker and the wrong line.
-		//
-		// An id-less comment has no stable identity to re-resolve, so there is
-		// no way to tell "still here" from "something else is here now". Refuse
-		// rather than guess. Reject is repeatable once the note catches up;
-		// overwritten prose is not.
-		//
-		// Id-less markers are a supported part of the format, so refusing them
-		// outright would break Reject for them permanently, including from the
-		// live editor where the offsets are perfectly fresh, and reopening the
-		// note cannot conjure an id. For those, fall back to a fingerprint:
-		// require the marker to still be at exactly the cached range AND to
-		// still carry the same category and body. That cannot silently hit a
-		// different comment, because a different comment would have to be
-		// byte-identical and at the same offset, which makes it the same marker
-		// for this purpose.
-		const parsed = parseAll(content);
-		const current = comment.id
-			? parsed.find((c) => c.id === comment.id)
-			: parsed.find(
-					(c) =>
-						c.marker.start === comment.marker.start &&
-						c.marker.end === comment.marker.end &&
-						c.category === comment.category &&
-						c.body === comment.body,
-				);
+		// The identify-or-refuse rule this needs is now freshComment's, shared
+		// with every other verb rather than stated twice. Its comment carries the
+		// reasoning that was worked out here.
+		const current = this.freshComment(content, comment);
 		if (!current) {
-			new Notice(
-				'This comment has moved since it was loaded. Reopen the note and try again.',
-			);
+			this.noticeVanished();
 			return;
 		}
+		// Everything from here reads `current`, never the caller's `comment`
+		// (#12). Re-resolving only the OFFSETS fixed where the write lands; the
+		// marker it wrote was still rebuilt from the snapshot, so a reply that
+		// arrived after the card rendered was dropped by the revert.
+		//
+		// The original prose comes from `current.addressed` too. If the addressed
+		// state is gone, someone accepted or revised this edit in the meantime and
+		// there is nothing left to revert; splicing the snapshot's stored original
+		// over the current line would overwrite prose the user has moved on from.
+		const currentAddressed = current.addressed;
+		if (!currentAddressed || currentAddressed.original === undefined) {
+			new Notice('This edit is no longer awaiting review.');
+			return;
+		}
+
 		const { start: markerStart, end: markerEnd } = current.marker;
 		// Skip the single begin-placement space between the marker and the new
 		// prose, if present.
@@ -219,7 +256,7 @@ export class CommentService {
 			content.charAt(markerEnd) === ' ' ? markerEnd + 1 : markerEnd;
 		const lineEnd = this.endOfLine(content, proseStart);
 
-		const reopened: Comment = { ...comment, addressed: undefined };
+		const reopened: Comment = { ...current, addressed: undefined };
 		const markerText = serialize({
 			id: reopened.id,
 			category: reopened.category,
@@ -233,7 +270,11 @@ export class CommentService {
 
 		await this.applySplices(path, file, [
 			{ from: markerStart, to: markerEnd, insert: markerText },
-			{ from: proseStart, to: lineEnd, insert: addressed.original },
+			{
+				from: proseStart,
+				to: lineEnd,
+				insert: currentAddressed.original,
+			},
 		]);
 		new Notice('Reverted to the original text.');
 	}
@@ -289,13 +330,38 @@ export class CommentService {
 	// Single funnel for parser.serialize + write + index rebuild +
 	// "index-changed" event. Every comment-lifecycle write goes through here so
 	// future callers cannot bypass index rebuild or event emission.
+	//
+	// `apply` receives the marker's CURRENT contents, re-read from the file, and
+	// returns what to write, or undefined to abort without writing. Returns
+	// whether a write happened, so callers can pick the right Notice.
+	//
+	// Taking a transition rather than a finished `next` comment is what fixes
+	// #12. Callers hold a Comment captured when a Hub card was rendered, and
+	// building `{...cached, resolution}` serializes that whole snapshot: its
+	// replies, author, timestamps and addressed state as of render time. A reply
+	// arriving between the card being drawn and the button being pressed was
+	// silently discarded by the next write. Re-resolving offsets, which this
+	// already did, only ever fixed WHERE the write landed, never WHAT it wrote.
+	//
+	// Costs no extra read: the content fetch was already here for the offsets.
+	// On the paths that pass a live marker straight from the editor (the popover,
+	// the at-cursor commands) the re-resolution finds the same object it was
+	// given, so it is a no-op rather than an extra round trip.
 	async replaceMarker(
 		path: string,
 		prev: Comment,
-		next: Comment,
-	): Promise<void> {
+		apply: (current: Comment) => Comment | undefined,
+	): Promise<WriteOutcome> {
 		const file = this.plugin.app.vault.getAbstractFileByPath(path);
-		if (!(file instanceof TFile)) return;
+		if (!(file instanceof TFile)) return 'missing';
+		const content = await this.readCurrentContent(file, path);
+		const current = this.freshComment(content, prev);
+		if (!current) {
+			this.noticeVanished();
+			return 'missing';
+		}
+		const next = apply(current);
+		if (!next) return 'declined';
 		const serialized = serialize({
 			id: next.id,
 			category: next.category,
@@ -307,13 +373,14 @@ export class CommentService {
 			addressed: next.addressed,
 			resolution: next.resolution,
 		});
-		// Re-resolve offsets by id against current content so a stale cached
-		// comment (e.g. from the panel) does not splice the wrong range.
-		const content = await this.readCurrentContent(file, path);
-		const { start, end } = this.freshOffsets(content, prev);
 		await this.applySplices(path, file, [
-			{ from: start, to: end, insert: serialized },
+			{
+				from: current.marker.start,
+				to: current.marker.end,
+				insert: serialized,
+			},
 		]);
+		return 'written';
 	}
 
 	resolvedAuthor(): string {
@@ -346,22 +413,52 @@ export class CommentService {
 		return this.plugin.app.vault.read(file);
 	}
 
-	// Re-resolve a comment's marker offsets against the current file content by
-	// id. Callers (the Thread panel especially) hold a cached comment whose
-	// marker.start/end can be stale if the document changed since the index was
-	// last built; splicing on stale offsets removes the wrong range and leaves
-	// the real marker in place. Matching by id against a fresh parse fixes that.
-	// Falls back to the cached offsets when there is no id or no match.
-	private freshOffsets(
+	// Re-resolve a comment against the current file content, returning the LIVE
+	// marker, or undefined when it can no longer be identified. Callers (the
+	// Thread panel especially) hold a comment cached when a card was rendered:
+	// its marker.start/end can be stale if the document changed since, and so
+	// can everything else about it. Splicing on stale offsets removes the wrong
+	// range; serializing stale contents discards whatever landed in between.
+	//
+	// There is no fallback to the caller's own comment, which is the important
+	// part. An earlier version returned it when the id lookup failed, so a card
+	// for a marker that had since been DELETED wrote at offsets now pointing at
+	// unrelated prose: resolve would overwrite that text with a marker, and
+	// delete would remove it. A failed lookup means "gone", and gone must abort.
+	//
+	// Id-less markers stay supported, because the format supports them and
+	// refusing outright would break them permanently even from the live editor
+	// where offsets are perfectly fresh. They resolve by fingerprint instead:
+	// same range, same category, same body. That cannot land on a different
+	// comment, because a different comment would have to be byte-identical at
+	// the same offset, which makes it the same marker for this purpose.
+	//
+	// This is the predicate rejectAddressed worked out across four review rounds
+	// in PR A; it is shared now rather than written twice.
+	private freshComment(
 		content: string,
 		comment: Comment,
-	): { start: number; end: number } {
+	): Comment | undefined {
+		const parsed = parseAll(content);
 		if (comment.id !== undefined) {
-			const match = parseAll(content).find((c) => c.id === comment.id);
-			if (match)
-				return { start: match.marker.start, end: match.marker.end };
+			return parsed.find((c) => c.id === comment.id);
 		}
-		return { start: comment.marker.start, end: comment.marker.end };
+		return parsed.find(
+			(c) =>
+				c.marker.start === comment.marker.start &&
+				c.marker.end === comment.marker.end &&
+				c.category === comment.category &&
+				c.body === comment.body,
+		);
+	}
+
+	// One message for "the marker this action was aimed at is not there any
+	// more". Repeatable once the note catches up, unlike whatever a stale-offset
+	// write would have destroyed.
+	private noticeVanished(): void {
+		new Notice(
+			'This comment has moved since it was loaded. Reopen the note and try again.',
+		);
 	}
 
 	private buildDeleteSplice(

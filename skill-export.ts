@@ -15,7 +15,10 @@ export type SkillExportTarget = 'claude' | 'agent' | 'both';
 // (begin-placement, addressed flow, forbid marker deletion / unprompted resolve);
 // 3 = full-timestamp stamps (YYYY-MM-DDTHH:MM:SS) so AI-written lines sort in
 // read order alongside the plugin's own timestamped writes (F-280).
-export const SKILL_SCHEMA_VERSION = 3;
+// Bumped to 4 when the `-->` escape was documented. An assistant working from a
+// v3 skill does not know to escape it and will corrupt a note the moment it
+// writes a body containing one, so existing exports have to be flagged stale.
+export const SKILL_SCHEMA_VERSION = 4;
 
 const SKILL_VERSION_RE = /^annoteca-skill-version:\s*(\d+)\s*$/m;
 
@@ -119,6 +122,7 @@ Field rules (match these exactly; the plugin's parser enforces them):
 - Reply: \`[reply <author> <timestamp>]: <inline markdown>\`.
 - Addressed: \`[addressed <author> <timestamp>]: <note>\`, at most one, after the replies and before any \`[resolved ...]\` line. It means "I applied an edit; the reviewer still needs to accept, revise, or reject." When the edit *replaced* prose, store the verbatim old text in a fenced \`annoteca-original\` block on the lines directly after the \`[addressed ...]\` line so the reviewer can reject and auto-revert.
 - Resolved: \`[resolved <author> <timestamp>]: <optional note>\`.
+- **Escaping \`-->\`**: the marker is an HTML comment, so a literal \`-->\` anywhere inside one would end it early, truncating the comment and spilling the rest into the document as visible text. Write it as \`--\\>\` instead, in every free-text field: the body, \`[anchor=]\`, reply bodies, the \`[addressed ...]\` and \`[resolved ...]\` notes, and inside the \`annoteca-original\` fence. The plugin displays \`--\\>\` as \`-->\`. If the text you are storing already contains \`--\\>\`, add one more backslash (\`--\\\\>\`); the rule is that reading removes one backslash from the run, so writing adds one.
 
 ## What to do
 

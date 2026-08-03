@@ -3,6 +3,7 @@ import {
 	convertGenericHtmlComments,
 	convertAllComments,
 } from '../imports';
+import { parseAll } from '../parser';
 
 describe('convertNativeComments', () => {
 	it('converts single-line %%comments%% to annoteca markers', () => {
@@ -61,5 +62,41 @@ describe('convertAllComments', () => {
 		expect(r.converted).toBe(2);
 		expect(r.updated).toContain('annoteca/uncategorized: x');
 		expect(r.updated).toContain('annoteca/uncategorized: y');
+	});
+});
+
+// A `%%...%%` native comment can legitimately contain `-->`, because only `%%`
+// closes it. Interpolating that straight into an HTML comment ended the marker
+// early and spilled the remainder into the document as visible text.
+describe('imports: text containing the marker terminator', () => {
+	it('escapes `-->` from a native comment so the marker survives', () => {
+		const { updated, converted } = convertNativeComments(
+			'Prose %%an arrow --> here%% more.',
+			'note',
+		);
+		expect(converted).toBe(1);
+		expect(updated).toBe(
+			'Prose <!-- annoteca/note: an arrow --\\> here --> more.',
+		);
+		const parsed = parseAll(updated);
+		expect(parsed).toHaveLength(1);
+		expect(parsed[0]?.body).toBe('an arrow --> here');
+	});
+
+	it('leaves the surrounding prose intact', () => {
+		const { updated } = convertNativeComments(
+			'Before %%a --> b%% after.',
+			'note',
+		);
+		expect(updated.startsWith('Before ')).toBe(true);
+		expect(updated.endsWith(' after.')).toBe(true);
+	});
+
+	it('produces the same output as before for text without the sequence', () => {
+		const { updated } = convertNativeComments(
+			'Prose %%plain note%% end.',
+			'note',
+		);
+		expect(updated).toBe('Prose <!-- annoteca/note: plain note --> end.');
 	});
 });

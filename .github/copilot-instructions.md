@@ -36,12 +36,14 @@ All TypeScript source files are in the **root** of the repository (not in a `src
 | `scripture.ts` | Scripture reference formatting |
 | `templates.ts` | Template helpers |
 | `ui-helpers.ts` / `view-utils.ts` | Shared UI utilities |
+| `markdown-render.ts` | The only place that calls `MarkdownRenderer`; owns render-component lifetimes |
 | `platform.ts` | The only place that reads Obsidian's `Platform`; per-platform decisions go through it |
 | `globals.d.ts` | Obsidian API type augmentations (`editor.cm`, `manifest.version`) |
 | `styles.css` | All plugin CSS |
 | `__tests__/` | Jest unit tests |
 | `__mocks__/obsidian.ts` | Minimal Obsidian stub for Jest (no real plugin host) |
 | `scripts/check-submission.mjs` | Obsidian marketplace submission pre-check (runs as part of lint) |
+| `scripts/check-settings-parity.mjs` | Fails when a setting is missing from one of the two settings render paths (runs as part of lint) |
 | `docs/pandoc-annoteca.lua` | Pandoc Lua filter that strips markers at export time |
 | `esbuild.config.mjs` | esbuild config; dev build auto-copies artifacts into a sibling `obs-test-vault` if it exists |
 | `version-bump.mjs` | Bumps version in `manifest.json` and `versions.json` |
@@ -54,7 +56,8 @@ All TypeScript source files are in the **root** of the repository (not in a `src
 npm install          # install all dependencies
 npm run dev          # dev build with file watching (auto-copies to obs-test-vault if present)
 npm run build        # TypeScript type-check (noEmit) + esbuild production bundle → main.js
-npm run lint         # ESLint (zero warnings allowed) + prettier --check "**/*.ts" + scripts/check-submission.mjs
+npm run lint         # ESLint (zero warnings allowed) + prettier --check "**/*.ts"
+                     #   + scripts/check-submission.mjs + scripts/check-settings-parity.mjs
 npm test             # Jest unit tests
 ```
 
@@ -109,8 +112,8 @@ it landed as a shock to the whole team
 - ID: 8-character lowercase base36 string.
 - Anchor text: up to 80 visible characters; mid-truncated with `…` when longer.
 - Replies are sorted chronologically by timestamp on read; file order is the tiebreak for equal timestamps.
-- The `-->` sequence must never appear inside an `annoteca-original` fence (it would close the HTML comment wrapper).
-- Forward-compatibility: unrecognized bracket-shaped trailing lines (`[unknown ...]`) are silently ignored by the parser.
+- The `-->` sequence cannot appear literally in any free-text field, because it closes the HTML comment wrapper. `parser.ts` escapes it as `--\>` on write and restores it on read, for the body, `[anchor=...]`, reply bodies, the addressed and resolved notes, and the `annoteca-original` fence. Anything that writes a marker must go through `serialize()`; do not hand-build one.
+- Forward-compatibility: a trailing line in a shape the format defines but this version does not recognize is ignored by the parser. That means exactly two shapes, `[key=value]` alone on the line, and `[key <author> <timestamp>]:`, where key is `[a-z][a-z0-9-]*`. **Not** "any line starting with `[`": bodies are markdown, and `[label](url)`, `[ref]: url`, `[^1]: note` and `[[Wikilink]]` all begin with a bracket. Treating those as structured deleted the last line of the body. When a trailing line is ambiguous, keep it in the body: lost prose is unrecoverable, an unparsed structured line is merely visible.
 
 ---
 
@@ -164,6 +167,12 @@ Worked example: category reordering. Move up / move down buttons render everywhe
 
 Settings tab section headings must not contain the words "settings", "options", "general", or the plugin name ("Annoteca").
 
+### Every setting row goes in BOTH render paths
+
+`minAppVersion` is 1.8.7, so both are live: `getSettingDefinitions()` for Obsidian 1.13+, and `renderImperativeSettings()` for everything older. A row added to one is invisible to half the supported range, and the dev vault runs 1.13.x, so testing by hand only ever exercises the declarative path.
+
+`npm run lint` runs `scripts/check-settings-parity.mjs`, which fails when a key appears in one path and not the other, or in `DEFAULT_SETTINGS` with no row at all. A key that genuinely has no plain row (bespoke UI, or persisted state) goes in that script's `NO_PLAIN_ROW` list with a reason.
+
 ---
 
 ## Adding or editing tests
@@ -205,8 +214,11 @@ Releases are triggered by pushing a version tag. The release workflow:
 
 - **Marker format changes must be reflected in `parser.ts`** (the source of truth). Updating the format in one place and not the other will cause silent data loss or parse failures.
 - **Category name rules are strict.** An invalid category name silently fails to match the parser regex and markers with that category will not be indexed.
-- **`-->` inside an `annoteca-original` fence closes the HTML comment.** The caller must ensure the captured prose does not contain `-->`. Check `comment-service.ts` for how existing code handles this.
-- **Stale marker positions.** Operations triggered from the side panel should re-resolve the marker by its `id` against current file content before editing, not use a cached `marker.start/end`. See `comment-service.ts` for the pattern.
+- **`-->` is escaped by `serialize()`, not forbidden.** Every free-text field round-trips through `escapeTerminator` / `unescapeTerminator` in `parser.ts`. Do not add a caller-side check that rejects `-->`, and do not write a marker without going through `serialize()`.
+- **Stale marker snapshots, not just stale positions.** A panel card holds the `Comment` captured when it was drawn. Re-resolving the marker's `id` for its OFFSETS is necessary but not sufficient: building the write from the cached object serializes its replies, author, timestamps, and addressed state as of render time, silently discarding anything that landed in between. `replaceMarker` in `comment-service.ts` therefore takes a TRANSITION (`current => next`) applied to the freshly re-read comment, and returns whether it wrote so the caller can pick the right Notice. Add new lifecycle verbs that way; do not reintroduce a `next`-shaped parameter.
+- **Comment text renders as markdown through one entry point.** `markdown-render.ts` owns it. Never call `MarkdownRenderer.render` directly from a surface. Two rules go with it: the inline body widget in `decorations.ts` stays plain `textContent` (rendered headings and lists repeated at every marker destroy the document's layout, which is the opposite of what that feature is for), and the `annoteca-original` text stays plain everywhere (it is the verbatim prose Reject would restore, so it must be shown as what would be written back, not as what it renders to).
+- **Every ephemeral markdown surface needs a `Component` that is later unloaded.** `MarkdownRenderer.render` attaches child components for embeds and code-block processors. A CodeMirror tooltip gets one per instance, unloaded in its `destroy` hook; the Hub panel cycles one per render pass via `cycleLifetime`. Passing a long-lived component (the plugin, the view) leaks on every hover and every panel refresh.
+- **Markdown renders asynchronously, and CodeMirror tooltips size themselves synchronously.** A popover built with `create()` is measured and positioned before an async render lands, so it ends up mis-sized and visibly misplaced above its anchor. Call `repositionTooltips(view)` once the render settles; that is what the host's `onRendered` hook is for.
 - **Anything the editor decorations read must be a declared CodeMirror dependency, or it will not repaint.** `EditorView.decorations.compute(deps, ...)` only re-runs when one of `deps` changes. A module-level flag or a value reached through `ctx.getSettings()` is invisible to that machinery, so changing it appears to do nothing until an unrelated edit or click recomputes the facet for some other reason. Focusing the editor is not enough. This has bitten three times: hide-all, inline comment bodies, and every editor-indicator setting. The pattern is in `decorations.ts`: mirror the value into a `StateField`, list that field in `deps`, and dispatch an effect into every view in `liveViews`. Settings are already covered wholesale by `refreshDecorationsEverywhere()`, which `saveSettings` calls.
 - **A command must not re-derive the drawing code's conditions.** If a command needs to know whether pressing it would produce anything visible, ask a predicate that lives beside the drawing code (see `inlineBodiesBlockedBy` in `decorations.ts`). Enumerating the gates at the call site drifts the moment a new early return is added to `decorationsCompute`.
 - **`npm run lint` runs `scripts/check-submission.mjs`** in addition to ESLint. That script checks manifest description constraints, `!important` in CSS, and ESLint directive hygiene. Read it before adding new lint suppressions.

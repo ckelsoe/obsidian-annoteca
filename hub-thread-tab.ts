@@ -24,6 +24,12 @@ import {
 	renderCategoryBadge,
 	renderStarButton,
 } from './ui-helpers';
+import {
+	renderCommentMarkdown,
+	cycleLifetime,
+	type MarkdownLifetime,
+	type MarkdownRenderHost,
+} from './markdown-render';
 
 // Thread-tab class names for the shared reply-row renderer (ui-helpers). Author
 // and date spans stay unclassed here, matching the prior inline markup; tinting
@@ -52,6 +58,11 @@ export class ThreadTabRenderer {
 	// when the selection actually changed, not on every refresh.
 	private activeCardEl: HTMLElement | undefined;
 	private lastScrolledActiveKey: string | undefined;
+	// Owns the markdown renders of the CURRENT pass only. The panel re-renders
+	// on every index-changed event, which on an active vault is constant, and
+	// each pass empties the container; without cycling this, every render's
+	// children would stay loaded for the life of the vault.
+	private markdownLifetime: MarkdownLifetime | undefined;
 
 	constructor(
 		private readonly plugin: AnnotecaPlugin,
@@ -59,7 +70,30 @@ export class ThreadTabRenderer {
 		private readonly refresh: () => void,
 	) {}
 
+	// Unloads the current render's markdown lifetime. Called when the hub view
+	// closes; without it the last pass stays loaded after the panel is gone.
+	dispose(): void {
+		this.markdownLifetime?.unload();
+		this.markdownLifetime = undefined;
+	}
+
+	// A render host bound to one card's file. Built per card rather than per
+	// pass because a folder or vault scope shows comments from several files at
+	// once, and a wikilink in a body has to resolve against the note the comment
+	// lives in, not against whatever is active in the editor.
+	private markdownHost(path: string): MarkdownRenderHost | undefined {
+		const lifetime = this.markdownLifetime;
+		if (!lifetime) return undefined;
+		return {
+			app: this.app,
+			component: lifetime,
+			sourcePath: path,
+			enabled: this.plugin.settings.renderMarkdownBodies,
+		};
+	}
+
 	render(container: HTMLElement): void {
+		this.markdownLifetime = cycleLifetime(this.markdownLifetime);
 		this.renderScopeToolbar(container);
 
 		const scopeFiles = this.plugin.computeScopeFiles();
@@ -546,10 +580,12 @@ export class ThreadTabRenderer {
 		const expandedSection = card.createDiv({
 			cls: 'annoteca-reviewer-expanded',
 		});
-		expandedSection.createDiv({
-			cls: 'annoteca-reviewer-body',
-			text: c.body,
-		});
+		const host = this.markdownHost(path);
+		renderCommentMarkdown(
+			expandedSection.createDiv({ cls: 'annoteca-reviewer-body' }),
+			c.body,
+			host,
+		);
 
 		if (c.resolution) {
 			const res = expandedSection.createDiv({
@@ -559,10 +595,13 @@ export class ThreadTabRenderer {
 				text: `Resolved ${formatStamp(c.resolution.date)} by ${c.resolution.author}`,
 			});
 			if (c.resolution.note) {
-				res.createDiv({
-					cls: 'annoteca-reviewer-resolution-note',
-					text: c.resolution.note,
-				});
+				renderCommentMarkdown(
+					res.createDiv({
+						cls: 'annoteca-reviewer-resolution-note',
+					}),
+					c.resolution.note,
+					host,
+				);
 			}
 		}
 
@@ -577,16 +616,22 @@ export class ThreadTabRenderer {
 				text: `Addressed ${formatStamp(c.addressed.date)} by ${c.addressed.author}`,
 			});
 			if (c.addressed.note) {
-				addr.createDiv({
-					cls: 'annoteca-reviewer-addressed-note',
-					text: c.addressed.note,
-				});
+				renderCommentMarkdown(
+					addr.createDiv({
+						cls: 'annoteca-reviewer-addressed-note',
+					}),
+					c.addressed.note,
+					host,
+				);
 			}
 			if (c.addressed.original !== undefined) {
 				addr.createDiv({
 					cls: 'annoteca-reviewer-addressed-original-label',
 					text: 'Original text',
 				});
+				// Plain text on purpose, matching the popover: this is the
+				// verbatim prose Reject would restore, so it must be shown as
+				// what would be written back, not as what it renders to.
 				addr.createDiv({
 					cls: 'annoteca-reviewer-addressed-original',
 					text: c.addressed.original,
@@ -600,8 +645,12 @@ export class ThreadTabRenderer {
 			});
 			thread.createEl('h5', { text: 'Replies' });
 			for (const r of c.replies) {
-				renderReplyRow(thread, r, THREAD_REPLY_CLASSES, (el, tag) =>
-					this.applyAuthorColor(el, tag),
+				renderReplyRow(
+					thread,
+					r,
+					THREAD_REPLY_CLASSES,
+					(el, tag) => this.applyAuthorColor(el, tag),
+					host,
 				);
 			}
 		}
@@ -658,18 +707,46 @@ export class ThreadTabRenderer {
 			cls: 'annoteca-reply-submit',
 			text: 'Reply',
 		});
+		// Single-flight, matching the popover composer. The write is asynchronous
+		// and can be refused, so without this a second press starts a second
+		// append against the same snapshot and posts the reply twice.
+		let pending = false;
 		submitBtn.addEventListener('click', () => {
+			if (pending) return;
 			const body = textarea.value.trim();
 			if (body === '') {
 				new Notice('Reply is empty.');
 				return;
 			}
 			const author = authorSelect.value.trim() || defaultAuthor;
+			pending = true;
+			submitBtn.disabled = true;
+			textarea.readOnly = true;
+			const release = (): void => {
+				pending = false;
+				submitBtn.disabled = false;
+				textarea.readOnly = false;
+			};
 			void this.plugin
 				.appendReply(c, { author, date: nowISO(), body })
-				.then(() => {
+				.then((wrote) => {
+					// Keep what the user typed when the write was refused. The
+					// draft is the only copy of it at that point.
+					if (!wrote) {
+						release();
+						return;
+					}
 					textarea.value = '';
 					if (c.id) this.plugin.clearDraft(c.id);
+					release();
+				})
+				.catch(() => {
+					// A vault read or write can reject on an adapter or transient
+					// I/O error. Without this the button stays disabled with the
+					// user's text trapped behind it, and the rejection surfaces as
+					// an unhandled promise.
+					release();
+					new Notice('Could not save the reply. Try again.');
 				});
 		});
 	}

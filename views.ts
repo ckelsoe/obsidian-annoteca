@@ -399,6 +399,14 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 		this.registerEvent(
 			this.plugin.events.on('index-changed', () => this.refresh()),
 		);
+		// The panel reads display settings (markdown rendering, among others)
+		// only while rendering, so a setting changed with the panel open leaves
+		// every card as it was until some unrelated event happens to refresh.
+		// The editor half of this is already handled by
+		// refreshDecorationsEverywhere(); this is the panel half.
+		this.registerEvent(
+			this.plugin.events.on('settings-changed', () => this.refresh()),
+		);
 		this.registerEvent(
 			this.plugin.events.on('starred-changed', () => {
 				if (this.activeTab === 'starred' || this.activeTab === 'thread')
@@ -427,6 +435,9 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 		// F-276: dropping the panel deselects the active comment, so clear its
 		// editor highlight. The marker decorations themselves are untouched.
 		this.plugin.clearActiveCommentHighlight();
+		// Unload the last render's markdown lifetime. contentEl.empty() in
+		// super.onClose() removes the DOM but not the components attached to it.
+		this.threadRenderer.dispose();
 		await super.onClose();
 	}
 
@@ -439,6 +450,13 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 
 	private refresh(): void {
 		const container = this.contentEl;
+		// Unload the previous pass's markdown renders before the DOM they are
+		// attached to goes away. Switching to Outline or Starred empties the
+		// Thread DOM without rendering Thread again, so without this its embeds
+		// and post-processors stay live against detached elements for as long as
+		// the user stays on the other tab. Rendering Thread immediately creates a
+		// fresh lifetime, so this is safe on every path.
+		this.threadRenderer.dispose();
 		container.empty();
 		container.addClass('annoteca-hub-root');
 

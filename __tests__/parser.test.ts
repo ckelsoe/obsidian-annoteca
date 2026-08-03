@@ -675,3 +675,257 @@ describe('parser: nowISO', () => {
 		expect(todayISO(new Date(2026, 4, 25, 9, 7, 3))).toBe('2026-05-25');
 	});
 });
+
+// The rule that used to sit here matched any line starting `[`, so the last
+// line of a body was deleted whenever it began with a bracket. Markdown is full
+// of bracket-leading constructs and Obsidian's wikilink is one, which makes this
+// reachable from ordinary prose rather than from a crafted edge case.
+describe('parser: bracket-leading markdown at the end of a body', () => {
+	const bodyEndingWith = (lastLine: string): string | undefined =>
+		parseAll(
+			[
+				'<!-- annoteca/note: Some prose.',
+				lastLine,
+				'[id=abc12345]',
+				'-->',
+			].join('\n'),
+		)[0]?.body;
+
+	it('keeps an inline markdown link', () => {
+		expect(bodyEndingWith('[the guide](https://example.com/guide)')).toBe(
+			'Some prose.\n[the guide](https://example.com/guide)',
+		);
+	});
+
+	it('keeps a single-word reference-style link definition', () => {
+		expect(bodyEndingWith('[ref]: https://example.com')).toBe(
+			'Some prose.\n[ref]: https://example.com',
+		);
+	});
+
+	// The nastiest case: multi-word label plus `]:` looks exactly like the
+	// `[keyword ...]:` note lines the format defines. Disambiguated by requiring
+	// a timestamp, which every real note line carries.
+	it('keeps a multi-word reference-style link definition', () => {
+		expect(bodyEndingWith('[see the docs]: https://example.com')).toBe(
+			'Some prose.\n[see the docs]: https://example.com',
+		);
+	});
+
+	it('keeps a footnote definition', () => {
+		expect(bodyEndingWith('[^1]: a footnote')).toBe(
+			'Some prose.\n[^1]: a footnote',
+		);
+	});
+
+	it('keeps an Obsidian wikilink', () => {
+		expect(bodyEndingWith('[[Some Note]]')).toBe(
+			'Some prose.\n[[Some Note]]',
+		);
+	});
+
+	it('keeps a task-list-shaped line', () => {
+		expect(bodyEndingWith('[x] done')).toBe('Some prose.\n[x] done');
+	});
+
+	it('still drops an unknown [key=value] line (forward-compat)', () => {
+		expect(bodyEndingWith('[priority=high]')).toBe('Some prose.');
+	});
+
+	it('still drops an unknown stamped keyword line (forward-compat)', () => {
+		expect(bodyEndingWith('[assigned bob 2026-06-20]: take a look')).toBe(
+			'Some prose.',
+		);
+	});
+});
+
+// `-->` closes the HTML comment wrapping every marker. Before the escape it
+// serialized raw, so the marker ended early and the remainder of the body was
+// left behind as visible text in the user's document.
+describe('parser: `-->` in free text round-trips', () => {
+	const roundTrip = (
+		c: Parameters<typeof serialize>[0],
+	): Comment | undefined => parseAll(serialize(c))[0];
+
+	it('survives in a single-line body', () => {
+		const out = serialize({ category: 'note', body: 'arrow --> here' });
+		expect(out).toBe('<!-- annoteca/note: arrow --\\> here -->');
+		expect(parseAll(out)).toHaveLength(1);
+		expect(parseAll(out)[0]?.body).toBe('arrow --> here');
+	});
+
+	it('survives in a multi-line body', () => {
+		const c = roundTrip({
+			category: 'note',
+			body: 'line one\narrow --> here',
+			id: 'abc12345',
+		});
+		expect(c?.body).toBe('line one\narrow --> here');
+	});
+
+	it('survives in a reply body', () => {
+		const c = roundTrip({
+			category: 'note',
+			body: 'body',
+			replies: [{ author: 'bob', date: '2026-06-20', body: 'a --> b' }],
+		});
+		expect(c?.replies[0]?.body).toBe('a --> b');
+	});
+
+	it('survives in a resolution note', () => {
+		const c = roundTrip({
+			category: 'note',
+			body: 'body',
+			resolution: { author: 'bob', date: '2026-06-20', note: 'a --> b' },
+		});
+		expect(c?.resolution?.note).toBe('a --> b');
+	});
+
+	it('survives in an addressed note and its original fence', () => {
+		const c = roundTrip({
+			category: 'note',
+			body: 'body',
+			addressed: {
+				author: 'claude',
+				date: '2026-06-20',
+				note: 'changed a --> b',
+				original: 'the old a --> b text',
+			},
+		});
+		expect(c?.addressed?.note).toBe('changed a --> b');
+		expect(c?.addressed?.original).toBe('the old a --> b text');
+	});
+
+	it('survives in an anchor', () => {
+		const c = roundTrip({
+			category: 'note',
+			body: 'body',
+			anchor: { text: 'points --> there', truncated: false },
+		});
+		expect(c?.anchor?.text).toBe('points --> there');
+	});
+
+	it('emits exactly one `-->` per marker, the terminator', () => {
+		const out = serialize({
+			category: 'note',
+			body: 'a --> b\nc --> d',
+			id: 'abc12345',
+			replies: [{ author: 'bob', date: '2026-06-20', body: 'e --> f' }],
+			resolution: { author: 'bob', date: '2026-06-21', note: 'g --> h' },
+		});
+		expect(out.split('-->')).toHaveLength(2);
+		expect(out.endsWith('\n-->')).toBe(true);
+	});
+
+	it('leaves text without the sequence untouched', () => {
+		const out = serialize({ category: 'note', body: 'a -> b and a --- c' });
+		expect(out).toBe('<!-- annoteca/note: a -> b and a --- c -->');
+	});
+});
+
+// The escape marker has to survive round-tripping too, or a body that already
+// contained the literal `--\>` comes back with the backslash silently removed.
+// Worst in the annoteca-original fence, whose contract is a VERBATIM restore.
+describe('parser: the `-->` escape is reversible at every depth', () => {
+	const roundTripBody = (body: string): string | undefined =>
+		parseAll(serialize({ category: 'note', body, id: 'abc12345' }))[0]
+			?.body;
+
+	it('round-trips a literal --\\> written by the user', () => {
+		expect(roundTripBody('a --\\> b')).toBe('a --\\> b');
+	});
+
+	it('round-trips a literal --\\\\> written by the user', () => {
+		expect(roundTripBody('a --\\\\> b')).toBe('a --\\\\> b');
+	});
+
+	it('round-trips the real terminator and a literal escape side by side', () => {
+		expect(roundTripBody('real --> and literal --\\> together')).toBe(
+			'real --> and literal --\\> together',
+		);
+	});
+
+	it('keeps an annoteca-original fence verbatim', () => {
+		const original = 'He said --> and she wrote --\\> in reply.';
+		const out = serialize({
+			category: 'note',
+			body: 'body',
+			addressed: {
+				author: 'claude',
+				date: '2026-06-20',
+				note: 'edited',
+				original,
+			},
+		});
+		expect(parseAll(out)[0]?.addressed?.original).toBe(original);
+	});
+
+	it('never emits a bare terminator inside the marker', () => {
+		const out = serialize({
+			category: 'note',
+			body: 'a --> b --\\> c --\\\\> d',
+			id: 'abc12345',
+		});
+		expect(out.split('-->')).toHaveLength(2);
+	});
+});
+
+// Bounding the one case the escape cannot disambiguate: a marker written by a
+// version that predates it, whose text legitimately contains a literal `--\>`.
+// There is no sentinel in the old format, so a reader cannot tell that from an
+// encoded terminator. What matters is how far the consequence actually reaches.
+describe('parser: legacy markers containing a literal --\\>', () => {
+	const legacy = [
+		'<!-- annoteca/note: an escaped arrow --\\> written before encoding existed',
+		'[id=legacy01]',
+		'-->',
+	].join('\n');
+
+	it('reads one backslash off, which is the known limitation', () => {
+		expect(parseAll(legacy)[0]?.body).toBe(
+			'an escaped arrow --> written before encoding existed',
+		);
+	});
+
+	// The important half: parse + re-serialize is a fixed point, so merely
+	// opening a vault does not rewrite anyone's files, and repeated edits do not
+	// walk the text further with each pass.
+	it('round-trips byte-identically, so the file is never rewritten', () => {
+		const parsed = parseAll(legacy)[0];
+		expect(parsed).toBeDefined();
+		if (!parsed) return;
+		expect(
+			serialize({
+				id: parsed.id,
+				category: parsed.category,
+				body: parsed.body,
+				date: parsed.date,
+				author: parsed.author,
+				anchor: parsed.anchor,
+				replies: parsed.replies,
+				addressed: parsed.addressed,
+				resolution: parsed.resolution,
+			}),
+		).toBe(legacy);
+	});
+
+	it('is stable across repeated parse/serialize passes', () => {
+		let text = legacy;
+		for (let i = 0; i < 5; i++) {
+			const c = parseAll(text)[0];
+			if (!c) throw new Error('lost the marker');
+			text = serialize({
+				id: c.id,
+				category: c.category,
+				body: c.body,
+				date: c.date,
+				author: c.author,
+				anchor: c.anchor,
+				replies: c.replies,
+				addressed: c.addressed,
+				resolution: c.resolution,
+			});
+		}
+		expect(text).toBe(legacy);
+	});
+});

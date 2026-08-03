@@ -118,6 +118,16 @@ export interface AnnotecaSettings {
 	// replies shows nothing either way: a "0" on the common case is noise.
 	markerReplyCount: boolean;
 
+	// When true (default), comment bodies, replies and notes render as markdown
+	// in the popover and the Hub panel instead of showing their source. `body`
+	// has been documented as freeform inline markdown since the format was
+	// written, and AI assistants emit markdown by default, so leaving it as
+	// source was the common case rather than the exception.
+	//
+	// Does NOT affect the inline body widget in the editor, which stays plain
+	// truncated text on purpose. See markdown-render.ts.
+	renderMarkdownBodies: boolean;
+
 	// Visual character of the anchor underline. Applies to every category;
 	// per-category urgency comes from the tier on each CategoryDefinition.
 	anchorStyle: 'solid' | 'wavy' | 'dotted' | 'dashed';

@@ -4,6 +4,8 @@
 // a second suite needed the same eighteen no-op members; the only thing the two
 // callers differ on is how settings are supplied, so that is the one parameter.
 
+import type { App } from 'obsidian';
+
 import type { DecorationContext } from '../decorations';
 import type { AnnotecaSettings, CategoryDefinition } from '../types';
 
@@ -15,6 +17,11 @@ export function stubDecorationContext(
 ): DecorationContext {
 	const noop = () => undefined;
 	return {
+		// Never dereferenced by these suites: they assert on decoration ranges
+		// and facet dependencies, and the only thing that touches `app` is
+		// MarkdownRenderer inside the popover, which no test builds.
+		app: {} as App,
+		getSourcePath: () => '',
 		getSettings,
 		onMarkerClick: noop,
 		openInReviewer: noop,
@@ -29,7 +36,9 @@ export function stubDecorationContext(
 		reviseAddressed: noop,
 		rejectAddressed: noop,
 		copyPermalink: noop,
-		submitReply: noop,
+		// Reports "written" so the double never looks like a refused write to a
+		// test that does exercise the composer.
+		submitReply: () => Promise.resolve(true),
 		getAuthorTag: () => 'ck',
 		getAuthorOptions: () => ['ck'],
 		authorColor: () => undefined,

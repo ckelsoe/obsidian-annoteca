@@ -97,6 +97,13 @@ export default class AnnotecaPlugin extends Plugin {
 
 		this.registerEditorExtension(
 			buildAnnotecaExtension({
+				app: this.app,
+				// The note the popover's comment lives in, for resolving
+				// relative links and wikilinks in a rendered body. The editor
+				// extension is per-leaf but the context is built once, so this
+				// reads the active file at render time rather than capturing it.
+				getSourcePath: () =>
+					this.app.workspace.getActiveFile()?.path ?? '',
 				getSettings: () => this.settings,
 				onMarkerClick: (m) => this.openReviewerOnComment(m),
 				openInReviewer: (m) => this.openReviewerOnComment(m),
@@ -128,9 +135,8 @@ export default class AnnotecaPlugin extends Plugin {
 				copyPermalink: (m) => {
 					void this.copyCommentId(m);
 				},
-				submitReply: (m, body, author) => {
-					void this.submitReplyFromPopup(m, body, author);
-				},
+				submitReply: (m, body, author) =>
+					this.submitReplyFromPopup(m, body, author),
 				getAuthorTag: () => this.comments.resolvedAuthor(),
 				getAuthorOptions: () => this.authorPickerOptions([]),
 				authorColor: (tag) => this.authorColor(tag),
@@ -269,6 +275,15 @@ export default class AnnotecaPlugin extends Plugin {
 				loaded?.markerClickAction,
 				isMobile(),
 			),
+			// data.json is user-editable and also arrives over sync, so a stored
+			// value is not guaranteed to be the type it was written as. The
+			// spread would take a string "false" verbatim, and every read of
+			// this setting is a truthiness test, so a disabled setting would
+			// come back on. Fall back to the default for anything non-boolean.
+			renderMarkdownBodies:
+				typeof loaded?.renderMarkdownBodies === 'boolean'
+					? loaded.renderMarkdownBodies
+					: DEFAULT_SETTINGS.renderMarkdownBodies,
 		};
 
 		// Migrate legacy indicatorStyle values. Prior to the underline rewrite,
@@ -965,8 +980,8 @@ export default class AnnotecaPlugin extends Plugin {
 		return this.comments.deleteAllResolvedInFile(path);
 	}
 
-	async appendReply(comment: Comment, reply: Reply): Promise<void> {
-		await this.comments.appendReply(comment, reply);
+	async appendReply(comment: Comment, reply: Reply): Promise<boolean> {
+		return this.comments.appendReply(comment, reply);
 	}
 
 	async toggleResolutionFromPopup(comment: Comment): Promise<void> {
@@ -1029,21 +1044,27 @@ export default class AnnotecaPlugin extends Plugin {
 		await this.comments.rejectAddressed(path, comment);
 	}
 
+	// Returns whether the reply was written, so the popup composer knows not to
+	// clear the draft and close when the write was refused.
 	async submitReplyFromPopup(
 		comment: Comment,
 		body: string,
 		author?: string,
-	): Promise<void> {
+	): Promise<boolean> {
 		const trimmed = body.trim();
-		if (trimmed.length === 0) return;
+		if (trimmed.length === 0) return false;
 		const tag = (author ?? '').trim();
 		const reply: Reply = {
 			author: tag !== '' ? tag : this.comments.resolvedAuthor(),
 			date: todayISO(),
 			body: trimmed,
 		};
-		await this.comments.appendReply(comment, reply);
-		new Notice('Reply added.');
+		// Only claim success when something was written. A refused write has
+		// already explained itself with its own notice, and the composer keeps
+		// the text so the user can retry once the note catches up.
+		const wrote = await this.comments.appendReply(comment, reply);
+		if (wrote) new Notice('Reply added.');
+		return wrote;
 	}
 
 	// Author picker options (F-274): the global author tag, the configured

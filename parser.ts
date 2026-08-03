@@ -47,6 +47,30 @@ const RESOLVED_LINE_RE = new RegExp(
 	`^\\s*\\[resolved\\s+([^\\s\\]<>]{1,32})\\s+(${STAMP_SRC})\\]:\\s?([\\s\\S]*)$`,
 );
 
+// Forward-compatibility shapes for trailing lines this version does not know
+// (per data-format.md Migration: ignore unknown structured trailing lines
+// rather than failing). Deliberately narrow, and narrower than they could be.
+//
+// The rule these replace matched ANY line starting `[...]`, which silently ate
+// the last line of a body whenever it began with a bracket. Markdown is full of
+// bracket-leading constructs, and Obsidian's own wikilink is one, so a body
+// ending in `[the guide](url)`, `[ref]: url`, `[^1]: note` or `[[Some Note]]`
+// lost that line on the next parse with nothing to show the user.
+//
+// The two shapes below mirror the ones the format actually defines: a
+// `[key=value]` line (id, date, author, anchor) and a `[key <author> <stamp>]:`
+// note line (reply, addressed, resolved). Anything else stays in the body.
+//
+// The asymmetry is on purpose. Guessing "structured" on an ambiguous line
+// deletes prose and cannot be undone from the file; guessing "body" on a real
+// future structured line leaves it visible as text, which is ugly but recovers
+// as soon as a version that understands it reads the marker. Prefer the
+// recoverable failure.
+const UNKNOWN_KV_LINE_RE = /^\s*\[[a-z][a-z0-9-]*=[^\]\r\n]*\]\s*$/;
+const UNKNOWN_STAMPED_LINE_RE = new RegExp(
+	`^\\s*\\[[a-z][a-z0-9-]*\\s+[^\\s\\]<>]{1,32}\\s+${STAMP_SRC}\\]:`,
+);
+
 // The lossless-original fence (F-271): a fenced block tagged annoteca-original
 // inside the [addressed ...] note, holding the verbatim pre-edit text. Matched
 // as whole lines (m flag); group 1 is the verbatim original. Tolerates CRLF and
@@ -61,6 +85,66 @@ export const ANCHOR_MAX_CHARS = 80;
 const ANCHOR_ELLIPSIS = '…';
 
 const ID_BASE36_ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyz';
+
+// `-->` closes the HTML comment that wraps every marker, so it is the one
+// sequence no free-text field can hold literally (data-format.md: "the only
+// forbidden inner sequence is `-->`"). Nothing used to enforce that: a body
+// containing it serialized to `<!-- annoteca/note: arrow --> here -->`, which
+// re-parsed as the body "arrow" and left ` here -->` behind as visible text in
+// the user's document.
+//
+// Escaped on write and restored on read, so the format is closed under
+// arbitrary user text instead of forbidding a sequence and hoping. `--\>` is
+// the escape because a backslash before `>` is markdown's own escape, so the
+// stored form renders as `-->` wherever a body is rendered as markdown, and
+// reads as intended even in the plain-text surfaces.
+//
+// The escape marker is itself escaped, which is what makes this reversible
+// rather than merely lossy in a rare case. A body can legitimately already
+// contain the literal text `--\>`, and a naive decode would hand it back as
+// `-->`, silently rewriting the user's characters. That matters most in the
+// `annoteca-original` fence, whose whole contract is that Reject restores the
+// prose VERBATIM.
+//
+// So the rule is on the run of backslashes: writing adds one, reading removes
+// one. `-->` <-> `--\>`, `--\>` <-> `--\\>`, and so on, which is a bijection at
+// every depth. Escaping only ever ADDS backslashes, so it can never manufacture
+// a new `-->` and can never fail to remove an existing one.
+//
+// An older plugin reading a file written by this one shows the literal `--\>`
+// rather than losing the line, which is the degradation the format's Migration
+// section asks for.
+//
+// KNOWN LIMITATION, accepted deliberately. A marker written BEFORE this encoding
+// existed whose text legitimately contained `--\>` is indistinguishable from an
+// encoded terminator, because the old format carries no sentinel. Such a body
+// reads back with one backslash removed.
+//
+// The blast radius is small and it is pinned by tests. Decoding on read and
+// encoding on write are inverses, so parse + serialize is a FIXED POINT: an
+// affected file is never rewritten by opening a vault, and repeated edits do not
+// walk the text further on each pass. What actually differs is the displayed
+// text, and the prose Reject restores, by that one character.
+//
+// The alternative is a version sentinel in the format, which means a breaking
+// change and the migration machinery data-format.md requires for one. That is
+// not worth it against a corruption bug that loses whole lines today.
+const TERMINATOR_RUN_RE = /--(\\*)>/g;
+const ESCAPED_RUN_RE = /--(\\+)>/g;
+
+function escapeTerminator(text: string): string {
+	return text.replace(
+		TERMINATOR_RUN_RE,
+		(_match, slashes: string) => `--\\${slashes}>`,
+	);
+}
+
+function unescapeTerminator(text: string): string {
+	return text.replace(
+		ESCAPED_RUN_RE,
+		(_match, slashes: string) => `--${slashes.slice(1)}>`,
+	);
+}
 
 interface RawMarker {
 	start: number;
@@ -113,7 +197,7 @@ function parseInnerContent(inner: string): ParsedTail {
 		fenceMatch[1] !== undefined &&
 		fenceMatch.index !== undefined
 	) {
-		originalText = fenceMatch[1];
+		originalText = unescapeTerminator(fenceMatch[1]);
 		const before = inner.slice(0, fenceMatch.index).replace(/\r?\n$/, '');
 		const after = inner.slice(fenceMatch.index + fenceMatch[0].length);
 		stripped = before + after;
@@ -162,7 +246,7 @@ function parseInnerContent(inner: string): ParsedTail {
 
 		const anchorMatch = ANCHOR_LINE_RE.exec(line);
 		if (anchorMatch && anchorMatch[1] !== undefined) {
-			const raw = anchorMatch[1];
+			const raw = unescapeTerminator(anchorMatch[1]);
 			const truncated = raw.includes(ANCHOR_ELLIPSIS);
 			anchor = { text: raw, truncated };
 			bodyEndExclusive = i;
@@ -178,7 +262,7 @@ function parseInnerContent(inner: string): ParsedTail {
 			replies.push({
 				author: replyMatch[1],
 				date: replyMatch[2],
-				body: replyMatch[3] ?? '',
+				body: unescapeTerminator(replyMatch[3] ?? ''),
 			});
 			bodyEndExclusive = i;
 			continue;
@@ -194,7 +278,7 @@ function parseInnerContent(inner: string): ParsedTail {
 				addressed = {
 					author: addressedMatch[1],
 					date: addressedMatch[2],
-					note: addressedMatch[3] ?? '',
+					note: unescapeTerminator(addressedMatch[3] ?? ''),
 					original: originalText,
 				};
 			}
@@ -212,19 +296,22 @@ function parseInnerContent(inner: string): ParsedTail {
 				resolution = {
 					author: resolvedMatch[1],
 					date: resolvedMatch[2],
-					note: resolvedMatch[3] ?? '',
+					note: unescapeTerminator(resolvedMatch[3] ?? ''),
 				};
 			}
 			bodyEndExclusive = i;
 			continue;
 		}
 
-		// Forward-compatibility: bracket-shaped trailing lines we do not
-		// recognize are still treated as structured (per data-format.md
-		// Migration: ignore unknown structured trailing lines rather than
-		// failing). They never re-emerge in serialize() because the Comment
-		// shape does not carry them.
-		if (/^\s*\[[^\]]+\][^\n]*$/.test(line)) {
+		// Forward-compatibility: trailing lines in a shape the format defines
+		// but this version does not recognize are still treated as structured.
+		// They never re-emerge in serialize() because the Comment shape does
+		// not carry them. See UNKNOWN_KV_LINE_RE / UNKNOWN_STAMPED_LINE_RE for
+		// why these two shapes and not "any bracket-leading line".
+		if (
+			UNKNOWN_KV_LINE_RE.test(line) ||
+			UNKNOWN_STAMPED_LINE_RE.test(line)
+		) {
 			bodyEndExclusive = i;
 			continue;
 		}
@@ -234,7 +321,7 @@ function parseInnerContent(inner: string): ParsedTail {
 
 	const bodyLines = lines.slice(0, bodyEndExclusive);
 	const bodyRaw = bodyLines.join('\n');
-	const body = bodyRaw.trim();
+	const body = unescapeTerminator(bodyRaw.trim());
 
 	replies.reverse();
 	// Stable-sort by timestamp so a thread reads oldest-first even if its
@@ -303,6 +390,10 @@ export interface SerializeInput {
 }
 
 export function serialize(c: SerializeInput): string {
+	// Every free-text field is escaped on the way out and unescaped on the way
+	// back in, so a body, note, anchor or reply holding `-->` round-trips
+	// instead of closing the marker early. See escapeTerminator.
+	const body = escapeTerminator(c.body);
 	const hasMetadata =
 		c.id !== undefined ||
 		c.date !== undefined ||
@@ -311,7 +402,7 @@ export function serialize(c: SerializeInput): string {
 	const hasReplies = (c.replies?.length ?? 0) > 0;
 	const hasAddressed = c.addressed !== undefined;
 	const hasResolution = c.resolution !== undefined;
-	const bodyMultiline = c.body.includes('\n');
+	const bodyMultiline = body.includes('\n');
 
 	if (
 		!hasMetadata &&
@@ -320,36 +411,41 @@ export function serialize(c: SerializeInput): string {
 		!hasResolution &&
 		!bodyMultiline
 	) {
-		return `<!-- annoteca/${c.category}: ${c.body} -->`;
+		return `<!-- annoteca/${c.category}: ${body} -->`;
 	}
 
 	const lines: string[] = [];
-	lines.push(`<!-- annoteca/${c.category}: ${c.body}`);
+	lines.push(`<!-- annoteca/${c.category}: ${body}`);
 	if (c.id !== undefined) lines.push(`[id=${c.id}]`);
 	if (c.date !== undefined) lines.push(`[date=${c.date}]`);
 	if (c.author !== undefined) lines.push(`[author=${c.author}]`);
-	if (c.anchor !== undefined) lines.push(`[anchor=${c.anchor.text}]`);
+	if (c.anchor !== undefined)
+		lines.push(`[anchor=${escapeTerminator(c.anchor.text)}]`);
 	for (const r of c.replies ?? []) {
-		lines.push(`[reply ${r.author} ${r.date}]: ${r.body}`);
+		lines.push(
+			`[reply ${r.author} ${r.date}]: ${escapeTerminator(r.body)}`,
+		);
 	}
 	if (c.addressed) {
-		const note = c.addressed.note.length > 0 ? ` ${c.addressed.note}` : '';
+		const rawNote = escapeTerminator(c.addressed.note);
+		const note = rawNote.length > 0 ? ` ${rawNote}` : '';
 		lines.push(
 			`[addressed ${c.addressed.author} ${c.addressed.date}]:${note}`,
 		);
 		// F-271: the verbatim replaced text lives in a fenced annoteca-original
 		// block directly after the [addressed ...] line. The fence is inert
-		// markdown inside the HTML comment; the only sequence that would break
-		// the wrapper is `-->`, which never appears in the captured prose.
+		// markdown inside the HTML comment, so the only sequence that would
+		// break the wrapper is `-->`, and the captured prose CAN contain one:
+		// it is arbitrary text lifted out of the user's document.
 		if (c.addressed.original !== undefined) {
 			lines.push('```annoteca-original');
-			lines.push(c.addressed.original);
+			lines.push(escapeTerminator(c.addressed.original));
 			lines.push('```');
 		}
 	}
 	if (c.resolution) {
-		const note =
-			c.resolution.note.length > 0 ? ` ${c.resolution.note}` : '';
+		const rawNote = escapeTerminator(c.resolution.note);
+		const note = rawNote.length > 0 ? ` ${rawNote}` : '';
 		lines.push(
 			`[resolved ${c.resolution.author} ${c.resolution.date}]:${note}`,
 		);

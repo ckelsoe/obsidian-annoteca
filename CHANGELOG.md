@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Comment bodies, replies, and notes render as markdown in the marker popover and the Hub panel. The format has always described a comment body as markdown, and AI assistants write markdown by default, so the usual result was a comment full of visible asterisks, backticks, and `- ` bullets. Links, emphasis, code, lists, quotes, and tables now render, and a `[[wikilink]]` in a comment resolves against the note the comment lives in. There is a "Render markdown in comments" setting under Editor indicators to turn it off. The one-line body shown beside a marker in the editor stays plain text either way, so turning this on cannot reflow the document you are reading.
+
+### Fixed
+- Comment bodies no longer lose their last line when it starts with a bracket. A body ending in a markdown link, a reference definition, a footnote, or an Obsidian `[[wikilink]]` had that line silently deleted the next time the comment was read, because anything shaped like `[...]` at the end of a comment was treated as internal metadata. Only the specific shapes the format actually defines are treated that way now. Existing comments that were already truncated cannot be recovered by this fix; the text was removed from the file when it was last written.
+- A comment containing `-->` no longer corrupts the note. That sequence ends the HTML comment the marker lives in, so the marker stopped early, the rest of the body appeared as stray text in the document, and everything after it in the comment was lost. It is now stored escaped and restored on read, so any text can go in a comment, including an arrow. The same fix covers importing: converting an Obsidian `%%comment%%` that contained `-->` used to produce a broken marker, because `%%` comments can hold that sequence quite legally.
+- The exported AI skill now teaches assistants to escape `-->`, so an assistant writing a comment directly into a file cannot break the marker. The skill's schema version has gone up, so the plugin will tell you to re-export it with "Export AI skill".
+- Hub panel actions no longer discard changes that arrived while you were looking at the card. Resolve, reopen, delete, reply, accept, revise, and reject all wrote back the version of the comment captured when the card was drawn, so a reply landing in between (from an assistant, another pane, or a sync) was silently overwritten. Every action now re-reads the comment immediately before writing, and refuses instead of guessing when the state it was going to act on is gone.
+
 ## [1.13.0] - 2026-08-03
 
 ### Added

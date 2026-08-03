@@ -8,6 +8,10 @@ import { App, Modal, setIcon, getIconIds } from 'obsidian';
 
 import type { CategoryDefinition } from './types';
 import { formatStamp } from './view-utils';
+import {
+	renderCommentMarkdown,
+	type MarkdownRenderHost,
+} from './markdown-render';
 
 // Class names for a category badge on a given surface. `icon` is optional: the
 // panels show the category icon, the hover popup omits it. Passing each
@@ -97,11 +101,15 @@ export interface ReplyRowClasses {
 // body. Previously duplicated in decorations.ts (hover popup) and
 // hub-thread-tab.ts (Thread tab); this is the single implementation both call.
 // `colorAuthor` applies per-author tinting from each surface's own settings.
+//
+// `host` is optional so callers with no App to hand (or with markdown rendering
+// off) still get the plain-text row they always did.
 export function renderReplyRow(
 	parent: HTMLElement,
 	reply: { author: string; date: string; body: string },
 	classes: ReplyRowClasses,
 	colorAuthor: (el: HTMLElement, author: string) => void,
+	host?: MarkdownRenderHost,
 ): void {
 	const row = parent.createDiv({ cls: classes.row });
 	const meta = row.createDiv({ cls: classes.meta });
@@ -112,7 +120,11 @@ export function renderReplyRow(
 	if (classes.date)
 		meta.createSpan({ cls: classes.date, text: formatStamp(reply.date) });
 	else meta.createSpan({ text: formatStamp(reply.date) });
-	row.createDiv({ cls: classes.body, text: reply.body });
+	renderCommentMarkdown(
+		row.createDiv({ cls: classes.body }),
+		reply.body,
+		host,
+	);
 }
 
 export interface StackedRowOpts {

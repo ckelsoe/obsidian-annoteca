@@ -68,7 +68,13 @@ function makeHarnessWith(initial: string, deleteOnResolve = false) {
 					return Promise.resolve();
 				},
 			},
-			workspace: { getLeavesOfType: () => [], getActiveFile: () => null },
+			workspace: {
+				getLeavesOfType: () => [],
+				// appendReply resolves its own path from the active file, unlike
+				// every other verb which is handed one. Without this it returns
+				// early and the test silently exercises nothing.
+				getActiveFile: () => ({ path: 'note.md' }),
+			},
 		},
 		commentIndex: { rebuild: () => undefined },
 		events: { trigger: () => undefined },
@@ -77,6 +83,12 @@ function makeHarnessWith(initial: string, deleteOnResolve = false) {
 		service: new CommentService(plugin),
 		get content() {
 			return content;
+		},
+		// Simulates the file changing underneath a rendered Hub card: an
+		// assistant replying, another pane writing, a sync landing. Used by the
+		// stale-snapshot tests (#12).
+		set content(updated: string) {
+			content = updated;
 		},
 	};
 }
@@ -259,5 +271,249 @@ describe('addressed-state transitions (F-270/F-271/F-272)', () => {
 		expect(c.addressed).toBeUndefined();
 		// Nothing to revert: the prose is left untouched.
 		expect(h.content).toContain('the prose.');
+	});
+});
+
+// Issue #12. Every panel action used to serialize the Comment captured when the
+// card was rendered, so anything that landed in the marker between render and
+// button press was silently overwritten. Each test takes a snapshot, changes the
+// file underneath it, then acts on the snapshot.
+const IDLESS = [
+	'<!-- annoteca/clarify: which products?',
+	'[reply bob 2026-06-20]: the first one',
+	'-->',
+].join('\n');
+
+const THREADED_ID = [
+	'Prose before. <!-- annoteca/clarify: which products?',
+	'[id=stale009]',
+	'-->',
+	'',
+	'Prose after.',
+].join('\n');
+
+describe('#12: actions build from current file state, not a cached snapshot', () => {
+	const THREADED = [
+		'<!-- annoteca/clarify: which products?',
+		'[id=stale001]',
+		'[reply bob 2026-06-20]: the first one',
+		'-->',
+	].join('\n');
+
+	// The reply that arrives after the card was drawn.
+	const withSecondReply = (doc: string): string =>
+		doc.replace(
+			'[reply bob 2026-06-20]: the first one',
+			'[reply bob 2026-06-20]: the first one\n[reply claude 2026-06-21]: landed later',
+		);
+
+	it('appendReply keeps a reply that landed after the snapshot', async () => {
+		const h = makeHarnessWith(THREADED);
+		const snapshot = firstComment(h.content);
+		h.content = withSecondReply(h.content);
+
+		const wrote = await h.service.appendReply(snapshot, {
+			author: 'charles',
+			date: '2026-06-22',
+			body: 'and mine',
+		});
+
+		expect(wrote).toBe(true);
+		const bodies = firstComment(h.content).replies.map((r) => r.body);
+		expect(bodies).toEqual(['the first one', 'landed later', 'and mine']);
+	});
+
+	it('resolveComment keeps a reply that landed after the snapshot', async () => {
+		const h = makeHarnessWith(THREADED);
+		const snapshot = firstComment(h.content);
+		h.content = withSecondReply(h.content);
+
+		await h.service.resolveComment('note.md', snapshot);
+
+		const c = firstComment(h.content);
+		expect(c.resolution?.author).toBe('charles');
+		expect(c.replies.map((r) => r.body)).toEqual([
+			'the first one',
+			'landed later',
+		]);
+	});
+
+	it('resolveComment refuses to overwrite a resolution written in the meantime', async () => {
+		const h = makeHarnessWith(THREADED);
+		const snapshot = firstComment(h.content);
+		h.content = h.content.replace(
+			'-->',
+			'[resolved someone-else 2026-06-21]: handled\n-->',
+		);
+
+		await h.service.resolveComment('note.md', snapshot);
+
+		const c = firstComment(h.content);
+		expect(c.resolution?.author).toBe('someone-else');
+		expect(c.resolution?.note).toBe('handled');
+	});
+
+	it('acceptAddressed keeps a reply that landed after the snapshot', async () => {
+		const doc = [
+			'<!-- annoteca/clarify: tighten this',
+			'[id=stale002]',
+			'[reply bob 2026-06-20]: the first one',
+			'[addressed claude 2026-06-20]: cut the framing',
+			'--> The new sentence.',
+		].join('\n');
+		const h = makeHarnessWith(doc);
+		const snapshot = firstComment(h.content);
+		h.content = withSecondReply(h.content);
+
+		await h.service.acceptAddressed('note.md', snapshot);
+
+		const c = firstComment(h.content);
+		expect(c.resolution?.note).toBe('accepted');
+		expect(c.replies.map((r) => r.body)).toEqual([
+			'the first one',
+			'landed later',
+		]);
+	});
+
+	it('rejectAddressed keeps a reply that landed after the snapshot', async () => {
+		const doc = [
+			'<!-- annoteca/clarify: tighten this',
+			'[id=stale003]',
+			'[reply bob 2026-06-20]: the first one',
+			'[addressed claude 2026-06-20]: cut the framing',
+			'```annoteca-original',
+			'The old sentence.',
+			'```',
+			'--> The new sentence.',
+		].join('\n');
+		const h = makeHarnessWith(doc);
+		const snapshot = firstComment(h.content);
+		h.content = withSecondReply(h.content);
+
+		await h.service.rejectAddressed('note.md', snapshot);
+
+		const c = firstComment(h.content);
+		expect(c.addressed).toBeUndefined();
+		expect(c.replies.map((r) => r.body)).toEqual([
+			'the first one',
+			'landed later',
+		]);
+		expect(h.content).toContain('The old sentence.');
+	});
+
+	it('rejectAddressed refuses once the edit is no longer awaiting review', async () => {
+		const doc = [
+			'<!-- annoteca/clarify: tighten this',
+			'[id=stale004]',
+			'[addressed claude 2026-06-20]: cut the framing',
+			'```annoteca-original',
+			'The old sentence.',
+			'```',
+			'--> The new sentence.',
+		].join('\n');
+		const h = makeHarnessWith(doc);
+		const snapshot = firstComment(h.content);
+		// Someone accepts it while the card sits on screen.
+		await h.service.acceptAddressed('note.md', firstComment(h.content));
+		const afterAccept = h.content;
+
+		await h.service.rejectAddressed('note.md', snapshot);
+
+		// The prose is NOT reverted: reverting would overwrite text the user has
+		// already moved on from.
+		expect(h.content).toBe(afterAccept);
+		expect(h.content).toContain('The new sentence.');
+	});
+
+	// Id-less markers are a supported part of the format, so they resolve by
+	// fingerprint (same range, same category, same body) rather than being
+	// refused outright, which would break them permanently.
+	it('resolves an id-less marker by fingerprint when it still matches', async () => {
+		const h = makeHarnessWith(IDLESS);
+		await h.service.resolveComment('note.md', firstComment(h.content));
+
+		const c = firstComment(h.content);
+		expect(c.resolution?.author).toBe('charles');
+		expect(c.replies.map((r) => r.body)).toEqual(['the first one']);
+	});
+
+	it('refuses an id-less marker whose body changed underneath', async () => {
+		const h = makeHarnessWith(IDLESS);
+		const snapshot = firstComment(h.content);
+		h.content = h.content.replace('which products?', 'rewritten elsewhere');
+		const before = h.content;
+
+		await h.service.resolveComment('note.md', snapshot);
+
+		expect(h.content).toBe(before);
+		expect(firstComment(h.content).resolution).toBeUndefined();
+	});
+});
+
+// The marker a panel card points at can be gone by the time the button is
+// pressed. Falling back to the cached offsets then writes into whatever prose
+// now occupies that range: resolve overwrites it with a marker, delete removes
+// it outright. A failed lookup means "gone", and gone has to abort.
+describe('#12: a vanished marker aborts instead of writing at stale offsets', () => {
+	// The snapshot's offsets stay valid-looking while pointing at prose that has
+	// nothing to do with it.
+	const withMarkerRemoved = (doc: string): string =>
+		doc.replace(
+			/<!-- annoteca[\s\S]*?-->/,
+			'Replacement prose exactly here.',
+		);
+
+	it('resolveComment does not touch the file', async () => {
+		const h = makeHarnessWith(THREADED_ID);
+		const snapshot = firstComment(h.content);
+		h.content = withMarkerRemoved(h.content);
+		const before = h.content;
+
+		await h.service.resolveComment('note.md', snapshot);
+
+		expect(h.content).toBe(before);
+		expect(h.content).toContain('Replacement prose exactly here.');
+	});
+
+	it('deleteComment does not remove the prose that took its place', async () => {
+		const h = makeHarnessWith(THREADED_ID);
+		const snapshot = firstComment(h.content);
+		h.content = withMarkerRemoved(h.content);
+		const before = h.content;
+
+		await h.service.deleteComment('note.md', snapshot);
+
+		expect(h.content).toBe(before);
+		expect(h.content).toContain('Replacement prose exactly here.');
+	});
+
+	it('resolveAndRemoveComment does not remove it either', async () => {
+		const h = makeHarnessWith(THREADED_ID);
+		const snapshot = firstComment(h.content);
+		h.content = withMarkerRemoved(h.content);
+		const before = h.content;
+
+		await h.service.resolveAndRemoveComment('note.md', snapshot);
+
+		expect(h.content).toBe(before);
+	});
+
+	it('appendReply does not write the reply into unrelated prose', async () => {
+		const h = makeHarnessWith(THREADED_ID);
+		const snapshot = firstComment(h.content);
+		h.content = withMarkerRemoved(h.content);
+		const before = h.content;
+
+		const wrote = await h.service.appendReply(snapshot, {
+			author: 'charles',
+			date: '2026-06-22',
+			body: 'and mine',
+		});
+
+		// The return value is what stops the composer clearing the user's text
+		// and the popup announcing "Reply added." when nothing was written.
+		expect(wrote).toBe(false);
+		expect(h.content).toBe(before);
+		expect(h.content).not.toContain('and mine');
 	});
 });
