@@ -862,7 +862,13 @@ export default class AnnotecaPlugin extends Plugin {
 			id: 'clear-orphaned-stars',
 			name: 'Clear orphaned stars',
 			callback: () => {
-				void this.clearOrphanedStars();
+				// Guarded, not voided: this awaits a full vault scan and a
+				// settings write, either of which can reject on an I/O or
+				// permission error, and a discarded rejection would leave the
+				// user looking at a command that did nothing.
+				this.runGuarded('Clear orphaned stars', () =>
+					this.clearOrphanedStars(),
+				);
 			},
 		});
 		this.addCommand({

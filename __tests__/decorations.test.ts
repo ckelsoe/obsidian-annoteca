@@ -678,27 +678,33 @@ describe('pinned surfaces track the comment, not a copy of it', () => {
 	it('hands the CURRENT comment to a preserved surface, not the open-time one', () => {
 		// The preserved DOM keeps its `create` closure by design, so whatever
 		// that closure captured is frozen. A comment with no id is resolved by
-		// its offsets, so a frozen capture stops matching after any edit above
-		// it and every action reports it as vanished. The closure reads through
-		// a ref, and this asserts the ref is repointed.
-		const built = buildMarkerDecorations(stubCtx());
-		const state = EditorState.create({
-			doc: DOC,
-			extensions: [built.extension],
-		});
-		const markersBefore = state.field(built.markerField);
-		expect(markersBefore[0]!.marker.start).toBe(MARKER_START);
-
-		const edited = state.update({
-			changes: { from: 0, insert: 'XXXX' },
+		// its OFFSETS, so a frozen capture stops matching after an edit and
+		// every action on that surface reports it as vanished.
+		//
+		// Asserted through the tap popover, and through an edit INSIDE the
+		// marker, because that is the one path where the tooltip is rebuilt by
+		// calling `build(ref)`: the resulting `pos`/`end` are then read off
+		// `ref.current` and nothing else. On the preserve path they come from
+		// the mapped offset instead, so asserting there would pass whether or
+		// not the ref was ever repointed, which is exactly the hole this test
+		// replaced.
+		const open = stateWithExtension().update({
+			effects: setTapPopoverEffect.of(MARKER_START),
 		}).state;
-		const markersAfter = edited.field(built.markerField);
-
-		// The parser reports the moved marker, which is what the ref is
-		// repointed to; a captured copy would still say MARKER_START.
-		expect(markersAfter[0]!.marker.start).toBe(MARKER_START + 4);
-		expect(markersAfter[0]!.marker.start).not.toBe(
-			markersBefore[0]!.marker.start,
+		expect(tooltipsOf(open)[0]!.end).toBe(
+			findMarkersInDoc(DOC)[0]!.marker.end,
 		);
+
+		const grown = open.update({
+			changes: { from: BODY_INSERT_AT, insert: 'much longer body ' },
+		}).state;
+
+		const after = tooltipsOf(grown);
+		expect(after).toHaveLength(1);
+		// The marker is longer now. A stale ref would still report the end it
+		// had when the popover opened.
+		const freshEnd = findMarkersInDoc(grown.doc.toString())[0]!.marker.end;
+		expect(freshEnd).toBeGreaterThan(findMarkersInDoc(DOC)[0]!.marker.end);
+		expect(after[0]!.end).toBe(freshEnd);
 	});
 });

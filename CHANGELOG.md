@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- "Clear orphaned stars" removes starred comments whose comment no longer exists anywhere in the vault. The Starred tab has always pointed at this command; until now there was no such command, and those stars could not be removed at all.
 - Comment bodies, replies, and notes render as Markdown in the marker popover and the Hub panel. The format has always described a comment body as Markdown, and AI assistants write Markdown by default, so the usual result was a comment full of visible asterisks, backticks, and `-` list markers. Links, emphasis, code, lists, quotes, and tables now render, and a `[[wikilink]]` in a comment resolves against the note the comment lives in. There is a "Render Markdown in comments" setting under Editor indicators to turn it off. The one-line body shown beside a marker in the editor stays plain text either way, so turning this on cannot reflow the document you are reading.
 
 ### Fixed
@@ -43,7 +44,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Navigating to a comment no longer opens a second tab for a note that is already open. A tab restored when Obsidian started but never clicked on was not recognised as holding the note, so the tab bar filled up a little more after every restart.
 - The Hub panel redraws once per change instead of twice. Starring a comment, changing scope, changing the status filter or switching tabs each rebuilt the panel two times, and on the Thread tab each rebuild walks the vault.
 - The Hub's scope dropdown no longer says "This file" while showing something else. With a pinned scope that does not match the note you are on, it now names the scope that is actually in force.
-- Added "Clear orphaned stars", which removes starred comments whose comment no longer exists anywhere in the vault. The Starred tab has always pointed at this command; until now there was no such command, and those stars could not be removed at all.
 - Closing the Hub's sidebar tab now keeps it closed. It was recreated every time Obsidian started.
 - Marker size and anchor appearance settings now apply in separate windows, which were falling back to the defaults and ignoring them.
 - The comment text shown beside a marker sits with the line it annotates instead of sagging below it. Thanks to `craziedde` for the report.
