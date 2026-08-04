@@ -47,12 +47,61 @@ const RESOLVED_LINE_RE = new RegExp(
 	`^\\s*\\[resolved\\s+([^\\s\\]<>]{1,32})\\s+(${STAMP_SRC})\\]:\\s?([\\s\\S]*)$`,
 );
 
+// Forward-compatibility shapes for trailing lines this version does not know
+// (per data-format.md Migration: ignore unknown structured trailing lines
+// rather than failing). Deliberately narrow, and narrower than they could be.
+//
+// The rule these replace matched ANY line starting `[...]`, which silently ate
+// the last line of a body whenever it began with a bracket. Markdown is full of
+// bracket-leading constructs, and Obsidian's own wikilink is one, so a body
+// ending in `[the guide](url)`, `[ref]: url`, `[^1]: note` or `[[Some Note]]`
+// lost that line on the next parse with nothing to show the user.
+//
+// The two shapes below mirror the ones the format actually defines: a
+// `[key=value]` line (id, date, author, anchor) and a `[key <author> <stamp>]:`
+// note line (reply, addressed, resolved). Anything else stays in the body.
+//
+// The asymmetry is on purpose. Guessing "structured" on an ambiguous line
+// deletes prose and cannot be undone from the file; guessing "body" on a real
+// future structured line leaves it visible as text, which is ugly but recovers
+// as soon as a version that understands it reads the marker. Prefer the
+// recoverable failure.
+const UNKNOWN_KV_LINE_RE = /^\s*\[[a-z][a-z0-9-]*=[^\]\r\n]*\]\s*$/;
+const UNKNOWN_STAMPED_LINE_RE = new RegExp(
+	`^\\s*\\[[a-z][a-z0-9-]*\\s+[^\\s\\]<>]{1,32}\\s+${STAMP_SRC}\\]:`,
+);
+
 // The lossless-original fence (F-271): a fenced block tagged annoteca-original
 // inside the [addressed ...] note, holding the verbatim pre-edit text. Matched
-// as whole lines (m flag); group 1 is the verbatim original. Tolerates CRLF and
+// as whole lines (m flag); group 2 is the verbatim original. Tolerates CRLF and
 // trailing whitespace on the fence lines.
+//
+// The delimiter length is VARIABLE and the closing run must match the opening
+// one (the \1 backreference). A fixed three-backtick fence was a second
+// terminator alongside `-->`: the captured text is arbitrary prose lifted out
+// of the user's document, so it can contain a code block, and the first ``` line
+// inside it closed the fence early. The addressed state, the id and the original
+// itself were then lost, because the leftover fence lines stopped the backward
+// walk and collapsed the trailing block into the body.
+//
+// Backward compatible in both directions. Existing markers use exactly three
+// backticks and still match, because `{3,}` includes three. Serializing only
+// widens the fence when the content holds a run that would close it, and content
+// like that cannot round-trip through the old form at all, so no marker that
+// reads correctly today is rewritten.
 const ORIGINAL_FENCE_RE =
-	/^```annoteca-original[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/m;
+	/^(`{3,})annoteca-original[ \t]*\r?\n([\s\S]*?)\r?\n\1[ \t]*$/gm;
+
+// Longest run of backticks starting a line, which is the only place a run can
+// close the fence (the closing pattern anchors to a whole line).
+const LINE_LEADING_BACKTICKS_RE = /^[ \t]*(`+)/gm;
+
+function fenceFor(content: string): string {
+	let longest = 0;
+	for (const match of content.matchAll(LINE_LEADING_BACKTICKS_RE))
+		longest = Math.max(longest, (match[1] ?? '').length);
+	return '`'.repeat(Math.max(3, longest + 1));
+}
 
 // Maximum visible characters in an anchor value before mid-truncation kicks
 // in. 80 strikes the balance between "disambiguate the commented words" and
@@ -61,6 +110,92 @@ export const ANCHOR_MAX_CHARS = 80;
 const ANCHOR_ELLIPSIS = '…';
 
 const ID_BASE36_ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyz';
+
+// `-->` closes the HTML comment that wraps every marker, so it is the one
+// sequence no free-text field can hold literally (data-format.md: "the only
+// forbidden inner sequence is `-->`"). Nothing used to enforce that: a body
+// containing it serialized to `<!-- annoteca/note: arrow --> here -->`, which
+// re-parsed as the body "arrow" and left ` here -->` behind as visible text in
+// the user's document.
+//
+// Escaped on write and restored on read, so the format is closed under
+// arbitrary user text instead of forbidding a sequence and hoping. `--\>` is
+// the escape because a backslash before `>` is markdown's own escape, so the
+// stored form renders as `-->` wherever a body is rendered as markdown, and
+// reads as intended even in the plain-text surfaces.
+//
+// The escape marker is itself escaped, which is what makes this reversible
+// rather than merely lossy in a rare case. A body can legitimately already
+// contain the literal text `--\>`, and a naive decode would hand it back as
+// `-->`, silently rewriting the user's characters. That matters most in the
+// `annoteca-original` fence, whose whole contract is that Reject restores the
+// prose VERBATIM.
+//
+// So the rule is on the run of backslashes: writing adds one, reading removes
+// one. `-->` <-> `--\>`, `--\>` <-> `--\\>`, and so on, which is a bijection at
+// every depth. Escaping only ever ADDS backslashes, so it can never manufacture
+// a new `-->` and can never fail to remove an existing one.
+//
+// An older plugin reading a file written by this one shows the literal `--\>`
+// rather than losing the line, which is the degradation the format's Migration
+// section asks for.
+//
+// KNOWN LIMITATION, accepted deliberately. A marker written BEFORE this encoding
+// existed whose text legitimately contained `--\>` is indistinguishable from an
+// encoded terminator, because the old format carries no sentinel. Such a body
+// reads back with one backslash removed.
+//
+// The blast radius is small and it is pinned by tests. Decoding on read and
+// encoding on write are inverses, so parse + serialize is a FIXED POINT: an
+// affected file is never rewritten by opening a vault, and repeated edits do not
+// walk the text further on each pass. What actually differs is the displayed
+// text, and the prose Reject restores, by that one character.
+//
+// The alternative is a version sentinel in the format, which means a breaking
+// change and the migration machinery data-format.md requires for one. That is
+// not worth it against a corruption bug that loses whole lines today.
+const TERMINATOR_RUN_RE = /--(\\*)>/g;
+const ESCAPED_RUN_RE = /--(\\+)>/g;
+
+function escapeTerminator(text: string): string {
+	return text.replace(
+		TERMINATOR_RUN_RE,
+		(_match, slashes: string) => `--\\${slashes}>`,
+	);
+}
+
+function unescapeTerminator(text: string): string {
+	return text.replace(
+		ESCAPED_RUN_RE,
+		(_match, slashes: string) => `--${slashes.slice(1)}>`,
+	);
+}
+
+// `-->` is not the only sequence that can break a marker. Every bracketed
+// trailing line is a SINGLE-LINE grammar: parseInnerContent splits the inner
+// content on `\n` and matches each line against one pattern. A newline anywhere
+// in a reply body, an anchor, or an addressed/resolution note therefore emits a
+// continuation line that matches nothing, the backward walk breaks on it
+// immediately, and every structured line above it, the `[reply ...]` itself and
+// the `[id=...]` with it, is absorbed into the body. The comment loses its
+// thread and its identity, which breaks starring, drafts, Copy ID, and the
+// freshComment re-lookup this change relies on.
+//
+// Nothing upstream prevents it: the Hub's reply box is a rows=3 textarea with no
+// keydown handler, so Enter inserts a newline, and rendering replies as markdown
+// makes a multi-line reply the invited usage rather than an odd one.
+//
+// Collapsing a run of line breaks to a single space keeps every word the user
+// wrote and costs only the line break, which the format has never been able to
+// store in these fields anyway. The body and the annoteca-original fence are
+// deliberately NOT collapsed: both are multi-line by contract, the body because
+// bodyMultiline re-emits it and the fence because it is delimited rather than
+// line-oriented.
+const LINE_BREAK_RUN_RE = /[\r\n]+/g;
+
+function escapeInline(text: string): string {
+	return escapeTerminator(text).replace(LINE_BREAK_RUN_RE, ' ');
+}
 
 interface RawMarker {
 	start: number;
@@ -99,27 +234,162 @@ interface ParsedTail {
 	resolution: Resolution | undefined;
 }
 
-function parseInnerContent(inner: string): ParsedTail {
-	// Pull the annoteca-original fence out first (F-271). It is the only
-	// multi-line element in the trailing block; removing it lets the backward
-	// line-walk below treat [addressed ...] as an ordinary single structured
-	// line. The fence always lives directly after the [addressed ...] line, so
-	// its content unambiguously belongs to the (at most one) addressed note.
-	let originalText: string | undefined;
-	let stripped = inner;
-	const fenceMatch = ORIGINAL_FENCE_RE.exec(inner);
-	if (
-		fenceMatch &&
-		fenceMatch[1] !== undefined &&
-		fenceMatch.index !== undefined
-	) {
-		originalText = fenceMatch[1];
-		const before = inner.slice(0, fenceMatch.index).replace(/\r?\n$/, '');
-		const after = inner.slice(fenceMatch.index + fenceMatch[0].length);
-		stripped = before + after;
-	}
+interface FenceBlock {
+	start: number;
+	end: number;
+	content: string;
+}
 
-	const lines = stripped.split('\n');
+function findOriginalFences(inner: string): FenceBlock[] {
+	const out: FenceBlock[] = [];
+	for (const match of inner.matchAll(ORIGINAL_FENCE_RE)) {
+		const content = match[2];
+		if (content === undefined || match.index === undefined) continue;
+		out.push({
+			start: match.index,
+			end: match.index + match[0].length,
+			content,
+		});
+	}
+	return out;
+}
+
+// Character offset of the LAST [addressed ...] line that is not itself inside a
+// fence, or -1.
+//
+// Last, not first, because that is the one the walk itself keeps: it runs
+// backward and takes the first [addressed ...] it meets. Anchoring anywhere
+// else attributes a fence to a note the parsed comment does not carry.
+//
+// Last is also what cannot be fooled by a marker quoted inside a body. The
+// trailing block is a SUFFIX of the lines, so a real [addressed ...] always
+// sits below a quoted one; the last one is therefore the real one whenever
+// there is a real one at all. When there is not, the walk comes back with no
+// addressed note and parseInnerContent throws the strip away.
+//
+// FENCED CONTENT IS SKIPPED, and that is not an edge case. The fence holds
+// prose lifted verbatim out of the user's document, so it can hold a line
+// shaped like [addressed ...] the same way it can hold a code fence or a `-->`,
+// and serialize() writes exactly that. Counting one would put the anchor INSIDE
+// the block, which sits before it, so the real fence would look like a body
+// fence and be left in place to stop the walk. That is the whole failure this
+// function exists to prevent, arriving through the back door.
+function lastAddressedOffset(inner: string, fences: FenceBlock[]): number {
+	let offset = 0;
+	let found = -1;
+	let next = 0;
+	for (const line of inner.split('\n')) {
+		let fence = fences[next];
+		while (fence !== undefined && fence.end <= offset) {
+			next++;
+			fence = fences[next];
+		}
+		const insideFence = fence !== undefined && offset >= fence.start;
+		if (!insideFence && ADDRESSED_LINE_RE.test(line)) found = offset;
+		offset += line.length + 1;
+	}
+	return found;
+}
+
+interface StrippedFence {
+	stripped: string;
+	originalText: string;
+}
+
+// Lift the annoteca-original fence out of the inner content (F-271).
+//
+// The strip does TWO jobs, and they are easy to conflate:
+//
+//   1. attribute the fenced text to the [addressed ...] note, and
+//   2. remove the block, so the backward line-walk is not stopped by it.
+//
+// Job 2 is not optional. The walk is line-oriented, and a fence line matches
+// nothing, so a fence left in place ends the walk on the spot and collapses
+// every structured line above it (the [addressed ...] itself, the [id=...], the
+// replies) into the body. That is silent, permanent damage to a marker that was
+// perfectly well-formed, so findMalformedMarkers never flags it.
+//
+// So the question a fence has to answer is NOT "is this one adjacent to the
+// [addressed ...] line" but "is this one the addressed note's original". Only
+// the second question is safe to answer with `continue`.
+//
+// The rule is position, not adjacency: a fence is the original if it appears
+// anywhere after the last [addressed ...] line. serialize() writes it
+// immediately after, but nothing in the format requires that, and
+// data-format.md only ever said "inside the [addressed ...] note". A blank line
+// before a fenced block is ordinary Markdown, an assistant writing a marker by
+// hand puts one there, and [reply ...] or [resolved ...] lines can sit in
+// between.
+//
+// A fence ABOVE that line, or in a marker with no addressed note at all, is
+// body text and stays put: a comment that documents the format by showing a
+// fence is a normal thing to write, and the exported skill describes the fence,
+// so assistants write them too.
+//
+// THE ONE CASE THAT STAYS AMBIGUOUS, and it is irreducible. A body whose LAST
+// lines quote the format ([addressed ...] then a fence, with nothing but the
+// trailing block after them) is byte-identical to a real addressed note. The
+// quote is absorbed: the comment gains an addressed state it did not mean.
+//
+// Do not "fix" this by requiring the fence to touch the [addressed ...] line.
+// That was tried, and it is the trade running the wrong way. Adjacency turns a
+// real, well-formed marker into permanent damage (the whole trailing block
+// collapses into the body, Reject loses the prose it was holding), while this
+// costs a misread on a marker whose every character still survives the next
+// rewrite. Prefer the recoverable failure, which is the same rule the
+// forward-compatibility shapes above are chosen by. The pin is in
+// __tests__/parser.test.ts, "absorbs a format example that ends a body".
+//
+// Returns undefined when there is nothing to lift, in which case the caller
+// walks the untouched content.
+function stripOriginalFence(inner: string): StrippedFence | undefined {
+	const fences = findOriginalFences(inner);
+	if (fences.length === 0) return undefined;
+	const addressedAt = lastAddressedOffset(inner, fences);
+	if (addressedAt < 0) return undefined;
+
+	let originalText: string | undefined;
+	let kept = '';
+	let cursor = 0;
+	for (const fence of fences) {
+		if (fence.start <= addressedAt) continue;
+		// Every attributable fence is removed, not just the one that supplies
+		// the original. A second one is degenerate (serialize writes at most
+		// one), but leaving it behind would stop the walk, which is the failure
+		// this whole function exists to prevent. Dropping the extra block is the
+		// same trade the walk already makes for a duplicate [addressed ...] or
+		// [resolved ...] line: the format carries one, so the first wins.
+		kept += inner.slice(cursor, fence.start).replace(/\r?\n$/, '');
+		cursor = fence.end;
+		originalText ??= unescapeTerminator(fence.content);
+	}
+	if (originalText === undefined) return undefined;
+	return { stripped: kept + inner.slice(cursor), originalText };
+}
+
+function parseInnerContent(inner: string): ParsedTail {
+	// Lift the fence out first, then check the walk's own verdict: if it did
+	// not come back with an addressed note, the [addressed ...] line the fence
+	// was attributed to was body text (a marker quoted inside a comment, say),
+	// so the strip was wrong and the fence is prose. Re-walk the untouched
+	// content rather than deleting it. The walk classifies body vs trailing
+	// block; asking it is what keeps a second, drifting copy of that rule out
+	// of this function.
+	const lifted = stripOriginalFence(inner);
+	if (lifted !== undefined) {
+		const parsed = walkTrailingLines(
+			lifted.stripped.split('\n'),
+			lifted.originalText,
+		);
+		if (parsed.addressed !== undefined) return parsed;
+	}
+	return walkTrailingLines(inner.split('\n'), undefined);
+}
+
+function walkTrailingLines(
+	lines: string[],
+	originalText: string | undefined,
+): ParsedTail {
 	let id: string | undefined;
 	let date: string | undefined;
 	let author: string | undefined;
@@ -162,7 +432,7 @@ function parseInnerContent(inner: string): ParsedTail {
 
 		const anchorMatch = ANCHOR_LINE_RE.exec(line);
 		if (anchorMatch && anchorMatch[1] !== undefined) {
-			const raw = anchorMatch[1];
+			const raw = unescapeTerminator(anchorMatch[1]);
 			const truncated = raw.includes(ANCHOR_ELLIPSIS);
 			anchor = { text: raw, truncated };
 			bodyEndExclusive = i;
@@ -178,7 +448,7 @@ function parseInnerContent(inner: string): ParsedTail {
 			replies.push({
 				author: replyMatch[1],
 				date: replyMatch[2],
-				body: replyMatch[3] ?? '',
+				body: unescapeTerminator(replyMatch[3] ?? ''),
 			});
 			bodyEndExclusive = i;
 			continue;
@@ -194,7 +464,7 @@ function parseInnerContent(inner: string): ParsedTail {
 				addressed = {
 					author: addressedMatch[1],
 					date: addressedMatch[2],
-					note: addressedMatch[3] ?? '',
+					note: unescapeTerminator(addressedMatch[3] ?? ''),
 					original: originalText,
 				};
 			}
@@ -212,19 +482,22 @@ function parseInnerContent(inner: string): ParsedTail {
 				resolution = {
 					author: resolvedMatch[1],
 					date: resolvedMatch[2],
-					note: resolvedMatch[3] ?? '',
+					note: unescapeTerminator(resolvedMatch[3] ?? ''),
 				};
 			}
 			bodyEndExclusive = i;
 			continue;
 		}
 
-		// Forward-compatibility: bracket-shaped trailing lines we do not
-		// recognize are still treated as structured (per data-format.md
-		// Migration: ignore unknown structured trailing lines rather than
-		// failing). They never re-emerge in serialize() because the Comment
-		// shape does not carry them.
-		if (/^\s*\[[^\]]+\][^\n]*$/.test(line)) {
+		// Forward-compatibility: trailing lines in a shape the format defines
+		// but this version does not recognize are still treated as structured.
+		// They never re-emerge in serialize() because the Comment shape does
+		// not carry them. See UNKNOWN_KV_LINE_RE / UNKNOWN_STAMPED_LINE_RE for
+		// why these two shapes and not "any bracket-leading line".
+		if (
+			UNKNOWN_KV_LINE_RE.test(line) ||
+			UNKNOWN_STAMPED_LINE_RE.test(line)
+		) {
 			bodyEndExclusive = i;
 			continue;
 		}
@@ -234,7 +507,7 @@ function parseInnerContent(inner: string): ParsedTail {
 
 	const bodyLines = lines.slice(0, bodyEndExclusive);
 	const bodyRaw = bodyLines.join('\n');
-	const body = bodyRaw.trim();
+	const body = unescapeTerminator(bodyRaw.trim());
 
 	replies.reverse();
 	// Stable-sort by timestamp so a thread reads oldest-first even if its
@@ -303,6 +576,10 @@ export interface SerializeInput {
 }
 
 export function serialize(c: SerializeInput): string {
+	// Every free-text field is escaped on the way out and unescaped on the way
+	// back in, so a body, note, anchor or reply holding `-->` round-trips
+	// instead of closing the marker early. See escapeTerminator.
+	const body = escapeTerminator(c.body);
 	const hasMetadata =
 		c.id !== undefined ||
 		c.date !== undefined ||
@@ -311,7 +588,7 @@ export function serialize(c: SerializeInput): string {
 	const hasReplies = (c.replies?.length ?? 0) > 0;
 	const hasAddressed = c.addressed !== undefined;
 	const hasResolution = c.resolution !== undefined;
-	const bodyMultiline = c.body.includes('\n');
+	const bodyMultiline = body.includes('\n');
 
 	if (
 		!hasMetadata &&
@@ -320,36 +597,44 @@ export function serialize(c: SerializeInput): string {
 		!hasResolution &&
 		!bodyMultiline
 	) {
-		return `<!-- annoteca/${c.category}: ${c.body} -->`;
+		return `<!-- annoteca/${c.category}: ${body} -->`;
 	}
 
 	const lines: string[] = [];
-	lines.push(`<!-- annoteca/${c.category}: ${c.body}`);
+	lines.push(`<!-- annoteca/${c.category}: ${body}`);
 	if (c.id !== undefined) lines.push(`[id=${c.id}]`);
 	if (c.date !== undefined) lines.push(`[date=${c.date}]`);
 	if (c.author !== undefined) lines.push(`[author=${c.author}]`);
-	if (c.anchor !== undefined) lines.push(`[anchor=${c.anchor.text}]`);
+	if (c.anchor !== undefined)
+		lines.push(`[anchor=${escapeInline(c.anchor.text)}]`);
 	for (const r of c.replies ?? []) {
-		lines.push(`[reply ${r.author} ${r.date}]: ${r.body}`);
+		lines.push(`[reply ${r.author} ${r.date}]: ${escapeInline(r.body)}`);
 	}
 	if (c.addressed) {
-		const note = c.addressed.note.length > 0 ? ` ${c.addressed.note}` : '';
+		const rawNote = escapeInline(c.addressed.note);
+		const note = rawNote.length > 0 ? ` ${rawNote}` : '';
 		lines.push(
 			`[addressed ${c.addressed.author} ${c.addressed.date}]:${note}`,
 		);
 		// F-271: the verbatim replaced text lives in a fenced annoteca-original
-		// block directly after the [addressed ...] line. The fence is inert
-		// markdown inside the HTML comment; the only sequence that would break
-		// the wrapper is `-->`, which never appears in the captured prose.
+		// block directly after the [addressed ...] line. The captured prose is
+		// arbitrary text lifted out of the user's document, so it can contain
+		// BOTH sequences that would end the block early: `-->`, which closes the
+		// HTML comment, and a fence line, which closes the fence. The first is
+		// escaped; the second is handled by widening the delimiter past anything
+		// in the content, since escaping backticks would change the text the
+		// fence exists to preserve verbatim.
 		if (c.addressed.original !== undefined) {
-			lines.push('```annoteca-original');
-			lines.push(c.addressed.original);
-			lines.push('```');
+			const original = escapeTerminator(c.addressed.original);
+			const fence = fenceFor(original);
+			lines.push(`${fence}annoteca-original`);
+			lines.push(original);
+			lines.push(fence);
 		}
 	}
 	if (c.resolution) {
-		const note =
-			c.resolution.note.length > 0 ? ` ${c.resolution.note}` : '';
+		const rawNote = escapeInline(c.resolution.note);
+		const note = rawNote.length > 0 ? ` ${rawNote}` : '';
 		lines.push(
 			`[resolved ${c.resolution.author} ${c.resolution.date}]:${note}`,
 		);

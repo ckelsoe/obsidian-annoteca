@@ -24,6 +24,12 @@ import {
 	renderCategoryBadge,
 	renderStarButton,
 } from './ui-helpers';
+import {
+	renderCommentMarkdown,
+	cycleLifetime,
+	type MarkdownLifetime,
+	type MarkdownRenderHost,
+} from './markdown-render';
 
 // Thread-tab class names for the shared reply-row renderer (ui-helpers). Author
 // and date spans stay unclassed here, matching the prior inline markup; tinting
@@ -33,6 +39,14 @@ const THREAD_REPLY_CLASSES = {
 	meta: 'annoteca-reply-meta',
 	body: 'annoteca-reply-body',
 };
+
+// One armed debounced draft save. `flush` writes the composer's CURRENT text,
+// so disposing stores what is on screen at that moment rather than the value
+// captured when the timer was set.
+interface PendingDraftSave {
+	timer: number;
+	flush: () => void;
+}
 
 export class ThreadTabRenderer {
 	activePath: string | undefined;
@@ -52,6 +66,18 @@ export class ThreadTabRenderer {
 	// when the selection actually changed, not on every refresh.
 	private activeCardEl: HTMLElement | undefined;
 	private lastScrolledActiveKey: string | undefined;
+	// Owns the markdown renders of the CURRENT pass only. The panel re-renders
+	// on every index-changed event, which on an active vault is constant, and
+	// each pass empties the container; without cycling this, every render's
+	// children would stay loaded for the life of the vault.
+	private markdownLifetime: MarkdownLifetime | undefined;
+
+	// Pending debounced draft saves, keyed by comment id, across every reply
+	// composer this renderer has built. Submitting cancels every save for that
+	// comment so none can write a sent reply back over the cleared draft;
+	// dispose() flushes them instead, so a refresh cannot swallow text typed
+	// inside the debounce. See renderReplyInput for why those differ.
+	private readonly draftSaveTimers = new Map<string, Set<PendingDraftSave>>();
 
 	constructor(
 		private readonly plugin: AnnotecaPlugin,
@@ -59,7 +85,42 @@ export class ThreadTabRenderer {
 		private readonly refresh: () => void,
 	) {}
 
+	// Unloads the current render's markdown lifetime. Called when the hub view
+	// closes; without it the last pass stays loaded after the panel is gone.
+	dispose(): void {
+		this.markdownLifetime?.unload();
+		this.markdownLifetime = undefined;
+		// Debounced draft saves are the other thing that outlives this DOM.
+		// FLUSH them rather than cancel them: this runs before every refresh
+		// (views.ts:459), and the composers are still attached, so dropping the
+		// pending save would discard whatever was typed in the last 300ms and
+		// the rebuilt composer would come back empty. Submitting is the case
+		// that discards, and it does that itself before clearing the draft.
+		for (const saves of this.draftSaveTimers.values())
+			for (const save of saves) {
+				window.clearTimeout(save.timer);
+				save.flush();
+			}
+		this.draftSaveTimers.clear();
+	}
+
+	// A render host bound to one card's file. Built per card rather than per
+	// pass because a folder or vault scope shows comments from several files at
+	// once, and a wikilink in a body has to resolve against the note the comment
+	// lives in, not against whatever is active in the editor.
+	private markdownHost(path: string): MarkdownRenderHost | undefined {
+		const lifetime = this.markdownLifetime;
+		if (!lifetime) return undefined;
+		return {
+			app: this.app,
+			component: lifetime,
+			sourcePath: path,
+			enabled: this.plugin.settings.renderMarkdownBodies,
+		};
+	}
+
 	render(container: HTMLElement): void {
+		this.markdownLifetime = cycleLifetime(this.markdownLifetime);
 		this.renderScopeToolbar(container);
 
 		const scopeFiles = this.plugin.computeScopeFiles();
@@ -546,10 +607,12 @@ export class ThreadTabRenderer {
 		const expandedSection = card.createDiv({
 			cls: 'annoteca-reviewer-expanded',
 		});
-		expandedSection.createDiv({
-			cls: 'annoteca-reviewer-body',
-			text: c.body,
-		});
+		const host = this.markdownHost(path);
+		renderCommentMarkdown(
+			expandedSection.createDiv({ cls: 'annoteca-reviewer-body' }),
+			c.body,
+			host,
+		);
 
 		if (c.resolution) {
 			const res = expandedSection.createDiv({
@@ -559,10 +622,13 @@ export class ThreadTabRenderer {
 				text: `Resolved ${formatStamp(c.resolution.date)} by ${c.resolution.author}`,
 			});
 			if (c.resolution.note) {
-				res.createDiv({
-					cls: 'annoteca-reviewer-resolution-note',
-					text: c.resolution.note,
-				});
+				renderCommentMarkdown(
+					res.createDiv({
+						cls: 'annoteca-reviewer-resolution-note',
+					}),
+					c.resolution.note,
+					host,
+				);
 			}
 		}
 
@@ -577,16 +643,22 @@ export class ThreadTabRenderer {
 				text: `Addressed ${formatStamp(c.addressed.date)} by ${c.addressed.author}`,
 			});
 			if (c.addressed.note) {
-				addr.createDiv({
-					cls: 'annoteca-reviewer-addressed-note',
-					text: c.addressed.note,
-				});
+				renderCommentMarkdown(
+					addr.createDiv({
+						cls: 'annoteca-reviewer-addressed-note',
+					}),
+					c.addressed.note,
+					host,
+				);
 			}
 			if (c.addressed.original !== undefined) {
 				addr.createDiv({
 					cls: 'annoteca-reviewer-addressed-original-label',
 					text: 'Original text',
 				});
+				// Plain text on purpose, matching the popover: this is the
+				// verbatim prose Reject would restore, so it must be shown as
+				// what would be written back, not as what it renders to.
 				addr.createDiv({
 					cls: 'annoteca-reviewer-addressed-original',
 					text: c.addressed.original,
@@ -600,17 +672,28 @@ export class ThreadTabRenderer {
 			});
 			thread.createEl('h5', { text: 'Replies' });
 			for (const r of c.replies) {
-				renderReplyRow(thread, r, THREAD_REPLY_CLASSES, (el, tag) =>
-					this.applyAuthorColor(el, tag),
+				renderReplyRow(
+					thread,
+					r,
+					THREAD_REPLY_CLASSES,
+					(el, tag) => this.applyAuthorColor(el, tag),
+					host,
 				);
 			}
 		}
 
-		this.renderReplyInput(expandedSection, c);
+		this.renderReplyInput(expandedSection, c, path);
 		this.renderActions(expandedSection, c, path);
 	}
 
-	private renderReplyInput(container: HTMLElement, c: Comment): void {
+	// `path` is the CARD's file, which in a folder or vault scope is not
+	// necessarily the active one. Dropping it here sent the reply at whatever
+	// note was focused.
+	private renderReplyInput(
+		container: HTMLElement,
+		c: Comment,
+		path: string,
+	): void {
 		const wrap = container.createDiv({ cls: 'annoteca-reply-input-wrap' });
 		const textarea = wrap.createEl('textarea', {
 			cls: 'annoteca-reply-input',
@@ -621,14 +704,56 @@ export class ThreadTabRenderer {
 			const draft = this.plugin.loadDraft(c.id);
 			if (draft.length > 0) textarea.value = draft;
 		}
-		let saveTimer: number | undefined;
+		// Pending saves are tracked on the renderer and keyed by comment id, not
+		// just held in this closure, because a repaint detaches this composer
+		// while its debounced save is still armed.
+		//
+		// The two ways that pending save can end are OPPOSITE, and conflating
+		// them loses text either way:
+		//
+		//   - Submitting DISCARDS it. The text has been sent, so a timer firing
+		//     afterwards would write it back over the cleared draft and the
+		//     composer would redisplay a reply that was already posted.
+		//   - Disposing FLUSHES it. dispose() runs before every panel refresh
+		//     (views.ts:459), so cancelling without saving throws away whatever
+		//     the user typed in the last 300ms, and the rebuilt composer comes
+		//     back empty.
+		//
+		// Cancelling by id rather than by closure means submit kills every timer
+		// for the comment, including one left by a composer this render
+		// replaced. dispose() reads the live textarea, which is still attached
+		// at that point, so a flush stores the newest text rather than the value
+		// captured when the timer was armed.
+		const forgetSave = (id: string, save: PendingDraftSave): void => {
+			const saves = this.draftSaveTimers.get(id);
+			if (!saves) return;
+			saves.delete(save);
+			if (saves.size === 0) this.draftSaveTimers.delete(id);
+		};
+		const cancelSavesFor = (id: string): void => {
+			const saves = this.draftSaveTimers.get(id);
+			if (!saves) return;
+			for (const save of saves) window.clearTimeout(save.timer);
+			this.draftSaveTimers.delete(id);
+		};
 		textarea.addEventListener('input', () => {
-			if (!c.id) return;
-			if (saveTimer !== undefined) window.clearTimeout(saveTimer);
-			saveTimer = window.setTimeout(() => {
-				if (c.id) this.plugin.saveDraft(c.id, textarea.value);
-				saveTimer = undefined;
+			const id = c.id;
+			if (id === undefined) return;
+			cancelSavesFor(id);
+			const save: PendingDraftSave = {
+				timer: 0,
+				flush: () => this.plugin.saveDraft(id, textarea.value),
+			};
+			save.timer = window.setTimeout(() => {
+				forgetSave(id, save);
+				save.flush();
 			}, 300);
+			let saves = this.draftSaveTimers.get(id);
+			if (!saves) {
+				saves = new Set<PendingDraftSave>();
+				this.draftSaveTimers.set(id, saves);
+			}
+			saves.add(save);
 		});
 
 		// F-274: per-reply author picker. Default plus configured collaborators
@@ -658,18 +783,79 @@ export class ThreadTabRenderer {
 			cls: 'annoteca-reply-submit',
 			text: 'Reply',
 		});
+		// Single-flight, matching the popover composer. The write is asynchronous
+		// and can be refused, so without this a second press starts a second
+		// append against the same snapshot and posts the reply twice.
+		let pending = false;
 		submitBtn.addEventListener('click', () => {
+			if (pending) return;
 			const body = textarea.value.trim();
 			if (body === '') {
 				new Notice('Reply is empty.');
 				return;
 			}
 			const author = authorSelect.value.trim() || defaultAuthor;
+			pending = true;
+			submitBtn.disabled = true;
+			textarea.readOnly = true;
+			// Drop the debounced save, then clear the stored draft BEFORE the
+			// write rather than after it. A successful write triggers
+			// 'index-changed' synchronously from applySplices, and this panel
+			// rebuilds the card from that event while appendReply is still
+			// unresolved. Anything left in draft storage at that instant is read
+			// straight back into the freshly built textarea, so the composer
+			// redisplays the reply that was just posted and a second press sends
+			// it twice. Clearing afterwards is too late: it lands on a textarea
+			// that has already been detached.
+			//
+			// The draft still has to survive a refusal, which is why the save
+			// was moved to submit time in the first place: submitting inside the
+			// 300ms debounce meant the newest text had never been stored at all.
+			// Restoring it on the two failure branches keeps that property
+			// without leaving a copy in place across the re-render.
+			if (c.id) {
+				cancelSavesFor(c.id);
+				this.plugin.clearDraft(c.id);
+			}
+			const restoreDraft = (): void => {
+				if (c.id) this.plugin.saveDraft(c.id, textarea.value);
+				// Storage alone is not enough if something repainted the panel
+				// while the write was in flight: the rebuilt composer read the
+				// draft we had just cleared, so it is on screen empty, and the
+				// text now in storage is invisible until some later render
+				// happens to pick it up. Worse, the next keystroke's debounced
+				// save would overwrite it. Repaint so the restored draft is
+				// actually in front of the user. In the ordinary case nothing
+				// detached this textarea and no second render is needed.
+				if (!textarea.isConnected) this.refresh();
+			};
+			const release = (): void => {
+				pending = false;
+				submitBtn.disabled = false;
+				textarea.readOnly = false;
+			};
 			void this.plugin
-				.appendReply(c, { author, date: nowISO(), body })
-				.then(() => {
+				.appendReply(path, c, { author, date: nowISO(), body })
+				.then((wrote) => {
+					// Keep what the user typed when the write was refused. A
+					// refusal returns before applySplices, so no re-render has
+					// happened and this textarea is still the visible one.
+					if (!wrote) {
+						release();
+						restoreDraft();
+						return;
+					}
 					textarea.value = '';
-					if (c.id) this.plugin.clearDraft(c.id);
+					release();
+				})
+				.catch(() => {
+					// A vault read or write can reject on an adapter or transient
+					// I/O error. Without this the button stays disabled with the
+					// user's text trapped behind it, and the rejection surfaces as
+					// an unhandled promise.
+					release();
+					new Notice('Could not save the reply. Try again.');
+					restoreDraft();
 				});
 		});
 	}

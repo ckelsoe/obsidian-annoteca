@@ -15,18 +15,24 @@ import {
 	WidgetType,
 	ViewPlugin,
 	hoverTooltip,
+	repositionTooltips,
 	showTooltip,
 	tooltips,
 	type Tooltip,
 } from '@codemirror/view';
 
-import { setIcon } from 'obsidian';
+import { Notice, setIcon, editorInfoField, type App } from 'obsidian';
 
 import {
 	renderReplyRow as renderSharedReplyRow,
 	renderCategoryBadge,
 	renderStarButton,
 } from './ui-helpers';
+import {
+	renderCommentMarkdown,
+	MarkdownLifetime,
+	type MarkdownRenderHost,
+} from './markdown-render';
 
 import type { Comment } from './types';
 import type { AnnotecaSettings, CategoryDefinition } from './types';
@@ -42,6 +48,16 @@ import {
 } from './view-utils';
 
 export interface DecorationContext {
+	// Needed by MarkdownRenderer to render comment bodies in the popover (#6).
+	// This module otherwise touches Obsidian only for `setIcon`; carrying the
+	// App on the context keeps that dependency explicit and injectable rather
+	// than reaching for a global.
+	app: App;
+	// Fallback source path for resolving links in a rendered body, used only
+	// when the editor cannot say which file it holds. Empty string when unknown,
+	// which still renders, it just cannot resolve them. Prefer sourcePathFor,
+	// which asks the view first.
+	getSourcePath(): string;
 	getSettings(): AnnotecaSettings;
 	onMarkerClick(marker: Comment): void;
 	openInReviewer(marker: Comment): void;
@@ -53,7 +69,18 @@ export interface DecorationContext {
 	reviseAddressed(marker: Comment): void;
 	rejectAddressed(marker: Comment): void;
 	copyPermalink(marker: Comment): void;
-	submitReply(marker: Comment, body: string, author: string): void;
+	// Resolves to whether the reply was actually written. The write can be
+	// refused (the marker was deleted, or an id-less one changed underneath),
+	// and the composer must not clear the draft or close on a refusal: the
+	// draft is the only copy of what the user typed.
+	submitReply(
+		marker: Comment,
+		body: string,
+		author: string,
+		// The file THIS editor holds. A popover in a non-active split pane must
+		// write to its own note, not to whatever is focused.
+		sourcePath: string,
+	): Promise<boolean>;
 	getAuthorTag(): string;
 	getAuthorOptions(): string[];
 	authorColor(tag: string): string | undefined;
@@ -656,9 +683,14 @@ function renderReplyRow(
 	reply: { author: string; date: string; body: string },
 	parent: HTMLElement,
 	ctx: DecorationContext,
+	host: MarkdownRenderHost,
 ): void {
-	renderSharedReplyRow(parent, reply, HOVER_REPLY_CLASSES, (el, tag) =>
-		applyAuthorColor(el, tag, ctx),
+	renderSharedReplyRow(
+		parent,
+		reply,
+		HOVER_REPLY_CLASSES,
+		(el, tag) => applyAuthorColor(el, tag, ctx),
+		host,
 	);
 }
 
@@ -672,6 +704,18 @@ const HOVER_DELAY_MS: Record<AnnotecaSettings['hoverDelay'], number> = {
 	relaxed: 600,
 };
 
+// The file THIS editor holds, which is not necessarily the active one. Hovering
+// a marker in a split pane does not activate that leaf, so asking the workspace
+// for the active file resolves a body's relative links and wikilinks against
+// whichever note happens to be focused, quietly pointing them at the wrong note.
+// The editor itself knows, via the state field Obsidian installs on every
+// markdown editor. `false` makes the lookup optional, for a state built without
+// it (the unit tests build bare CodeMirror states).
+function sourcePathFor(ctx: DecorationContext, view: EditorView): string {
+	const info = view.state.field(editorInfoField, false);
+	return info?.file?.path ?? ctx.getSourcePath();
+}
+
 // Builds the comment popover DOM. Extracted from the hover tooltip so the
 // tap-anchored popover renders the identical surface instead of a second,
 // drifting copy: every action here (accept, revise, reject, star, reply,
@@ -679,15 +723,43 @@ const HOVER_DELAY_MS: Record<AnnotecaSettings['hoverDelay'], number> = {
 //
 // Takes `view` rather than a document because it needs the editor window for
 // element creation and dispatches the reply-composer effect back into it.
+//
+// Returns a destroy hook alongside the DOM: CodeMirror calls it when the
+// tooltip goes away, and it unloads the render lifetime below.
 function buildCommentPopover(
 	ctx: DecorationContext,
 	view: EditorView,
 	m: Comment,
-): HTMLElement {
+): { dom: HTMLElement; destroy: () => void } {
+	// One lifetime per popover instance. Whatever a rendered body creates
+	// (embeds, code-block processors, another plugin's post-processor) hangs off
+	// this and is unloaded when CodeMirror destroys the tooltip. A popover is
+	// ephemeral (the hover one dismisses on mouse-out), so anything longer-lived
+	// than the tooltip would accumulate for as long as the vault stays open.
+	const lifetime = new MarkdownLifetime();
+	lifetime.load();
+	const host: MarkdownRenderHost = {
+		app: ctx.app,
+		component: lifetime,
+		sourcePath: sourcePathFor(ctx, view),
+		enabled: ctx.getSettings().renderMarkdownBodies,
+		// MarkdownRenderer.render is async, but a CodeMirror tooltip measures and
+		// positions itself synchronously right after create() returns. So the
+		// tooltip is placed around an empty box and the content lands afterwards,
+		// leaving it mis-sized and, above the anchor, visibly out of place.
+		// repositionTooltips is CodeMirror's own answer for exactly this: content
+		// that changed outside a view update.
+		onRendered: () => repositionTooltips(view),
+	};
 	const dom = view.dom.ownerDocument.win.createDiv();
 	dom.addClass('annoteca-hover-preview');
-	// Tag the outer .cm-tooltip ancestor (closest, not parentElement,
-	// which can miss it) so styles.css strips the default frame.
+	// Tag the .cm-tooltip so styles.css strips the default frame. In practice
+	// CodeMirror puts that class on THIS element rather than on a wrapper, so
+	// closest() matches self and both classes end up on one node. That is why
+	// `.cm-tooltip.annoteca-hover-preview` exists in styles.css: the frame-
+	// stripping rule is a two-class selector on the same element and would
+	// otherwise win against the popover's own sizing. closest() rather than
+	// parentElement so this still works if CodeMirror ever does wrap it.
 	queueMicrotask(() => {
 		const tip = dom.closest('.cm-tooltip');
 		if (tip instanceof HTMLElement) tip.addClass('annoteca-hover-tooltip');
@@ -735,7 +807,11 @@ function buildCommentPopover(
 		reflectInPlace: true,
 	});
 
-	dom.createDiv({ cls: 'annoteca-hover-body', text: m.body });
+	renderCommentMarkdown(
+		dom.createDiv({ cls: 'annoteca-hover-body' }),
+		m.body,
+		host,
+	);
 
 	const repliesCount = m.replies.length;
 	if (repliesCount > 0) {
@@ -756,7 +832,7 @@ function buildCommentPopover(
 				ctx.openInReviewer(m);
 			});
 		}
-		for (const r of shown) renderReplyRow(r, repliesBlock, ctx);
+		for (const r of shown) renderReplyRow(r, repliesBlock, ctx, host);
 	}
 
 	// F-270/F-271/F-272: the addressed note, plus the verbatim original
@@ -779,10 +855,11 @@ function buildCommentPopover(
 			text: formatStamp(m.addressed.date),
 		});
 		if (m.addressed.note) {
-			block.createDiv({
-				cls: 'annoteca-hover-reply-body',
-				text: m.addressed.note,
-			});
+			renderCommentMarkdown(
+				block.createDiv({ cls: 'annoteca-hover-reply-body' }),
+				m.addressed.note,
+				host,
+			);
 		}
 		if (m.addressed.original !== undefined) {
 			const anchorResolves = findAnchorRange(view.state.doc, m) !== null;
@@ -794,6 +871,10 @@ function buildCommentPopover(
 				cls: 'annoteca-hover-original-label',
 				text: label,
 			});
+			// Stays plain text even with rendering on. This is the verbatim prose
+			// Reject would splice back into the document, so it has to be shown as
+			// what would be restored, not as what that text renders to. Formatting
+			// it would hide the difference between `**bold**` and bold.
 			orig.createDiv({
 				cls: 'annoteca-hover-original-body',
 				text: m.addressed.original,
@@ -816,10 +897,11 @@ function buildCommentPopover(
 			cls: 'annoteca-hover-reply-date',
 			text: formatStamp(m.resolution.date),
 		});
-		block.createDiv({
-			cls: 'annoteca-hover-reply-body',
-			text: m.resolution.note,
-		});
+		renderCommentMarkdown(
+			block.createDiv({ cls: 'annoteca-hover-reply-body' }),
+			m.resolution.note,
+			host,
+		);
 	}
 
 	const actions = dom.createDiv({
@@ -918,7 +1000,19 @@ function buildCommentPopover(
 		});
 	}
 
-	return dom;
+	// A rendered body can contain links. Following one navigates the workspace,
+	// which would otherwise leave a pinned popover hanging over the note the user
+	// just arrived at: clickKeepsTapPopover exempts everything inside
+	// .annoteca-hover-preview, and that exemption is what keeps the popover alive
+	// while a reply is being typed, so it cannot simply be narrowed.
+	dom.addEventListener('click', (e) => {
+		const target = e.target;
+		if (target instanceof HTMLElement && target.closest('a')) {
+			closeTapPopover(view);
+		}
+	});
+
+	return { dom, destroy: () => lifetime.unload() };
 }
 
 function hoverTooltipExtension(
@@ -983,9 +1077,11 @@ function hoverTooltipExtension(
 				pos: hoverRange.from,
 				end: hoverRange.to,
 				above: true,
-				create: () => ({
-					dom: buildCommentPopover(ctx, view, m),
-				}),
+				// destroy is forwarded, not dropped: it unloads the popover's
+				// markdown render lifetime. A hover tooltip is created and
+				// destroyed on every dwell, so leaking one per hover would be the
+				// fastest leak in the plugin.
+				create: () => buildCommentPopover(ctx, view, m),
 			};
 		},
 		{ hoverTime: HOVER_DELAY_MS[ctx.getSettings().hoverDelay] },
@@ -1137,12 +1233,71 @@ function buildReplyComposerDom(
 		cls: 'annoteca-hover-action mod-cta',
 		text: 'Send',
 	});
+	// Submitting is asynchronous now that the write can be refused, which opens a
+	// window the synchronous version did not have. Three things have to hold
+	// across it, and none of them are handled by disabling the button alone:
+	// Send is not the only way in (Cmd/Ctrl+Enter calls this directly), text
+	// typed mid-flight would be thrown away by a callback that then closes the
+	// composer, and the debounced draft save could fire after the draft was
+	// cleared and resurrect it.
+	let pending = false;
 	const submit = (): void => {
+		if (pending) return;
 		const body = textarea.value.trim();
 		if (body.length === 0) return;
-		ctx.submitReply(m, body, authorSelect.value);
-		if (draftKey) ctx.clearDraft(draftKey);
-		view.dispatch({ effects: setReplyComposerEffect.of(null) });
+		pending = true;
+		send.disabled = true;
+		// Read-only rather than merely ignored, so the user is not typing into a
+		// field whose contents are about to be discarded.
+		textarea.readOnly = true;
+		// Flush the debounced draft save rather than cancelling it. Cancelling
+		// alone fixed the resurrection problem (a queued save landing after
+		// clearDraft and bringing the sent text back) but created a worse one:
+		// submitting within the 300ms debounce meant the newest text had never
+		// been stored, so a refused or failed write left it only in a textarea
+		// that closing the composer discards. Saving now, clearing only on
+		// success, is correct in both directions.
+		if (saveTimer !== undefined) {
+			window.clearTimeout(saveTimer);
+			saveTimer = undefined;
+		}
+		if (draftKey) ctx.saveDraft(draftKey, textarea.value);
+		// The write is awaited, and the composer can be dismissed across that
+		// await: Escape, Cancel, or anything that tears the tooltip down. Then
+		// release() re-enables a Send button and a textarea that are no longer
+		// in the document, and the catch branch raises a Notice about a
+		// composer the user has already closed. Checking the textarea rather
+		// than a flag catches every teardown path, including the ones that do
+		// not run through this closure at all.
+		const release = (): boolean => {
+			if (!textarea.isConnected) return false;
+			pending = false;
+			send.disabled = false;
+			textarea.readOnly = false;
+			return true;
+		};
+		void ctx
+			.submitReply(m, body, authorSelect.value, sourcePathFor(ctx, view))
+			.then((wrote) => {
+				if (!wrote) {
+					// Leave the composer open with the text still in it. The
+					// refusal has already explained itself, and the user can
+					// retry once the note catches up.
+					release();
+					return;
+				}
+				if (draftKey) ctx.clearDraft(draftKey);
+				view.dispatch({ effects: setReplyComposerEffect.of(null) });
+			})
+			.catch(() => {
+				// A vault read or write can reject on an adapter, permission, or
+				// transient I/O error. Without this the composer stays disabled
+				// with the user's text trapped in it, and the rejection surfaces
+				// as an unhandled promise. The text is kept and Send works again.
+				// A dismissed composer stays dismissed and says nothing.
+				if (release())
+					new Notice('Could not save the reply. Try again.');
+			});
 	};
 	send.addEventListener('click', (e) => {
 		e.preventDefault();
@@ -1258,10 +1413,9 @@ function tapPopoverField(
 					above: true,
 					strictSide: false,
 					// The same builder the hover tooltip uses, so the two
-					// surfaces cannot drift apart.
-					create: (view) => ({
-						dom: buildCommentPopover(ctx, view, m),
-					}),
+					// surfaces cannot drift apart. Returned whole, so its
+					// destroy hook reaches CodeMirror too.
+					create: (view) => buildCommentPopover(ctx, view, m),
 				};
 			}),
 	});

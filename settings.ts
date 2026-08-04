@@ -49,6 +49,7 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 	// the safe literal to sit here.
 	markerClickAction: 'panel',
 	markerReplyCount: true,
+	renderMarkdownBodies: true,
 
 	anchorStyle: 'wavy',
 	anchorThickness: 'medium',
@@ -85,6 +86,53 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 	skillExportTarget: 'claude',
 	readingViewIndicator: 'banner',
 };
+
+// data.json is user-editable, and it also arrives over sync and out of a
+// restored backup, so a stored value is not guaranteed to be the type it was
+// written as. Every read of this setting is a truthiness test, so a stored
+// string "false" would silently turn a disabled setting back on.
+//
+// Both entry points go through here on purpose. Normalizing only on load left
+// the restore path spreading parsed JSON straight into the live settings, so a
+// backup file could reintroduce exactly the value the load path exists to
+// reject.
+//
+// The fallback is a parameter because ABSENT and WRONG TYPE are different
+// questions. Absent means the stored blob simply does not carry the key, and
+// the answer is whatever the surrounding spread already settled on: the default
+// on load, the current live value on restore. Only a present-but-non-boolean
+// value is a rejection.
+export function normalizeRenderMarkdownBodies(
+	stored: unknown,
+	fallback: boolean,
+): boolean {
+	return typeof stored === 'boolean' ? stored : fallback;
+}
+
+// The whole "restore settings from a backup file" merge, in one pure function.
+//
+// It lives here rather than inline in the plugin method for a reason found by
+// mutation: with the merge inline, deleting the normalizing entirely left the
+// suite green, because no test reaches main.ts at runtime. A normalizer nothing
+// can test is a normalizer that quietly stops running.
+//
+// Precedence is the same as the inline spread it replaces. Defaults fill gaps,
+// the live settings win over those, and the backup wins over both, because
+// restoring is an explicit request to take the file's values.
+export function mergeRestoredSettings(
+	current: AnnotecaSettings,
+	parsed: Partial<AnnotecaSettings>,
+): AnnotecaSettings {
+	return {
+		...DEFAULT_SETTINGS,
+		...current,
+		...parsed,
+		renderMarkdownBodies: normalizeRenderMarkdownBodies(
+			parsed.renderMarkdownBodies,
+			current.renderMarkdownBodies,
+		),
+	};
+}
 
 // Resolve the active category list given current settings. Centralized so the
 // modal, decorations, and views consume one source of truth.
@@ -219,6 +267,14 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 								panel: 'Open in side panel',
 								popover: 'Show popover',
 							},
+						},
+					},
+					{
+						name: 'Render Markdown in comments',
+						desc: 'Show comment bodies, replies and notes as formatted Markdown in the marker popover and the Hub panel, instead of their raw source. Links, emphasis, code and lists render. The one-line body shown beside a marker in the editor stays plain text either way, so it cannot reflow the document.',
+						control: {
+							type: 'toggle',
+							key: 'renderMarkdownBodies',
 						},
 					},
 					{
@@ -561,6 +617,12 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 				panel: 'Open in side panel',
 				popover: 'Show popover',
 			},
+		);
+		this.addToggleRow(
+			containerEl,
+			'Render Markdown in comments',
+			'Show comment bodies, replies and notes as formatted Markdown in the marker popover and the Hub panel, instead of their raw source. Links, emphasis, code and lists render. The one-line body shown beside a marker in the editor stays plain text either way, so it cannot reflow the document.',
+			'renderMarkdownBodies',
 		);
 		this.addToggleRow(
 			containerEl,

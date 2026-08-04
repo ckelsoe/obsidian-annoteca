@@ -1,6 +1,8 @@
 // Import helpers (F-221, F-222, F-230). Pure conversion utilities; commands
 // in main.ts wrap these with backup-confirmation modals and bulk vault writes.
 
+import { serialize } from './parser';
+
 // Match `%%text%%` Obsidian native comments. Non-greedy, multiline.
 const NATIVE_COMMENT_RE = /%%([\s\S]*?)%%/g;
 
@@ -26,7 +28,12 @@ function convertComments(
 		if (skip?.(body)) return full;
 		converted += 1;
 		const cleaned = body.trim().replace(/\n+/g, ' ');
-		return `<!-- annoteca/${category}: ${cleaned} -->`;
+		// Through serialize() rather than interpolated, so imported text gets
+		// the same `-->` escaping every other write path uses. A `%%...%%`
+		// native comment CAN contain `-->` (only `%%` closes it), and pasting
+		// that straight into an HTML comment ended the marker early and spilled
+		// the rest of the comment into the document as visible text.
+		return serialize({ category, body: cleaned });
 	});
 	return { updated, converted };
 }

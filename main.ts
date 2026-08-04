@@ -24,6 +24,8 @@ import {
 	DEFAULT_SETTINGS,
 	AnnotecaSettingTab,
 	resolveSettingsCategories,
+	normalizeRenderMarkdownBodies,
+	mergeRestoredSettings,
 } from './settings';
 import { getCategoryOrFallback } from './categories';
 import {
@@ -97,6 +99,13 @@ export default class AnnotecaPlugin extends Plugin {
 
 		this.registerEditorExtension(
 			buildAnnotecaExtension({
+				app: this.app,
+				// The note the popover's comment lives in, for resolving
+				// relative links and wikilinks in a rendered body. The editor
+				// extension is per-leaf but the context is built once, so this
+				// reads the active file at render time rather than capturing it.
+				getSourcePath: () =>
+					this.app.workspace.getActiveFile()?.path ?? '',
 				getSettings: () => this.settings,
 				onMarkerClick: (m) => this.openReviewerOnComment(m),
 				openInReviewer: (m) => this.openReviewerOnComment(m),
@@ -128,9 +137,8 @@ export default class AnnotecaPlugin extends Plugin {
 				copyPermalink: (m) => {
 					void this.copyCommentId(m);
 				},
-				submitReply: (m, body, author) => {
-					void this.submitReplyFromPopup(m, body, author);
-				},
+				submitReply: (m, body, author, sourcePath) =>
+					this.submitReplyFromPopup(m, body, author, sourcePath),
 				getAuthorTag: () => this.comments.resolvedAuthor(),
 				getAuthorOptions: () => this.authorPickerOptions([]),
 				authorColor: (tag) => this.authorColor(tag),
@@ -268,6 +276,10 @@ export default class AnnotecaPlugin extends Plugin {
 			markerClickAction: resolveMarkerClickAction(
 				loaded?.markerClickAction,
 				isMobile(),
+			),
+			renderMarkdownBodies: normalizeRenderMarkdownBodies(
+				loaded?.renderMarkdownBodies,
+				DEFAULT_SETTINGS.renderMarkdownBodies,
 			),
 		};
 
@@ -558,6 +570,11 @@ export default class AnnotecaPlugin extends Plugin {
 									await this.deleteAllResolvedInFile(
 										file.path,
 									);
+								// null means the file could not be opened and
+								// the service has already said so. Reporting a
+								// count here would claim a deletion that did
+								// not happen.
+								if (removed === null) return;
 								const noun =
 									removed === 1 ? 'comment' : 'comments';
 								new Notice(
@@ -945,9 +962,12 @@ export default class AnnotecaPlugin extends Plugin {
 				this.settings,
 				comment,
 				() => {
+					// No freshness guard: this is the explicit destructive
+					// action, already confirmed by the modal above, so it acts
+					// on whatever is currently at the marker.
 					void this.comments
 						.resolveAndRemoveComment(path, comment)
-						.then(resolve);
+						.then(() => resolve());
 				},
 				{
 					title: 'Resolve and remove comment',
@@ -961,12 +981,16 @@ export default class AnnotecaPlugin extends Plugin {
 		return this.comments.listResolvedInFile(path);
 	}
 
-	async deleteAllResolvedInFile(path: string): Promise<number> {
+	async deleteAllResolvedInFile(path: string): Promise<number | null> {
 		return this.comments.deleteAllResolvedInFile(path);
 	}
 
-	async appendReply(comment: Comment, reply: Reply): Promise<void> {
-		await this.comments.appendReply(comment, reply);
+	async appendReply(
+		path: string,
+		comment: Comment,
+		reply: Reply,
+	): Promise<boolean> {
+		return this.comments.appendReply(path, comment, reply);
 	}
 
 	async toggleResolutionFromPopup(comment: Comment): Promise<void> {
@@ -1029,21 +1053,36 @@ export default class AnnotecaPlugin extends Plugin {
 		await this.comments.rejectAddressed(path, comment);
 	}
 
+	// Returns whether the reply was written, so the popup composer knows not to
+	// clear the draft and close when the write was refused.
 	async submitReplyFromPopup(
 		comment: Comment,
 		body: string,
-		author?: string,
-	): Promise<void> {
+		author: string | undefined,
+		// The file the popover's own editor holds. Falls back to the active file
+		// only when the editor cannot say, which is the same rule the popover
+		// uses to resolve links in a rendered body.
+		sourcePath?: string,
+	): Promise<boolean> {
 		const trimmed = body.trim();
-		if (trimmed.length === 0) return;
+		if (trimmed.length === 0) return false;
 		const tag = (author ?? '').trim();
 		const reply: Reply = {
 			author: tag !== '' ? tag : this.comments.resolvedAuthor(),
 			date: todayISO(),
 			body: trimmed,
 		};
-		await this.comments.appendReply(comment, reply);
-		new Notice('Reply added.');
+		// Only claim success when something was written. A refused write has
+		// already explained itself with its own notice, and the composer keeps
+		// the text so the user can retry once the note catches up.
+		const path =
+			sourcePath && sourcePath !== ''
+				? sourcePath
+				: this.app.workspace.getActiveFile()?.path;
+		if (!path) return false;
+		const wrote = await this.comments.appendReply(path, comment, reply);
+		if (wrote) new Notice('Reply added.');
+		return wrote;
 	}
 
 	// Author picker options (F-274): the global author tag, the configured
@@ -1651,11 +1690,12 @@ export default class AnnotecaPlugin extends Plugin {
 		const body = await this.app.vault.read(file);
 		try {
 			const parsed = JSON.parse(body) as Partial<AnnotecaSettings>;
-			this.settings = {
-				...DEFAULT_SETTINGS,
-				...this.settings,
-				...parsed,
-			};
+			// A backup file is the same untrusted shape as data.json, so it gets
+			// the same normalizing the load path does. The merge is a pure
+			// function in settings.ts so it is reachable by tests; inline here it
+			// was not, and mutation showed the normalizing could be deleted
+			// outright with the suite still green.
+			this.settings = mergeRestoredSettings(this.settings, parsed);
 			await this.saveSettings();
 			new Notice('Settings restored.');
 		} catch (err) {

@@ -3,6 +3,9 @@
 export interface Reply {
 	author: string;
 	date: string; // ISO date (YYYY-MM-DD) or full timestamp (YYYY-MM-DDTHH:MM:SS)
+	// Stored on one line. serialize() folds any line break to a space, because
+	// `[reply ...]` is matched line by line and a continuation line ends the
+	// marker's structured section. See escapeInline in parser.ts.
 	body: string;
 }
 
@@ -117,6 +120,16 @@ export interface AnnotecaSettings {
 	// surfaces never disagree about the size of a thread. A marker with no
 	// replies shows nothing either way: a "0" on the common case is noise.
 	markerReplyCount: boolean;
+
+	// When true (default), comment bodies, replies and notes render as markdown
+	// in the popover and the Hub panel instead of showing their source. `body`
+	// has been documented as freeform inline markdown since the format was
+	// written, and AI assistants emit markdown by default, so leaving it as
+	// source was the common case rather than the exception.
+	//
+	// Does NOT affect the inline body widget in the editor, which stays plain
+	// truncated text on purpose. See markdown-render.ts.
+	renderMarkdownBodies: boolean;
 
 	// Visual character of the anchor underline. Applies to every category;
 	// per-category urgency comes from the tier on each CategoryDefinition.

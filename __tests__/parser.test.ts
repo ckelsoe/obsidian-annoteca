@@ -675,3 +675,762 @@ describe('parser: nowISO', () => {
 		expect(todayISO(new Date(2026, 4, 25, 9, 7, 3))).toBe('2026-05-25');
 	});
 });
+
+// The rule that used to sit here matched any line starting `[`, so the last
+// line of a body was deleted whenever it began with a bracket. Markdown is full
+// of bracket-leading constructs and Obsidian's wikilink is one, which makes this
+// reachable from ordinary prose rather than from a crafted edge case.
+describe('parser: bracket-leading markdown at the end of a body', () => {
+	const bodyEndingWith = (lastLine: string): string | undefined =>
+		parseAll(
+			[
+				'<!-- annoteca/note: Some prose.',
+				lastLine,
+				'[id=abc12345]',
+				'-->',
+			].join('\n'),
+		)[0]?.body;
+
+	it('keeps an inline markdown link', () => {
+		expect(bodyEndingWith('[the guide](https://example.com/guide)')).toBe(
+			'Some prose.\n[the guide](https://example.com/guide)',
+		);
+	});
+
+	it('keeps a single-word reference-style link definition', () => {
+		expect(bodyEndingWith('[ref]: https://example.com')).toBe(
+			'Some prose.\n[ref]: https://example.com',
+		);
+	});
+
+	// The nastiest case: multi-word label plus `]:` looks exactly like the
+	// `[keyword ...]:` note lines the format defines. Disambiguated by requiring
+	// a timestamp, which every real note line carries.
+	it('keeps a multi-word reference-style link definition', () => {
+		expect(bodyEndingWith('[see the docs]: https://example.com')).toBe(
+			'Some prose.\n[see the docs]: https://example.com',
+		);
+	});
+
+	it('keeps a footnote definition', () => {
+		expect(bodyEndingWith('[^1]: a footnote')).toBe(
+			'Some prose.\n[^1]: a footnote',
+		);
+	});
+
+	it('keeps an Obsidian wikilink', () => {
+		expect(bodyEndingWith('[[Some Note]]')).toBe(
+			'Some prose.\n[[Some Note]]',
+		);
+	});
+
+	it('keeps a task-list-shaped line', () => {
+		expect(bodyEndingWith('[x] done')).toBe('Some prose.\n[x] done');
+	});
+
+	it('still drops an unknown [key=value] line (forward-compat)', () => {
+		expect(bodyEndingWith('[priority=high]')).toBe('Some prose.');
+	});
+
+	it('still drops an unknown stamped keyword line (forward-compat)', () => {
+		expect(bodyEndingWith('[assigned bob 2026-06-20]: take a look')).toBe(
+			'Some prose.',
+		);
+	});
+});
+
+// `-->` closes the HTML comment wrapping every marker. Before the escape it
+// serialized raw, so the marker ended early and the remainder of the body was
+// left behind as visible text in the user's document.
+describe('parser: `-->` in free text round-trips', () => {
+	const roundTrip = (
+		c: Parameters<typeof serialize>[0],
+	): Comment | undefined => parseAll(serialize(c))[0];
+
+	it('survives in a single-line body', () => {
+		const out = serialize({ category: 'note', body: 'arrow --> here' });
+		expect(out).toBe('<!-- annoteca/note: arrow --\\> here -->');
+		expect(parseAll(out)).toHaveLength(1);
+		expect(parseAll(out)[0]?.body).toBe('arrow --> here');
+	});
+
+	it('survives in a multi-line body', () => {
+		const c = roundTrip({
+			category: 'note',
+			body: 'line one\narrow --> here',
+			id: 'abc12345',
+		});
+		expect(c?.body).toBe('line one\narrow --> here');
+	});
+
+	it('survives in a reply body', () => {
+		const c = roundTrip({
+			category: 'note',
+			body: 'body',
+			replies: [{ author: 'bob', date: '2026-06-20', body: 'a --> b' }],
+		});
+		expect(c?.replies[0]?.body).toBe('a --> b');
+	});
+
+	it('survives in a resolution note', () => {
+		const c = roundTrip({
+			category: 'note',
+			body: 'body',
+			resolution: { author: 'bob', date: '2026-06-20', note: 'a --> b' },
+		});
+		expect(c?.resolution?.note).toBe('a --> b');
+	});
+
+	it('survives in an addressed note and its original fence', () => {
+		const c = roundTrip({
+			category: 'note',
+			body: 'body',
+			addressed: {
+				author: 'claude',
+				date: '2026-06-20',
+				note: 'changed a --> b',
+				original: 'the old a --> b text',
+			},
+		});
+		expect(c?.addressed?.note).toBe('changed a --> b');
+		expect(c?.addressed?.original).toBe('the old a --> b text');
+	});
+
+	it('survives in an anchor', () => {
+		const c = roundTrip({
+			category: 'note',
+			body: 'body',
+			anchor: { text: 'points --> there', truncated: false },
+		});
+		expect(c?.anchor?.text).toBe('points --> there');
+	});
+
+	it('emits exactly one `-->` per marker, the terminator', () => {
+		const out = serialize({
+			category: 'note',
+			body: 'a --> b\nc --> d',
+			id: 'abc12345',
+			replies: [{ author: 'bob', date: '2026-06-20', body: 'e --> f' }],
+			resolution: { author: 'bob', date: '2026-06-21', note: 'g --> h' },
+		});
+		expect(out.split('-->')).toHaveLength(2);
+		expect(out.endsWith('\n-->')).toBe(true);
+	});
+
+	it('leaves text without the sequence untouched', () => {
+		const out = serialize({ category: 'note', body: 'a -> b and a --- c' });
+		expect(out).toBe('<!-- annoteca/note: a -> b and a --- c -->');
+	});
+});
+
+// The escape marker has to survive round-tripping too, or a body that already
+// contained the literal `--\>` comes back with the backslash silently removed.
+// Worst in the annoteca-original fence, whose contract is a VERBATIM restore.
+describe('parser: the `-->` escape is reversible at every depth', () => {
+	const roundTripBody = (body: string): string | undefined =>
+		parseAll(serialize({ category: 'note', body, id: 'abc12345' }))[0]
+			?.body;
+
+	it('round-trips a literal --\\> written by the user', () => {
+		expect(roundTripBody('a --\\> b')).toBe('a --\\> b');
+	});
+
+	it('round-trips a literal --\\\\> written by the user', () => {
+		expect(roundTripBody('a --\\\\> b')).toBe('a --\\\\> b');
+	});
+
+	it('round-trips the real terminator and a literal escape side by side', () => {
+		expect(roundTripBody('real --> and literal --\\> together')).toBe(
+			'real --> and literal --\\> together',
+		);
+	});
+
+	it('keeps an annoteca-original fence verbatim', () => {
+		const original = 'He said --> and she wrote --\\> in reply.';
+		const out = serialize({
+			category: 'note',
+			body: 'body',
+			addressed: {
+				author: 'claude',
+				date: '2026-06-20',
+				note: 'edited',
+				original,
+			},
+		});
+		expect(parseAll(out)[0]?.addressed?.original).toBe(original);
+	});
+
+	it('never emits a bare terminator inside the marker', () => {
+		const out = serialize({
+			category: 'note',
+			body: 'a --> b --\\> c --\\\\> d',
+			id: 'abc12345',
+		});
+		expect(out.split('-->')).toHaveLength(2);
+	});
+});
+
+// Bounding the one case the escape cannot disambiguate: a marker written by a
+// version that predates it, whose text legitimately contains a literal `--\>`.
+// There is no sentinel in the old format, so a reader cannot tell that from an
+// encoded terminator. What matters is how far the consequence actually reaches.
+describe('parser: legacy markers containing a literal --\\>', () => {
+	const legacy = [
+		'<!-- annoteca/note: an escaped arrow --\\> written before encoding existed',
+		'[id=legacy01]',
+		'-->',
+	].join('\n');
+
+	it('reads one backslash off, which is the known limitation', () => {
+		expect(parseAll(legacy)[0]?.body).toBe(
+			'an escaped arrow --> written before encoding existed',
+		);
+	});
+
+	// The important half: parse + re-serialize is a fixed point, so merely
+	// opening a vault does not rewrite anyone's files, and repeated edits do not
+	// walk the text further with each pass.
+	it('round-trips byte-identically, so the file is never rewritten', () => {
+		const parsed = parseAll(legacy)[0];
+		expect(parsed).toBeDefined();
+		if (!parsed) return;
+		expect(
+			serialize({
+				id: parsed.id,
+				category: parsed.category,
+				body: parsed.body,
+				date: parsed.date,
+				author: parsed.author,
+				anchor: parsed.anchor,
+				replies: parsed.replies,
+				addressed: parsed.addressed,
+				resolution: parsed.resolution,
+			}),
+		).toBe(legacy);
+	});
+
+	it('is stable across repeated parse/serialize passes', () => {
+		let text = legacy;
+		for (let i = 0; i < 5; i++) {
+			const c = parseAll(text)[0];
+			if (!c) throw new Error('lost the marker');
+			text = serialize({
+				id: c.id,
+				category: c.category,
+				body: c.body,
+				date: c.date,
+				author: c.author,
+				anchor: c.anchor,
+				replies: c.replies,
+				addressed: c.addressed,
+				resolution: c.resolution,
+			});
+		}
+		expect(text).toBe(legacy);
+	});
+});
+
+describe('parser: a newline in a single-line field cannot destroy the marker', () => {
+	const roundTrip = (
+		c: Parameters<typeof serialize>[0],
+	): Comment | undefined => parseAll(serialize(c))[0];
+
+	// Every bracketed trailing line is matched per line, so a raw newline in one
+	// of these fields used to end the backward walk on the continuation line and
+	// absorb the whole trailing block, the [id=...] included, into the body.
+	it('keeps the id, the thread and the body when a reply spans lines', () => {
+		const c = roundTrip({
+			category: 'note',
+			body: 'the body',
+			id: 'abcd1234',
+			date: '2024-01-01',
+			replies: [
+				{
+					author: 'amy',
+					date: '2024-01-02',
+					body: '- first point\n- second point',
+				},
+			],
+		});
+		expect(c?.id).toBe('abcd1234');
+		expect(c?.body).toBe('the body');
+		expect(c?.replies).toHaveLength(1);
+		expect(c?.replies[0]?.body).toBe('- first point - second point');
+	});
+
+	it('collapses a newline in a resolution note', () => {
+		const c = roundTrip({
+			category: 'note',
+			body: 'body',
+			id: 'abcd1234',
+			resolution: { author: 'bob', date: '2026-06-20', note: 'a\nb' },
+		});
+		expect(c?.id).toBe('abcd1234');
+		expect(c?.resolution?.note).toBe('a b');
+	});
+
+	it('collapses a newline in an addressed note, leaving the fence alone', () => {
+		const c = roundTrip({
+			category: 'note',
+			body: 'body',
+			id: 'abcd1234',
+			addressed: {
+				author: 'claude',
+				date: '2026-06-20',
+				note: 'first\nsecond',
+				original: 'kept\nacross\nlines',
+			},
+		});
+		expect(c?.id).toBe('abcd1234');
+		expect(c?.addressed?.note).toBe('first second');
+		// The fence is delimited, not line-oriented, so it must stay multi-line.
+		expect(c?.addressed?.original).toBe('kept\nacross\nlines');
+	});
+
+	it('collapses a newline in an anchor', () => {
+		const c = roundTrip({
+			category: 'note',
+			body: 'body',
+			id: 'abcd1234',
+			anchor: { text: 'which\nproducts', truncated: false },
+		});
+		expect(c?.id).toBe('abcd1234');
+		expect(c?.anchor?.text).toBe('which products');
+	});
+
+	it('leaves a multi-line body multi-line', () => {
+		const c = roundTrip({
+			category: 'note',
+			body: 'line one\nline two',
+			id: 'abcd1234',
+		});
+		expect(c?.body).toBe('line one\nline two');
+	});
+
+	it('collapses a run of blank lines to one space, and handles CRLF', () => {
+		const c = roundTrip({
+			category: 'note',
+			body: 'body',
+			replies: [
+				{ author: 'amy', date: '2024-01-02', body: 'a\r\n\n\nb' },
+			],
+		});
+		expect(c?.replies[0]?.body).toBe('a b');
+	});
+
+	it('still escapes the terminator in a field it also collapses', () => {
+		const c = roundTrip({
+			category: 'note',
+			body: 'body',
+			replies: [{ author: 'amy', date: '2024-01-02', body: 'a -->\nb' }],
+		});
+		expect(c?.replies[0]?.body).toBe('a --> b');
+	});
+});
+
+describe('parser: a code fence inside the captured original cannot close the block', () => {
+	const roundTrip = (
+		c: Parameters<typeof serialize>[0],
+	): Comment | undefined => parseAll(serialize(c))[0];
+
+	// The fence is the second terminator, alongside `-->`. The captured prose is
+	// arbitrary text lifted out of the user's document, so it can hold a code
+	// block; a fixed ``` delimiter closed the fence on that line and the
+	// addressed state, the id and the original were all lost.
+	it('keeps the original, the addressed state and the id', () => {
+		const original = 'before\n```js\nconst a = 1;\n```\nafter';
+		const c = roundTrip({
+			category: 'note',
+			body: 'b',
+			id: 'abcd1234',
+			addressed: {
+				author: 'amy',
+				date: '2024-01-01',
+				note: 'n',
+				original,
+			},
+		});
+		expect(c?.id).toBe('abcd1234');
+		expect(c?.body).toBe('b');
+		expect(c?.addressed?.note).toBe('n');
+		expect(c?.addressed?.original).toBe(original);
+	});
+
+	it('widens the fence past the longest run in the content', () => {
+		const out = serialize({
+			category: 'note',
+			body: 'b',
+			addressed: {
+				author: 'amy',
+				date: '2024-01-01',
+				note: 'n',
+				original: '````\nnested\n````',
+			},
+		});
+		expect(out).toContain('`````annoteca-original');
+	});
+
+	it('still writes a plain three-backtick fence for ordinary prose', () => {
+		const out = serialize({
+			category: 'note',
+			body: 'b',
+			addressed: {
+				author: 'amy',
+				date: '2024-01-01',
+				note: 'n',
+				original: 'just prose',
+			},
+		});
+		expect(out).toContain('```annoteca-original');
+		expect(out).not.toContain('````annoteca-original');
+	});
+
+	it('still reads a legacy three-backtick marker written before this change', () => {
+		const legacy = [
+			'<!-- annoteca/note: b',
+			'[id=abcd1234]',
+			'[addressed amy 2024-01-01]: n',
+			'```annoteca-original',
+			'the old sentence',
+			'```',
+			'-->',
+		].join('\n');
+		const c = parseAll(legacy)[0];
+		expect(c?.id).toBe('abcd1234');
+		expect(c?.addressed?.original).toBe('the old sentence');
+	});
+
+	it('survives a fence and an arrow together', () => {
+		const original = 'a --> b\n```\ncode\n```';
+		const c = roundTrip({
+			category: 'note',
+			body: 'b',
+			id: 'abcd1234',
+			addressed: {
+				author: 'amy',
+				date: '2024-01-01',
+				note: 'n',
+				original,
+			},
+		});
+		expect(c?.addressed?.original).toBe(original);
+		expect(c?.id).toBe('abcd1234');
+	});
+});
+
+describe('parser: an annoteca-original fence in a body is body text, not an original', () => {
+	const roundTrip = (
+		c: Parameters<typeof serialize>[0],
+	): Comment | undefined => parseAll(serialize(c))[0];
+
+	// Lifting out any block tagged annoteca-original deleted it from the file,
+	// because originalText is dropped when there is no addressed note to hang it
+	// on. Only a fence directly after the [addressed ...] line is an original.
+	it('keeps a three-backtick fence written in a body', () => {
+		const body =
+			'the format looks like:\n```annoteca-original\nold text\n```\nclear?';
+		const c = roundTrip({ category: 'note', body, id: 'abcd1234' });
+		expect(c?.body).toBe(body);
+		expect(c?.id).toBe('abcd1234');
+		expect(c?.addressed).toBeUndefined();
+	});
+
+	it('keeps a longer fence written in a body', () => {
+		const body = 'nested:\n````annoteca-original\ninner\n````\ndone';
+		const c = roundTrip({ category: 'note', body, id: 'abcd1234' });
+		expect(c?.body).toBe(body);
+	});
+
+	it('still lifts the fence that follows an [addressed ...] line', () => {
+		const c = roundTrip({
+			category: 'note',
+			body: 'b',
+			id: 'abcd1234',
+			addressed: {
+				author: 'amy',
+				date: '2024-01-01',
+				note: 'n',
+				original: 'the old sentence',
+			},
+		});
+		expect(c?.addressed?.original).toBe('the old sentence');
+		expect(c?.body).toBe('b');
+	});
+
+	it('picks the addressed fence even when the body shows one first', () => {
+		const c = roundTrip({
+			category: 'note',
+			body: 'example:\n```annoteca-original\ndecoy\n```',
+			id: 'abcd1234',
+			addressed: {
+				author: 'amy',
+				date: '2024-01-01',
+				note: 'n',
+				original: 'the real original',
+			},
+		});
+		expect(c?.addressed?.original).toBe('the real original');
+		expect(c?.body).toBe('example:\n```annoteca-original\ndecoy\n```');
+	});
+});
+
+describe('parser: the original fence need not touch the [addressed ...] line', () => {
+	// serialize() writes the fence immediately after the [addressed ...] line,
+	// so the plugin never produces any of the markers below. Hand-written and
+	// ASSISTANT-written ones do, and an assistant writing markers is the whole
+	// premise: data-format.md says only "inside the [addressed ...] note", a
+	// blank line before a fenced block is ordinary Markdown, and nothing stops a
+	// [reply ...] or [resolved ...] line from landing in between.
+	//
+	// Requiring adjacency left the fence sitting in the content, and the
+	// backward line-walk stops dead on a line it cannot classify. The whole
+	// trailing block then collapsed into the body: no id, no addressed state,
+	// no original. Accept/Revise/Reject stop rendering, Reject can no longer
+	// restore the prose, and findMalformedMarkers does not flag any of it,
+	// because the marker is perfectly well-formed.
+	const marker = (...between: string[]): string =>
+		[
+			'<!-- annoteca/clarify: tighten this',
+			'[id=abcd1234]',
+			'[date=2026-06-20]',
+			'[addressed claude 2026-06-20]: Cut the framing.',
+			...between,
+			'```annoteca-original',
+			'the old sentence',
+			'```',
+			'-->',
+		].join('\n');
+
+	const expectIntact = (c: Comment | undefined): void => {
+		expect(c?.id).toBe('abcd1234');
+		expect(c?.body).toBe('tighten this');
+		expect(c?.addressed?.note).toBe('Cut the framing.');
+		expect(c?.addressed?.original).toBe('the old sentence');
+	};
+
+	it('reads a fence separated by a blank line', () => {
+		expectIntact(parseAll(marker(''))[0]);
+	});
+
+	it('reads a fence with a [reply ...] line in between', () => {
+		const c = parseAll(marker('[reply bob 2026-06-21]: looks good'))[0];
+		expectIntact(c);
+		expect(c?.replies).toHaveLength(1);
+	});
+
+	it('reads a fence written after the [resolved ...] line', () => {
+		const c = parseAll(marker('[resolved bob 2026-06-21]: done'))[0];
+		expectIntact(c);
+		expect(c?.resolution?.note).toBe('done');
+	});
+
+	it('reads a fence separated by a blank line in a CRLF file', () => {
+		const c = parseAll(marker('').replace(/\n/g, '\r\n'))[0];
+		expect(c?.id).toBe('abcd1234');
+		expect(c?.addressed?.original).toBe('the old sentence');
+	});
+
+	it('leaves a fence written ABOVE the [addressed ...] line in the body', () => {
+		// It cannot be that note's original, so it is prose. The trailing block
+		// below it still parses.
+		const c = parseAll(
+			[
+				'<!-- annoteca/clarify: the format looks like',
+				'```annoteca-original',
+				'old text',
+				'```',
+				'[addressed claude 2026-06-20]: Cut the framing.',
+				'-->',
+			].join('\n'),
+		)[0];
+		expect(c?.body).toBe(
+			'the format looks like\n```annoteca-original\nold text\n```',
+		);
+		expect(c?.addressed?.note).toBe('Cut the framing.');
+		expect(c?.addressed?.original).toBeUndefined();
+	});
+
+	it('keeps a whole marker quoted in a body when there is no real addressed note', () => {
+		// The [addressed ...] line here is prose, and the walk is what says so:
+		// it stops on "clear?" and never reaches the quote. Lifting the fence
+		// out on that line's say-so would delete the quote from the file, so
+		// the strip is thrown away as soon as the walk reports no addressed
+		// note, and the untouched content is walked instead.
+		const body = [
+			'here is what one looks like',
+			'[addressed amy 2024-01-01]: n',
+			'```annoteca-original',
+			'old text',
+			'```',
+			'clear?',
+		].join('\n');
+		const c = parseAll(
+			['<!-- annoteca/note: ' + body, '[id=abcd1234]', '-->'].join('\n'),
+		)[0];
+		expect(c?.body).toBe(body);
+		expect(c?.id).toBe('abcd1234');
+		expect(c?.addressed).toBeUndefined();
+	});
+
+	it('prefers the real fence over one quoted higher in the body', () => {
+		// The anchor is the LAST [addressed ...] line, which is the one the walk
+		// itself keeps, so the quote above it stays prose.
+		const c = parseAll(
+			[
+				'<!-- annoteca/note: here is what one looks like',
+				'[addressed amy 2024-01-01]: n',
+				'```annoteca-original',
+				'decoy',
+				'```',
+				'[id=abcd1234]',
+				'[addressed claude 2026-06-20]: real',
+				'```annoteca-original',
+				'the real original',
+				'```',
+				'-->',
+			].join('\n'),
+		)[0];
+		expect(c?.id).toBe('abcd1234');
+		expect(c?.addressed?.note).toBe('real');
+		expect(c?.addressed?.original).toBe('the real original');
+		expect(c?.body).toBe(
+			'here is what one looks like\n[addressed amy 2024-01-01]: n\n```annoteca-original\ndecoy\n```',
+		);
+	});
+
+	it('recovers the marker when a second fence follows the addressed note', () => {
+		// Deliberate trade, and the same one the walk already makes for a
+		// duplicate [addressed ...] or [resolved ...] line: the format carries
+		// one original, so the first wins and the extra block is dropped. The
+		// alternative is leaving it in place, which stops the walk and destroys
+		// the whole comment.
+		const c = parseAll(
+			[
+				'<!-- annoteca/note: b',
+				'[id=abcd1234]',
+				'[addressed claude 2026-06-20]: n',
+				'```annoteca-original',
+				'first',
+				'```',
+				'```annoteca-original',
+				'second',
+				'```',
+				'-->',
+			].join('\n'),
+		)[0];
+		expect(c?.id).toBe('abcd1234');
+		expect(c?.body).toBe('b');
+		expect(c?.addressed?.original).toBe('first');
+	});
+
+	it('ignores an [addressed ...] line stored INSIDE the original', () => {
+		// The fence holds prose lifted verbatim out of the document, so it can
+		// hold a line shaped like [addressed ...] exactly as it can hold a code
+		// fence or a `-->`, and serialize() writes one when the replaced passage
+		// had one. Counting it would put the anchor inside the block, which
+		// starts before it, so the real fence would look like a body fence and
+		// be left behind to stop the walk.
+		const original =
+			'she wrote:\n[addressed amy 2024-01-01]: n\nand left it there';
+		const marker = serialize({
+			category: 'note',
+			body: 'b',
+			id: 'abcd1234',
+			addressed: {
+				author: 'claude',
+				date: '2026-06-20',
+				note: 'trimmed',
+				original,
+			},
+		});
+		const c = parseAll(marker)[0];
+		expect(c?.id).toBe('abcd1234');
+		expect(c?.body).toBe('b');
+		expect(c?.addressed?.note).toBe('trimmed');
+		expect(c?.addressed?.original).toBe(original);
+	});
+
+	it('ignores an [addressed ...] line inside a NON-adjacent original', () => {
+		const original = '[addressed amy 2024-01-01]: n';
+		const c = parseAll(
+			[
+				'<!-- annoteca/note: b',
+				'[id=abcd1234]',
+				'[addressed claude 2026-06-20]: trimmed',
+				'',
+				'```annoteca-original',
+				original,
+				'```',
+				'-->',
+			].join('\n'),
+		)[0];
+		expect(c?.id).toBe('abcd1234');
+		expect(c?.addressed?.original).toBe(original);
+	});
+
+	it('absorbs a format example that ends a body, and loses no characters doing it', () => {
+		// Pinned, not accidental. A body whose LAST lines quote the format is
+		// byte-identical to a real addressed note, so it is absorbed and the
+		// comment gains an addressed state it did not mean. Every released
+		// version has done this; the alternative is requiring adjacency, which
+		// destroys real markers instead. The characters all survive, so the
+		// misread is recoverable by editing and the alternative is not.
+		const input = [
+			'<!-- annoteca/note: here is what one looks like',
+			'[addressed amy 2024-01-01]: n',
+			'',
+			'```annoteca-original',
+			'old text',
+			'```',
+			'[id=abcd1234]',
+			'-->',
+		].join('\n');
+		const c = parseAll(input)[0];
+		expect(c?.body).toBe('here is what one looks like');
+		expect(c?.addressed?.original).toBe('old text');
+
+		const squeeze = (s: string): string =>
+			s
+				.slice(s.indexOf(':') + 1, s.lastIndexOf('-->'))
+				.replace(/[\s`]/g, '')
+				.split('')
+				.sort()
+				.join('');
+		expect(c).toBeDefined();
+		if (c) expect(squeeze(serialize(c))).toBe(squeeze(input));
+	});
+
+	it('keeps the example when ordinary prose follows it', () => {
+		// One line of prose after the quote is enough: the walk stops there,
+		// reports no addressed note, and the strip is thrown away.
+		const c = parseAll(
+			[
+				'<!-- annoteca/note: here is what one looks like',
+				'[addressed amy 2024-01-01]: n',
+				'',
+				'```annoteca-original',
+				'old text',
+				'```',
+				'clear?',
+				'[id=abcd1234]',
+				'-->',
+			].join('\n'),
+		)[0];
+		expect(c?.id).toBe('abcd1234');
+		expect(c?.addressed).toBeUndefined();
+		expect(c?.body).toContain('```annoteca-original\nold text\n```');
+	});
+
+	it('round-trips a non-adjacent fence back to the canonical adjacent form', () => {
+		const c = parseAll(marker('', '[reply bob 2026-06-21]: hi'))[0];
+		expect(c).toBeDefined();
+		if (!c) return;
+		const rewritten = serialize(c);
+		expect(rewritten).toContain(
+			'[addressed claude 2026-06-20]: Cut the framing.\n```annoteca-original\nthe old sentence\n```',
+		);
+		const again = parseAll(rewritten)[0];
+		expect(again?.addressed?.original).toBe('the old sentence');
+		expect(serialize(again as Comment)).toBe(rewritten);
+	});
+});
