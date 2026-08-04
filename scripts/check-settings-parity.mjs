@@ -59,16 +59,25 @@ function settingKeys() {
 // Settings with bespoke UI (categories, presets, authors) or that are persisted
 // state with no row at all. Listed so that adding a key with no row is a
 // decision someone made here, not drift nobody noticed.
-const NO_PLAIN_ROW = new Set([
-	'authorStyles',
-	'categories',
-	'customPresets',
-	'enableScholarlyPreset',
-	'lastHubTab',
-	'scopeState',
-	'settingsBackupPath',
-	'starredComments',
-	'statusFilter',
+// A Map rather than a Set so each exemption carries its justification. The
+// check below only reads the keys; the reasons exist so that adding a key here
+// is a decision a reviewer can weigh, not a way to opt out of parity silently.
+const NO_PLAIN_ROW = new Map([
+	['authorStyles', 'Bespoke UI: per-collaborator color rows.'],
+	['categories', 'Bespoke UI: the category editor with reorder and icons.'],
+	['customPresets', 'Bespoke UI: rendered by the preset browser.'],
+	[
+		'enableScholarlyPreset',
+		'Applied through the preset browser, not a standalone toggle.',
+	],
+	['lastHubTab', 'Persisted UI state, not a user-facing preference.'],
+	['scopeState', 'Persisted UI state: the hub scope and whether it is pinned.'],
+	[
+		'settingsBackupPath',
+		'Written by the import backup flow; surfaced in its confirmation, not as a row.',
+	],
+	['starredComments', 'Persisted data: the starred set, edited from the hub.'],
+	['statusFilter', 'Persisted UI state: the hub open/resolved filter.'],
 ]);
 
 const declarative = region('getSettingDefinitions()', 'display(): void');

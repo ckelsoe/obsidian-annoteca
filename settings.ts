@@ -223,8 +223,8 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 						},
 					},
 					{
-						name: 'Render markdown in comments',
-						desc: 'Show comment bodies, replies and notes as formatted markdown in the marker popover and the Hub panel, instead of their raw source. Links, emphasis, code and lists render. The one-line body shown beside a marker in the editor stays plain text either way, so it cannot reflow the document.',
+						name: 'Render Markdown in comments',
+						desc: 'Show comment bodies, replies and notes as formatted Markdown in the marker popover and the Hub panel, instead of their raw source. Links, emphasis, code and lists render. The one-line body shown beside a marker in the editor stays plain text either way, so it cannot reflow the document.',
 						control: {
 							type: 'toggle',
 							key: 'renderMarkdownBodies',
@@ -573,8 +573,8 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		);
 		this.addToggleRow(
 			containerEl,
-			'Render markdown in comments',
-			'Show comment bodies, replies and notes as formatted markdown in the marker popover and the Hub panel, instead of their raw source. Links, emphasis, code and lists render. The one-line body shown beside a marker in the editor stays plain text either way, so it cannot reflow the document.',
+			'Render Markdown in comments',
+			'Show comment bodies, replies and notes as formatted Markdown in the marker popover and the Hub panel, instead of their raw source. Links, emphasis, code and lists render. The one-line body shown beside a marker in the editor stays plain text either way, so it cannot reflow the document.',
 			'renderMarkdownBodies',
 		);
 		this.addToggleRow(

@@ -40,6 +40,14 @@ const THREAD_REPLY_CLASSES = {
 	body: 'annoteca-reply-body',
 };
 
+// One armed debounced draft save. `flush` writes the composer's CURRENT text,
+// so disposing stores what is on screen at that moment rather than the value
+// captured when the timer was set.
+interface PendingDraftSave {
+	timer: number;
+	flush: () => void;
+}
+
 export class ThreadTabRenderer {
 	activePath: string | undefined;
 	activeStart: number | undefined;
@@ -65,11 +73,11 @@ export class ThreadTabRenderer {
 	private markdownLifetime: MarkdownLifetime | undefined;
 
 	// Pending debounced draft saves, keyed by comment id, across every reply
-	// composer this renderer has built. dispose() cancels the ones a repaint
-	// detached, and submitting cancels every timer for that comment rather than
-	// only the current closure's, so no orphan can write the draft back after
-	// clearDraft and resurrect a reply that was already sent.
-	private readonly draftSaveTimers = new Map<string, Set<number>>();
+	// composer this renderer has built. Submitting cancels every save for that
+	// comment so none can write a sent reply back over the cleared draft;
+	// dispose() flushes them instead, so a refresh cannot swallow text typed
+	// inside the debounce. See renderReplyInput for why those differ.
+	private readonly draftSaveTimers = new Map<string, Set<PendingDraftSave>>();
 
 	constructor(
 		private readonly plugin: AnnotecaPlugin,
@@ -82,11 +90,17 @@ export class ThreadTabRenderer {
 	dispose(): void {
 		this.markdownLifetime?.unload();
 		this.markdownLifetime = undefined;
-		// Debounced draft saves are the other thing that outlives this DOM. See
-		// renderReplyInput: an orphan that fires after a submit cleared the
-		// draft resurrects the reply that was just sent.
-		for (const timers of this.draftSaveTimers.values())
-			for (const timer of timers) window.clearTimeout(timer);
+		// Debounced draft saves are the other thing that outlives this DOM.
+		// FLUSH them rather than cancel them: this runs before every refresh
+		// (views.ts:459), and the composers are still attached, so dropping the
+		// pending save would discard whatever was typed in the last 300ms and
+		// the rebuilt composer would come back empty. Submitting is the case
+		// that discards, and it does that itself before clearing the draft.
+		for (const saves of this.draftSaveTimers.values())
+			for (const save of saves) {
+				window.clearTimeout(save.timer);
+				save.flush();
+			}
 		this.draftSaveTimers.clear();
 	}
 
@@ -690,39 +704,56 @@ export class ThreadTabRenderer {
 			const draft = this.plugin.loadDraft(c.id);
 			if (draft.length > 0) textarea.value = draft;
 		}
-		// Tracked on the renderer and keyed by comment id, not just held in this
-		// closure, because a repaint detaches this composer without cancelling
-		// its pending save. An orphan firing after a later submit cleared the
-		// draft writes the old text straight back, and the sent reply reappears
-		// on the next render. Cancelling by id rather than by closure means the
-		// submit path kills every timer for the comment, including one left by a
-		// composer this render replaced.
-		const forgetTimer = (id: string, timer: number): void => {
-			const timers = this.draftSaveTimers.get(id);
-			if (!timers) return;
-			timers.delete(timer);
-			if (timers.size === 0) this.draftSaveTimers.delete(id);
+		// Pending saves are tracked on the renderer and keyed by comment id, not
+		// just held in this closure, because a repaint detaches this composer
+		// while its debounced save is still armed.
+		//
+		// The two ways that pending save can end are OPPOSITE, and conflating
+		// them loses text either way:
+		//
+		//   - Submitting DISCARDS it. The text has been sent, so a timer firing
+		//     afterwards would write it back over the cleared draft and the
+		//     composer would redisplay a reply that was already posted.
+		//   - Disposing FLUSHES it. dispose() runs before every panel refresh
+		//     (views.ts:459), so cancelling without saving throws away whatever
+		//     the user typed in the last 300ms, and the rebuilt composer comes
+		//     back empty.
+		//
+		// Cancelling by id rather than by closure means submit kills every timer
+		// for the comment, including one left by a composer this render
+		// replaced. dispose() reads the live textarea, which is still attached
+		// at that point, so a flush stores the newest text rather than the value
+		// captured when the timer was armed.
+		const forgetSave = (id: string, save: PendingDraftSave): void => {
+			const saves = this.draftSaveTimers.get(id);
+			if (!saves) return;
+			saves.delete(save);
+			if (saves.size === 0) this.draftSaveTimers.delete(id);
 		};
 		const cancelSavesFor = (id: string): void => {
-			const timers = this.draftSaveTimers.get(id);
-			if (!timers) return;
-			for (const timer of timers) window.clearTimeout(timer);
+			const saves = this.draftSaveTimers.get(id);
+			if (!saves) return;
+			for (const save of saves) window.clearTimeout(save.timer);
 			this.draftSaveTimers.delete(id);
 		};
 		textarea.addEventListener('input', () => {
 			const id = c.id;
 			if (id === undefined) return;
 			cancelSavesFor(id);
-			const timer = window.setTimeout(() => {
-				forgetTimer(id, timer);
-				this.plugin.saveDraft(id, textarea.value);
+			const save: PendingDraftSave = {
+				timer: 0,
+				flush: () => this.plugin.saveDraft(id, textarea.value),
+			};
+			save.timer = window.setTimeout(() => {
+				forgetSave(id, save);
+				save.flush();
 			}, 300);
-			let timers = this.draftSaveTimers.get(id);
-			if (!timers) {
-				timers = new Set<number>();
-				this.draftSaveTimers.set(id, timers);
+			let saves = this.draftSaveTimers.get(id);
+			if (!saves) {
+				saves = new Set<PendingDraftSave>();
+				this.draftSaveTimers.set(id, saves);
 			}
-			timers.add(timer);
+			saves.add(save);
 		});
 
 		// F-274: per-reply author picker. Default plus configured collaborators

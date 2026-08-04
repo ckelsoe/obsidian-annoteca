@@ -73,10 +73,35 @@ const UNKNOWN_STAMPED_LINE_RE = new RegExp(
 
 // The lossless-original fence (F-271): a fenced block tagged annoteca-original
 // inside the [addressed ...] note, holding the verbatim pre-edit text. Matched
-// as whole lines (m flag); group 1 is the verbatim original. Tolerates CRLF and
+// as whole lines (m flag); group 2 is the verbatim original. Tolerates CRLF and
 // trailing whitespace on the fence lines.
+//
+// The delimiter length is VARIABLE and the closing run must match the opening
+// one (the \1 backreference). A fixed three-backtick fence was a second
+// terminator alongside `-->`: the captured text is arbitrary prose lifted out
+// of the user's document, so it can contain a code block, and the first ``` line
+// inside it closed the fence early. The addressed state, the id and the original
+// itself were then lost, because the leftover fence lines stopped the backward
+// walk and collapsed the trailing block into the body.
+//
+// Backward compatible in both directions. Existing markers use exactly three
+// backticks and still match, because `{3,}` includes three. Serializing only
+// widens the fence when the content holds a run that would close it, and content
+// like that cannot round-trip through the old form at all, so no marker that
+// reads correctly today is rewritten.
 const ORIGINAL_FENCE_RE =
-	/^```annoteca-original[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/m;
+	/^(`{3,})annoteca-original[ \t]*\r?\n([\s\S]*?)\r?\n\1[ \t]*$/gm;
+
+// Longest run of backticks starting a line, which is the only place a run can
+// close the fence (the closing pattern anchors to a whole line).
+const LINE_LEADING_BACKTICKS_RE = /^[ \t]*(`+)/gm;
+
+function fenceFor(content: string): string {
+	let longest = 0;
+	for (const match of content.matchAll(LINE_LEADING_BACKTICKS_RE))
+		longest = Math.max(longest, (match[1] ?? '').length);
+	return '`'.repeat(Math.max(3, longest + 1));
+}
 
 // Maximum visible characters in an anchor value before mid-truncation kicks
 // in. 80 strikes the balance between "disambiguate the commented words" and
@@ -215,18 +240,25 @@ function parseInnerContent(inner: string): ParsedTail {
 	// line-walk below treat [addressed ...] as an ordinary single structured
 	// line. The fence always lives directly after the [addressed ...] line, so
 	// its content unambiguously belongs to the (at most one) addressed note.
+	// ADJACENCY IS ENFORCED, not merely assumed. Lifting out any block that
+	// happens to be tagged annoteca-original deletes it from the file, because
+	// originalText is discarded when there is no addressed note to hang it on.
+	// A body that documents the format by showing a fence is a normal thing to
+	// write, and the exported skill describes the fence, so assistants write
+	// them too. Only a fence sitting DIRECTLY after the [addressed ...] line is
+	// the addressed note's original; everything else stays body text.
 	let originalText: string | undefined;
 	let stripped = inner;
-	const fenceMatch = ORIGINAL_FENCE_RE.exec(inner);
-	if (
-		fenceMatch &&
-		fenceMatch[1] !== undefined &&
-		fenceMatch.index !== undefined
-	) {
-		originalText = unescapeTerminator(fenceMatch[1]);
+	for (const fenceMatch of inner.matchAll(ORIGINAL_FENCE_RE)) {
+		const content = fenceMatch[2];
+		if (content === undefined || fenceMatch.index === undefined) continue;
 		const before = inner.slice(0, fenceMatch.index).replace(/\r?\n$/, '');
-		const after = inner.slice(fenceMatch.index + fenceMatch[0].length);
-		stripped = before + after;
+		const precedingLine = before.slice(before.lastIndexOf('\n') + 1);
+		if (!ADDRESSED_LINE_RE.test(precedingLine)) continue;
+		originalText = unescapeTerminator(content);
+		stripped =
+			before + inner.slice(fenceMatch.index + fenceMatch[0].length);
+		break;
 	}
 
 	const lines = stripped.split('\n');
@@ -457,14 +489,19 @@ export function serialize(c: SerializeInput): string {
 			`[addressed ${c.addressed.author} ${c.addressed.date}]:${note}`,
 		);
 		// F-271: the verbatim replaced text lives in a fenced annoteca-original
-		// block directly after the [addressed ...] line. The fence is inert
-		// markdown inside the HTML comment, so the only sequence that would
-		// break the wrapper is `-->`, and the captured prose CAN contain one:
-		// it is arbitrary text lifted out of the user's document.
+		// block directly after the [addressed ...] line. The captured prose is
+		// arbitrary text lifted out of the user's document, so it can contain
+		// BOTH sequences that would end the block early: `-->`, which closes the
+		// HTML comment, and a fence line, which closes the fence. The first is
+		// escaped; the second is handled by widening the delimiter past anything
+		// in the content, since escaping backticks would change the text the
+		// fence exists to preserve verbatim.
 		if (c.addressed.original !== undefined) {
-			lines.push('```annoteca-original');
-			lines.push(escapeTerminator(c.addressed.original));
-			lines.push('```');
+			const original = escapeTerminator(c.addressed.original);
+			const fence = fenceFor(original);
+			lines.push(`${fence}annoteca-original`);
+			lines.push(original);
+			lines.push(fence);
 		}
 	}
 	if (c.resolution) {

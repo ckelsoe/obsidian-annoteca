@@ -1027,3 +1027,149 @@ describe('parser: a newline in a single-line field cannot destroy the marker', (
 		expect(c?.replies[0]?.body).toBe('a --> b');
 	});
 });
+
+describe('parser: a code fence inside the captured original cannot close the block', () => {
+	const roundTrip = (
+		c: Parameters<typeof serialize>[0],
+	): Comment | undefined => parseAll(serialize(c))[0];
+
+	// The fence is the second terminator, alongside `-->`. The captured prose is
+	// arbitrary text lifted out of the user's document, so it can hold a code
+	// block; a fixed ``` delimiter closed the fence on that line and the
+	// addressed state, the id and the original were all lost.
+	it('keeps the original, the addressed state and the id', () => {
+		const original = 'before\n```js\nconst a = 1;\n```\nafter';
+		const c = roundTrip({
+			category: 'note',
+			body: 'b',
+			id: 'abcd1234',
+			addressed: {
+				author: 'amy',
+				date: '2024-01-01',
+				note: 'n',
+				original,
+			},
+		});
+		expect(c?.id).toBe('abcd1234');
+		expect(c?.body).toBe('b');
+		expect(c?.addressed?.note).toBe('n');
+		expect(c?.addressed?.original).toBe(original);
+	});
+
+	it('widens the fence past the longest run in the content', () => {
+		const out = serialize({
+			category: 'note',
+			body: 'b',
+			addressed: {
+				author: 'amy',
+				date: '2024-01-01',
+				note: 'n',
+				original: '````\nnested\n````',
+			},
+		});
+		expect(out).toContain('`````annoteca-original');
+	});
+
+	it('still writes a plain three-backtick fence for ordinary prose', () => {
+		const out = serialize({
+			category: 'note',
+			body: 'b',
+			addressed: {
+				author: 'amy',
+				date: '2024-01-01',
+				note: 'n',
+				original: 'just prose',
+			},
+		});
+		expect(out).toContain('```annoteca-original');
+		expect(out).not.toContain('````annoteca-original');
+	});
+
+	it('still reads a legacy three-backtick marker written before this change', () => {
+		const legacy = [
+			'<!-- annoteca/note: b',
+			'[id=abcd1234]',
+			'[addressed amy 2024-01-01]: n',
+			'```annoteca-original',
+			'the old sentence',
+			'```',
+			'-->',
+		].join('\n');
+		const c = parseAll(legacy)[0];
+		expect(c?.id).toBe('abcd1234');
+		expect(c?.addressed?.original).toBe('the old sentence');
+	});
+
+	it('survives a fence and an arrow together', () => {
+		const original = 'a --> b\n```\ncode\n```';
+		const c = roundTrip({
+			category: 'note',
+			body: 'b',
+			id: 'abcd1234',
+			addressed: {
+				author: 'amy',
+				date: '2024-01-01',
+				note: 'n',
+				original,
+			},
+		});
+		expect(c?.addressed?.original).toBe(original);
+		expect(c?.id).toBe('abcd1234');
+	});
+});
+
+describe('parser: an annoteca-original fence in a body is body text, not an original', () => {
+	const roundTrip = (
+		c: Parameters<typeof serialize>[0],
+	): Comment | undefined => parseAll(serialize(c))[0];
+
+	// Lifting out any block tagged annoteca-original deleted it from the file,
+	// because originalText is dropped when there is no addressed note to hang it
+	// on. Only a fence directly after the [addressed ...] line is an original.
+	it('keeps a three-backtick fence written in a body', () => {
+		const body =
+			'the format looks like:\n```annoteca-original\nold text\n```\nclear?';
+		const c = roundTrip({ category: 'note', body, id: 'abcd1234' });
+		expect(c?.body).toBe(body);
+		expect(c?.id).toBe('abcd1234');
+		expect(c?.addressed).toBeUndefined();
+	});
+
+	it('keeps a longer fence written in a body', () => {
+		const body = 'nested:\n````annoteca-original\ninner\n````\ndone';
+		const c = roundTrip({ category: 'note', body, id: 'abcd1234' });
+		expect(c?.body).toBe(body);
+	});
+
+	it('still lifts the fence that follows an [addressed ...] line', () => {
+		const c = roundTrip({
+			category: 'note',
+			body: 'b',
+			id: 'abcd1234',
+			addressed: {
+				author: 'amy',
+				date: '2024-01-01',
+				note: 'n',
+				original: 'the old sentence',
+			},
+		});
+		expect(c?.addressed?.original).toBe('the old sentence');
+		expect(c?.body).toBe('b');
+	});
+
+	it('picks the addressed fence even when the body shows one first', () => {
+		const c = roundTrip({
+			category: 'note',
+			body: 'example:\n```annoteca-original\ndecoy\n```',
+			id: 'abcd1234',
+			addressed: {
+				author: 'amy',
+				date: '2024-01-01',
+				note: 'n',
+				original: 'the real original',
+			},
+		});
+		expect(c?.addressed?.original).toBe('the real original');
+		expect(c?.body).toBe('example:\n```annoteca-original\ndecoy\n```');
+	});
+});

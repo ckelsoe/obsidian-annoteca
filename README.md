@@ -18,7 +18,7 @@ Annoteca is built for revision work on long documents: book manuscripts, theses,
 - **Reading view indicators.** Markers are invisible in reading view by design, so Annoteca can show a note-level banner with open and resolved totals, a badge on each section that has comments, both, or nothing. Click an indicator to open the hub on that comment.
 - **Resolve your way.** Resolving keeps the comment in the file as a dimmed record by default, and resolved comments can be reopened with one click. Prefer clean files? Use "Resolve and remove", turn on delete-on-resolve, or sweep a file with "Delete all resolved comments".
 - **Hover popup.** Hover a marker to read the thread and reply, resolve, or jump to the hub without leaving the editor.
-- **Comments read as markdown.** Bodies, replies, and notes render as formatted markdown in the popup and the hub, so links, emphasis, code, and lists look the way they were written rather than showing their source. `[[Wikilinks]]` resolve against the note the comment lives in. There is a setting to turn it off, and the one-line body shown beside a marker in the editor stays plain text either way so it cannot reflow the document.
+- **Comments read as Markdown.** Bodies, replies, and notes render as formatted Markdown in the popup and the hub, so links, emphasis, code, and lists look the way they were written rather than showing their source. `[[Wikilinks]]` resolve against the note the comment lives in. There is a setting to turn it off, and the one-line body shown beside a marker in the editor stays plain text either way so it cannot reflow the document.
 - **Read the whole document's comments at once.** "Toggle inline comment bodies" prints each comment beside the passage it is about, so a chapter's feedback reads in a single pass instead of one hover at a time. Bodies are trimmed to a single line and disappear again on the next press.
 - **Import what you already have.** Commands convert Obsidian `%%comments%%` and plain HTML comments into Annoteca markers, with a backup confirmation first.
 - **AI-ready by design.** The file is the API: any assistant that can read and edit markdown can read and write Annoteca comments. An "Export AI skill" command writes a skill file into your vault that teaches the assistant the format and your category vocabulary. The exported skill is versioned, so the plugin tells you when it has gone out of date after an update and should be re-exported.
@@ -82,7 +82,7 @@ To teach an assistant the format, run **Export AI skill**. It writes a skill fil
 ## Settings overview
 
 - **Categories**: edit the list, browse presets, set per-category icon, color, and underline tier.
-- **Indicators**: marker icon and underline style, size, thickness, default visibility, reply count on markers, resolved-comment display and brightness, reading view indicator, composer location, and whether jumping to a comment centers it or scrolls the minimum needed.
+- **Indicators**: marker icon and underline style, size, thickness, default visibility, reply count on markers, whether comments render as Markdown, resolved-comment display and brightness, reading view indicator, composer location, and whether jumping to a comment centers it or scrolls the minimum needed.
 - **Resolution**: delete-on-resolve toggle.
 - **Metadata**: author tag for your comments, plus collaborators and their colors for multi-party threads.
 - **AI integration**: skill export destination, export button, and an out-of-date indicator.

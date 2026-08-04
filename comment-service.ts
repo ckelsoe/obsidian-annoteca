@@ -27,7 +27,7 @@ import { parseAll, serialize, nowISO } from './parser';
 // at the CURRENT state and chose not to act (already resolved, no longer
 // addressed), while "missing" means the marker is gone and replaceMarker has
 // already said so. Collapsing them produced two notices for one action.
-type WriteOutcome = 'written' | 'declined' | 'missing';
+export type WriteOutcome = 'written' | 'declined' | 'missing';
 
 interface SpliceRange {
 	from: number;
@@ -116,6 +116,9 @@ export class CommentService {
 				: undefined,
 		);
 		if (outcome === 'written') new Notice('Reopened.');
+		// 'declined' means another writer reopened it first. Every sibling verb
+		// narrates that; without this the button looks broken.
+		else if (outcome === 'declined') new Notice('Already open.');
 	}
 
 	async deleteComment(path: string, comment: Comment): Promise<void> {
@@ -525,10 +528,11 @@ export class CommentService {
 
 	// One message for "the marker this action was aimed at is not there any
 	// more". Repeatable once the note catches up, unlike whatever a stale-offset
-	// write would have destroyed.
+	// write would have destroyed. The wording covers deletion as well as
+	// movement, because the id lookup cannot tell the two apart.
 	private noticeVanished(): void {
 		new Notice(
-			'This comment has moved since it was loaded. Reopen the note and try again.',
+			'This comment has moved or been deleted since it was loaded. Reopen the note and try again.',
 		);
 	}
 
