@@ -70,6 +70,10 @@ const NO_PLAIN_ROW = new Map([
 		'enableScholarlyPreset',
 		'Applied through the preset browser, not a standalone toggle.',
 	],
+	[
+		'hubTabAutoCreated',
+		'Persisted UI state: whether the hub sidebar tab has ever been auto-created, so closing it sticks.',
+	],
 	['lastHubTab', 'Persisted UI state, not a user-facing preference.'],
 	['scopeState', 'Persisted UI state: the hub scope and whether it is pinned.'],
 	[

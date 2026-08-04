@@ -51,6 +51,14 @@ interface SpliceRange {
 export const VANISHED_MESSAGE =
 	'This comment has moved or been deleted since it was loaded. Reopen the note and try again.';
 
+// Same reason, for "the file this action was aimed at is gone". The popover's
+// lifecycle actions resolve their own file (they act on the note the popover
+// belongs to, not the focused one) and have to refuse in these words rather
+// than invent a second phrasing for the same situation.
+export function fileGoneMessage(path: string): string {
+	return `Could not open ${path}. It may have been renamed or deleted.`;
+}
+
 export function ambiguousMessage(id: string): string {
 	return `More than one comment in this note has the identifier ${id}, so this action cannot tell which one you meant. Give one of them a different identifier, or delete the copy.`;
 }
@@ -720,9 +728,7 @@ export class CommentService {
 	// render and the button press. Every write path used to return silently here,
 	// so the button simply did nothing.
 	private noticeFileGone(path: string): void {
-		new Notice(
-			`Could not open ${path}. It may have been renamed or deleted.`,
-		);
+		new Notice(fileGoneMessage(path));
 	}
 
 	// One message for "the marker this action was aimed at is not there any

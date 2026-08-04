@@ -60,6 +60,8 @@ export class ComposerForm {
 	// line/column pair: text inserted above the marker moves the marker without
 	// changing the pair, so converting it late silently points somewhere else.
 	private readonly editingStartOffset: number;
+	// The body textarea of the most recent render, for `focusBody`.
+	private bodyArea?: HTMLTextAreaElement;
 
 	constructor(
 		plugin: AnnotecaPlugin,
@@ -81,6 +83,31 @@ export class ComposerForm {
 			scratchpad: !!request.scratchpad,
 			templateValues: {},
 		};
+	}
+
+	// Put the caret in the body field (#21). Called by the MODAL host only, and
+	// only after the form is in the document: focusing a detached element does
+	// nothing. The side-panel composer deliberately does not call this, because
+	// its whole point is that the editor stays usable while it is open, so
+	// pulling focus out of the document there would be hostile.
+	//
+	// Caret at the end rather than the start: on the edit path the field opens
+	// with the existing body, and amending text is the expected action.
+	//
+	// Deferred by a turn of the event loop because a plain call loses. Verified
+	// in the running app: focus went to the category dropdown, because Obsidian
+	// moves focus itself after the modal's onOpen returns, so anything focused
+	// during onOpen is overwritten a moment later.
+	focusBody(): void {
+		const area = this.bodyArea;
+		if (!area) return;
+		area.win.setTimeout(() => {
+			// The modal can be dismissed inside that turn, and focusing a
+			// detached element steals focus from whatever replaced it.
+			if (!area.isConnected) return;
+			area.focus();
+			area.setSelectionRange(area.value.length, area.value.length);
+		}, 0);
 	}
 
 	render(container: HTMLElement): void {
@@ -146,6 +173,9 @@ export class ComposerForm {
 			},
 		});
 		bodyArea.value = this.state.body;
+		// Held so a host can focus it after the form is attached. Reassigned on
+		// every render, because each one builds a fresh textarea.
+		this.bodyArea = bodyArea;
 		bodyArea.addEventListener('input', () => {
 			this.state.body = bodyArea.value;
 		});

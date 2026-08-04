@@ -49,7 +49,7 @@ export class StarredTabRenderer {
 		if (ordered.length === 0) {
 			this.renderEmpty(
 				container,
-				'All starred comments are missing from the vault. Use the cleanup command to clear orphans.',
+				'All starred comments are missing from the vault. Run "Annoteca: Clear orphaned stars" to remove them.',
 			);
 			return;
 		}

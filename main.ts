@@ -72,7 +72,7 @@ import {
 	AnnotecaPanelView,
 } from './views';
 import type { ComposerRequest } from './composer';
-import { todayISO } from './parser';
+import { nowISO } from './parser';
 import { convertAllComments, type ImportFormat } from './imports';
 import {
 	ConfirmBackupModal,
@@ -81,7 +81,7 @@ import {
 } from './confirm-modal';
 import { formatScripture } from './scripture';
 import { computeScopeFileSet, type ScopeFile } from './scope';
-import { CommentService } from './comment-service';
+import { CommentService, fileGoneMessage } from './comment-service';
 import { DiagnosticsService } from './diagnostics-service';
 
 export default class AnnotecaPlugin extends Plugin {
@@ -108,7 +108,8 @@ export default class AnnotecaPlugin extends Plugin {
 					this.app.workspace.getActiveFile()?.path ?? '',
 				getSettings: () => this.settings,
 				onMarkerClick: (m) => this.openReviewerOnComment(m),
-				openInReviewer: (m) => this.openReviewerOnComment(m),
+				openInReviewer: (m, sourcePath) =>
+					this.openReviewerOnComment(m, sourcePath || undefined),
 				addCommentForSelection: () => {
 					const view =
 						this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -119,20 +120,20 @@ export default class AnnotecaPlugin extends Plugin {
 						id,
 						resolveSettingsCategories(this.settings),
 					),
-				toggleResolution: (m) => {
-					void this.toggleResolutionFromPopup(m);
+				toggleResolution: (m, sourcePath) => {
+					void this.toggleResolutionFromPopup(m, sourcePath);
 				},
-				resolveAndRemove: (m) => {
-					void this.resolveAndRemoveFromPopup(m);
+				resolveAndRemove: (m, sourcePath) => {
+					void this.resolveAndRemoveFromPopup(m, sourcePath);
 				},
-				acceptAddressed: (m) => {
-					void this.acceptAddressedFromPopup(m);
+				acceptAddressed: (m, sourcePath) => {
+					void this.acceptAddressedFromPopup(m, sourcePath);
 				},
-				reviseAddressed: (m) => {
-					void this.reviseAddressedFromPopup(m);
+				reviseAddressed: (m, sourcePath) => {
+					void this.reviseAddressedFromPopup(m, sourcePath);
 				},
-				rejectAddressed: (m) => {
-					void this.rejectAddressedFromPopup(m);
+				rejectAddressed: (m, sourcePath) => {
+					void this.rejectAddressedFromPopup(m, sourcePath);
 				},
 				copyPermalink: (m) => {
 					void this.copyCommentId(m);
@@ -187,6 +188,18 @@ export default class AnnotecaPlugin extends Plugin {
 		this.applyIndicatorSize();
 		this.applyAnchorAppearance();
 
+		// A window opened after load starts with none of the appearance
+		// variables set, so its editors would draw markers at the default size
+		// and anchor style. Written straight to the new window's body from the
+		// event payload rather than by re-sweeping the workspace, which would
+		// depend on its leaves already being attached when this fires.
+		this.registerEvent(
+			this.app.workspace.on('window-open', (_leaf, win) => {
+				this.writeIndicatorSize(win.document.body);
+				this.writeAnchorAppearance(win.document.body);
+			}),
+		);
+
 		this.app.workspace.onLayoutReady(() => {
 			this.refreshActiveFileIndex();
 			this.ensureRightSidebarTab();
@@ -198,15 +211,7 @@ export default class AnnotecaPlugin extends Plugin {
 	// marker styling in styles.css can scale dynamically without recreating
 	// the editor extension. Called on load and on settings change.
 	applyIndicatorSize(): void {
-		const sizes: Record<AnnotecaSettings['indicatorSize'], string> = {
-			small: '0.85em',
-			medium: '1em',
-			large: '1.25em',
-		};
-		activeDocument.body.style.setProperty(
-			'--annoteca-indicator-size',
-			sizes[this.settings.indicatorSize],
-		);
+		this.forEachWindowBody((body) => this.writeIndicatorSize(body));
 	}
 
 	// Apply the anchor-underline style + baseline thickness + resolved
@@ -214,6 +219,22 @@ export default class AnnotecaPlugin extends Plugin {
 	// the .annoteca-anchor rule, the per-tier overrides, and the .annoteca-
 	// resolved opacity. Called on load and on settings change.
 	applyAnchorAppearance(): void {
+		this.forEachWindowBody((body) => this.writeAnchorAppearance(body));
+	}
+
+	private writeIndicatorSize(body: HTMLElement): void {
+		const sizes: Record<AnnotecaSettings['indicatorSize'], string> = {
+			small: '0.85em',
+			medium: '1em',
+			large: '1.25em',
+		};
+		body.style.setProperty(
+			'--annoteca-indicator-size',
+			sizes[this.settings.indicatorSize],
+		);
+	}
+
+	private writeAnchorAppearance(body: HTMLElement): void {
 		const thicknesses: Record<AnnotecaSettings['anchorThickness'], string> =
 			{
 				thin: '1px',
@@ -227,33 +248,72 @@ export default class AnnotecaPlugin extends Plugin {
 			normal: '0.5',
 			bright: '0.85',
 		};
-		activeDocument.body.style.setProperty(
+		body.style.setProperty(
 			'--annoteca-anchor-style',
 			this.settings.anchorStyle,
 		);
-		activeDocument.body.style.setProperty(
+		body.style.setProperty(
 			'--annoteca-anchor-thickness-normal',
 			thicknesses[this.settings.anchorThickness],
 		);
-		activeDocument.body.style.setProperty(
+		body.style.setProperty(
 			'--annoteca-resolved-opacity',
 			resolvedOpacities[this.settings.resolvedBrightness],
 		);
 	}
 
+	// Run `fn` against the body of every window the workspace is using. Both
+	// setters above wrote to `activeDocument.body` alone, which is ONE window,
+	// so a popout ignored the user's indicator size and anchor appearance and
+	// silently drew the styles.css defaults instead. A leaf can move to a new
+	// window at any time, which is what the "window-open" handler in onload
+	// covers.
+	private forEachWindowBody(fn: (body: HTMLElement) => void): void {
+		const seen = new Set<Document>();
+		const visit = (doc: Document | undefined): void => {
+			if (!doc || seen.has(doc)) return;
+			seen.add(doc);
+			fn(doc.body);
+		};
+		visit(document);
+		// Every open leaf, not just markdown ones: the hub panel can sit in a
+		// popout too, and its cards draw the same marker chrome.
+		this.app.workspace.iterateAllLeaves((leaf) => {
+			visit(leaf.view.containerEl.ownerDocument);
+		});
+	}
+
 	private ensureRightSidebarTab(): void {
-		// Place the reviewer pane in the right sidebar on first load so its
-		// tab icon shows up alongside backlinks, tags, and the other native
-		// right-pane tools. If a user has explicitly closed it, this won't
-		// reopen on subsequent loads because the leaf record persists across
-		// sessions and we only add when none exists.
+		// Place the hub in the right sidebar ONCE, on the first load that ever
+		// runs, so its tab icon shows up alongside backlinks, tags and the other
+		// native right-pane tools.
+		//
+		// The old comment claimed a closed leaf "persists across sessions" and
+		// that only adding when none exists was therefore enough. It is not: a
+		// closed leaf leaves no record, so every subsequent load found none and
+		// recreated the tab. Users could not permanently close the hub. The flag
+		// is the record the workspace does not keep. It is deliberately absent
+		// from the settings UI; the ribbon icon and "Open hub" reopen the tab on
+		// demand, which is what a user who closed it would reach for anyway.
+		if (this.settings.hubTabAutoCreated) return;
 		const existing = this.app.workspace.getLeavesOfType(
 			ANNOTECA_HUB_VIEW_TYPE,
 		);
-		if (existing.length > 0) return;
+		// A leaf restored by the workspace is proof the tab was already created,
+		// on an earlier run of a version that had no flag to record it. Without
+		// this branch every existing install starts with the flag false, so the
+		// first time such a user closed the tab and restarted it came back once
+		// more before the flag finally stuck.
+		if (existing.length > 0) {
+			this.settings.hubTabAutoCreated = true;
+			void this.saveSettings();
+			return;
+		}
 		const leaf = this.app.workspace.getRightLeaf(false);
 		if (!leaf) return;
 		void leaf.setViewState({ type: ANNOTECA_HUB_VIEW_TYPE, active: false });
+		this.settings.hubTabAutoCreated = true;
+		void this.saveSettings();
 	}
 
 	onunload(): void {
@@ -799,6 +859,13 @@ export default class AnnotecaPlugin extends Plugin {
 			},
 		});
 		this.addCommand({
+			id: 'clear-orphaned-stars',
+			name: 'Clear orphaned stars',
+			callback: () => {
+				void this.clearOrphanedStars();
+			},
+		});
+		this.addCommand({
 			id: 'import-native-comments',
 			name: 'Import native Obsidian comments',
 			callback: () => this.confirmAndConvert('native'),
@@ -900,10 +967,15 @@ export default class AnnotecaPlugin extends Plugin {
 		// (or edited) marker is queryable before the vault.modify event lands.
 		const file = this.app.vault.getAbstractFileByPath(path);
 		if (file instanceof TFile) {
+			// Only trust the active editor when it is actually holding THIS
+			// file. In panel-composer mode the active view is the composer
+			// panel (or another note), and reading its buffer indexed the
+			// wrong document, so the hub selected the wrong comment.
 			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 			const content =
-				view?.editor.getValue() ??
-				(await this.app.vault.cachedRead(file));
+				view?.file?.path === path
+					? view.editor.getValue()
+					: await this.app.vault.cachedRead(file);
 			this.commentIndex.rebuild(path, content);
 		}
 		this.events.trigger('index-changed', { path });
@@ -1025,8 +1097,33 @@ export default class AnnotecaPlugin extends Plugin {
 		return this.comments.appendReply(path, comment, reply);
 	}
 
-	async toggleResolutionFromPopup(comment: Comment): Promise<void> {
-		const path = this.app.workspace.getActiveFile()?.path;
+	// The note a popover action must act on (#22). Every one of these used to
+	// start from `getActiveFile()`, but a hover popover does not activate the
+	// leaf it is anchored in and neither does clicking a button on it, so in a
+	// split they all ran against whichever note was focused. The popover knows
+	// which editor it belongs to and passes that path in; this only has to
+	// check it still resolves to a file, and say so when it does not instead of
+	// returning silently the way the old `if (!path) return` did.
+	private popoverTargetPath(sourcePath: string): string | null {
+		if (sourcePath === '') {
+			new Notice(
+				'Could not determine which note this comment belongs to. Click into the note and try again.',
+			);
+			return null;
+		}
+		const file = this.app.vault.getAbstractFileByPath(sourcePath);
+		if (!(file instanceof TFile)) {
+			new Notice(fileGoneMessage(sourcePath));
+			return null;
+		}
+		return file.path;
+	}
+
+	async toggleResolutionFromPopup(
+		comment: Comment,
+		sourcePath: string,
+	): Promise<void> {
+		const path = this.popoverTargetPath(sourcePath);
 		if (!path) return;
 		if (comment.resolution) {
 			await this.reopenComment(path, comment);
@@ -1035,27 +1132,39 @@ export default class AnnotecaPlugin extends Plugin {
 		}
 	}
 
-	async resolveAndRemoveFromPopup(comment: Comment): Promise<void> {
-		const path = this.app.workspace.getActiveFile()?.path;
+	async resolveAndRemoveFromPopup(
+		comment: Comment,
+		sourcePath: string,
+	): Promise<void> {
+		const path = this.popoverTargetPath(sourcePath);
 		if (!path) return;
 		await this.resolveAndRemoveComment(path, comment);
 	}
 
 	// F-270 addressed-state actions from the hover popup.
-	async acceptAddressedFromPopup(comment: Comment): Promise<void> {
-		const path = this.app.workspace.getActiveFile()?.path;
+	async acceptAddressedFromPopup(
+		comment: Comment,
+		sourcePath: string,
+	): Promise<void> {
+		const path = this.popoverTargetPath(sourcePath);
 		if (!path) return;
 		await this.comments.acceptAddressed(path, comment);
 	}
 
-	async reviseAddressedFromPopup(comment: Comment): Promise<void> {
-		const path = this.app.workspace.getActiveFile()?.path;
+	async reviseAddressedFromPopup(
+		comment: Comment,
+		sourcePath: string,
+	): Promise<void> {
+		const path = this.popoverTargetPath(sourcePath);
 		if (!path) return;
 		await this.comments.reviseAddressed(path, comment);
 	}
 
-	async rejectAddressedFromPopup(comment: Comment): Promise<void> {
-		const path = this.app.workspace.getActiveFile()?.path;
+	async rejectAddressedFromPopup(
+		comment: Comment,
+		sourcePath: string,
+	): Promise<void> {
+		const path = this.popoverTargetPath(sourcePath);
 		if (!path) return;
 		await this.comments.rejectAddressed(path, comment);
 	}
@@ -1101,7 +1210,10 @@ export default class AnnotecaPlugin extends Plugin {
 		const tag = (author ?? '').trim();
 		const reply: Reply = {
 			author: tag !== '' ? tag : this.comments.resolvedAuthor(),
-			date: todayISO(),
+			// nowISO, not todayISO: the parser sorts replies lexically, so a
+			// date-only stamp sorts above every timestamped reply written the
+			// same day, and popover replies jumped to the top of the thread.
+			date: nowISO(),
 			body: trimmed,
 		};
 		// Only claim success when something was written. A refused write has
@@ -1111,7 +1223,15 @@ export default class AnnotecaPlugin extends Plugin {
 			sourcePath && sourcePath !== ''
 				? sourcePath
 				: this.app.workspace.getActiveFile()?.path;
-		if (!path) return false;
+		if (!path) {
+			// The last silent refusal in the reply path: Send went dead with no
+			// explanation when neither the editor nor the workspace could name
+			// a file.
+			new Notice(
+				'Could not determine which note this reply belongs to. Click into the note and try again.',
+			);
+			return false;
+		}
 		const wrote = await this.comments.appendReply(path, comment, reply);
 		if (wrote) new Notice('Reply added.');
 		return wrote;
@@ -1164,6 +1284,37 @@ export default class AnnotecaPlugin extends Plugin {
 		this.events.trigger('starred-changed', { id: comment.id });
 	}
 
+	// Drop starred ids whose comment no longer exists anywhere in the vault.
+	// Deleting a note, or deleting a starred comment out of one, leaves its id
+	// in settings.starredComments for good: the Starred tab can only draw cards
+	// for comments it can find, so an orphan is both invisible and impossible to
+	// unstar from the UI, and they accumulate. The tab's empty state has always
+	// told users to run a cleanup command; this is that command.
+	async clearOrphanedStars(): Promise<void> {
+		// The index only holds files that have been read. Without the full scan
+		// every comment in a never-opened note looks absent, and this would
+		// delete stars that are perfectly live. Stars are user data; erring
+		// costs more than the scan does.
+		await this.scanVaultIfNeeded();
+		const live = new Set<string>();
+		for (const idx of this.commentIndex.all()) {
+			for (const c of idx.comments) if (c.id) live.add(c.id);
+		}
+		const kept = this.settings.starredComments.filter((id) => live.has(id));
+		const removed = this.settings.starredComments.length - kept.length;
+		if (removed === 0) {
+			new Notice('No orphaned stars to clear.');
+			return;
+		}
+		this.settings.starredComments = kept;
+		// saveSettings emits settings-changed, which the hub already refreshes
+		// on, so the Starred tab redraws without a second event.
+		await this.saveSettings();
+		new Notice(
+			`Cleared ${removed} orphaned ${removed === 1 ? 'star' : 'stars'}.`,
+		);
+	}
+
 	async setLastHubTab(tab: AnnotecaSettings['lastHubTab']): Promise<void> {
 		if (this.settings.lastHubTab === tab) return;
 		this.settings.lastHubTab = tab;
@@ -1197,15 +1348,45 @@ export default class AnnotecaPlugin extends Plugin {
 		return `annoteca:draft:${commentId}`;
 	}
 
-	editCommentFromReviewer(path: string, comment: Comment): void {
+	// Edit writes the rebuilt marker through an Editor's replaceRange, so the
+	// editor it is handed decides which document gets written. It used to take
+	// whatever was active, and clicking Edit in the hub makes the HUB active:
+	// the common case was a dead-end notice with the file plainly visible, and
+	// in a folder or vault scope with another note focused, Save wrote the
+	// marker into the wrong document. Find the leaf actually holding this file.
+	async editCommentFromReviewer(
+		path: string,
+		comment: Comment,
+	): Promise<void> {
 		const file = this.app.vault.getAbstractFileByPath(path);
 		if (!(file instanceof TFile)) return;
-		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (!view) {
+		const leaf = this.findMarkdownLeafForPath(path);
+		if (!leaf) {
+			new Notice('Open the file to edit this comment.');
+			return;
+		}
+		await this.app.workspace.revealLeaf(leaf);
+		if (leaf.isDeferred) await leaf.loadIfDeferred();
+		const view = leaf.view;
+		if (!(view instanceof MarkdownView)) {
 			new Notice('Open the file to edit this comment.');
 			return;
 		}
 		this.openEditModal(view.editor, path, comment);
+	}
+
+	// A markdown leaf showing `path`, including one that has never been
+	// activated. Since Obsidian 1.7.2 a background tab restored from a saved
+	// workspace holds a DeferredView, which has no `.file`, so matching on
+	// `view.file?.path` skips it and every caller then opens a duplicate tab.
+	// The view state carries the path whether or not the view has been built.
+	private findMarkdownLeafForPath(path: string): WorkspaceLeaf | null {
+		for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
+			const statePath = (leaf.getViewState().state as { file?: string })
+				?.file;
+			if (statePath === path) return leaf;
+		}
+		return null;
 	}
 
 	// Scope state --------------------------------------------------------
@@ -1367,20 +1548,25 @@ export default class AnnotecaPlugin extends Plugin {
 		// user clicks a navigate button. The active view in that moment is
 		// the hub, not a MarkdownView, so the cursor + scroll calls would be
 		// gated out and produce a silent no-op.
-		let targetLeaf: WorkspaceLeaf | null = null;
-		for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
-			const view = leaf.view as MarkdownView;
-			if (view.file?.path === path) {
-				targetLeaf = leaf;
-				break;
-			}
-		}
+		//
+		// Matched on the view STATE, not on view.file, so a background tab that
+		// was restored but never activated is found too. Those hold a
+		// DeferredView with no `.file`, so the old check missed them and opened
+		// a second tab on the same note; after every restart the tab bar filled
+		// up a little more.
+		let targetLeaf = this.findMarkdownLeafForPath(path);
 		if (!targetLeaf) {
 			targetLeaf = this.app.workspace.getLeaf('tab');
 			await targetLeaf.openFile(file);
+		} else {
+			await this.app.workspace.revealLeaf(targetLeaf);
+			// Resolving the DeferredView is what gives us a real MarkdownView
+			// with an editor to move the cursor in.
+			if (targetLeaf.isDeferred) await targetLeaf.loadIfDeferred();
 		}
 
-		const view = targetLeaf.view as MarkdownView;
+		const view = targetLeaf.view;
+		if (!(view instanceof MarkdownView)) return;
 		const pos = view.editor.offsetToPos(offset);
 		view.editor.setCursor(pos);
 

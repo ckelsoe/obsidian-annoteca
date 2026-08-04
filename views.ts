@@ -352,11 +352,13 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 	private readonly threadRenderer: ThreadTabRenderer;
 	private readonly outlineRenderer: OutlineTabRenderer;
 	private readonly starredRenderer: StarredTabRenderer;
+	private refreshQueued = false;
+	private closed = false;
 
 	constructor(leaf: WorkspaceLeaf, plugin: AnnotecaPlugin) {
 		super(leaf, plugin);
 		this.threadRenderer = new ThreadTabRenderer(plugin, this.app, () =>
-			this.refresh(),
+			this.scheduleRefresh(),
 		);
 		this.outlineRenderer = new OutlineTabRenderer(plugin, this.app);
 		this.starredRenderer = new StarredTabRenderer(plugin);
@@ -376,7 +378,7 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 		this.activeTab = this.plugin.settings.lastHubTab;
 		const file = this.app.workspace.getActiveFile();
 		this.threadRenderer.activePath = file?.path;
-		this.refresh();
+		this.scheduleRefresh();
 		// Scan the vault once so that wider scopes (folder, vault, property,
 		// tag) have populated comment data. The first refresh above shows the
 		// current file only; when the scan completes it emits "index-changed"
@@ -392,12 +394,14 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 				// the comment they clicked, not whatever tab was last viewed.
 				this.activeTab = 'thread';
 				void this.plugin.setLastHubTab('thread');
-				this.refresh();
+				this.scheduleRefresh();
 			}),
 		);
 
 		this.registerEvent(
-			this.plugin.events.on('index-changed', () => this.refresh()),
+			this.plugin.events.on('index-changed', () =>
+				this.scheduleRefresh(),
+			),
 		);
 		// The panel reads display settings (markdown rendering, among others)
 		// only while rendering, so a setting changed with the panel open leaves
@@ -405,17 +409,19 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 		// The editor half of this is already handled by
 		// refreshDecorationsEverywhere(); this is the panel half.
 		this.registerEvent(
-			this.plugin.events.on('settings-changed', () => this.refresh()),
+			this.plugin.events.on('settings-changed', () =>
+				this.scheduleRefresh(),
+			),
 		);
 		this.registerEvent(
 			this.plugin.events.on('starred-changed', () => {
 				if (this.activeTab === 'starred' || this.activeTab === 'thread')
-					this.refresh();
+					this.scheduleRefresh();
 			}),
 		);
 		this.registerEvent(
 			this.plugin.events.on('scope-changed', () => {
-				if (this.activeTab === 'thread') this.refresh();
+				if (this.activeTab === 'thread') this.scheduleRefresh();
 			}),
 		);
 
@@ -426,12 +432,16 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 				if (f.path === this.threadRenderer.activePath) return;
 				this.threadRenderer.activePath = f.path;
 				this.threadRenderer.activeStart = undefined;
-				this.refresh();
+				this.scheduleRefresh();
 			}),
 		);
 	}
 
 	async onClose(): Promise<void> {
+		// Nothing queued may run after this point: a pending render would build
+		// a fresh Thread DOM and a fresh markdown lifetime immediately after the
+		// dispose below threw the last one away.
+		this.closed = true;
 		// F-276: dropping the panel deselects the active comment, so clear its
 		// editor highlight. The marker decorations themselves are untouched.
 		this.plugin.clearActiveCommentHighlight();
@@ -441,14 +451,37 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 		await super.onClose();
 	}
 
+	// Coalesce refreshes to one per tick. Several triggers fire for a single
+	// user action: starring, changing scope, changing the status filter and
+	// switching tabs each have their own refresh path AND persist through
+	// saveSettings(), which emits "settings-changed", so every one of them
+	// rendered the panel twice. A render is a full contentEl rebuild, and on the
+	// Thread tab it walks the vault through computeScopeFiles().
+	//
+	// Deduping rather than dropping the "settings-changed" listener, which is
+	// the tempting fix: that listener is the ONLY refresh path for a plain
+	// settings-tab edit, for cycleIndicatorStyle and for the skill-staleness
+	// save, so removing it brings back the stale-panel bug it was added for.
+	private scheduleRefresh(): void {
+		if (this.refreshQueued || this.closed) return;
+		this.refreshQueued = true;
+		queueMicrotask(() => {
+			this.refreshQueued = false;
+			if (this.closed) return;
+			this.renderPanel();
+		});
+	}
+
 	private async setActiveTab(tab: HubTab): Promise<void> {
 		if (this.activeTab === tab) return;
 		this.activeTab = tab;
 		await this.plugin.setLastHubTab(tab);
-		this.refresh();
+		this.scheduleRefresh();
 	}
 
-	private refresh(): void {
+	// The actual render. Reached only through scheduleRefresh, so no caller can
+	// accidentally bypass the coalescing.
+	private renderPanel(): void {
 		const container = this.contentEl;
 		// Unload the previous pass's markdown renders before the DOM they are
 		// attached to goes away. Switching to Outline or Starred empties the
