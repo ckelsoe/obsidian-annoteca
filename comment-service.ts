@@ -29,6 +29,15 @@ import { parseAll, serialize, nowISO } from './parser';
 // already said so. Collapsing them produced two notices for one action.
 export type WriteOutcome = 'written' | 'declined' | 'missing';
 
+// What re-finding a comment in the current file text produced. 'ambiguous' is
+// its own case rather than folded into 'missing' because the user-facing
+// message is different in kind: nothing has moved, reopening the note will not
+// help, and the only fix is to go and change one of the duplicated ids.
+type FreshLookup =
+	| { kind: 'found'; comment: Comment }
+	| { kind: 'missing' }
+	| { kind: 'ambiguous'; id: string };
+
 interface SpliceRange {
 	from: number;
 	to: number;
@@ -95,9 +104,8 @@ export class CommentService {
 		// Removing a range is the least forgiving thing this service does, so a
 		// marker it cannot identify aborts rather than deleting whatever now
 		// occupies the cached offsets.
-		const current = this.freshComment(content, comment);
+		const current = this.resolveFresh(content, comment);
 		if (!current) {
-			this.noticeVanished();
 			return 'missing';
 		}
 		if (stillApplies && !stillApplies(current)) return 'declined';
@@ -128,9 +136,8 @@ export class CommentService {
 			return;
 		}
 		const content = await this.readCurrentContent(file, path);
-		const current = this.freshComment(content, comment);
+		const current = this.resolveFresh(content, comment);
 		if (!current) {
-			this.noticeVanished();
 			return;
 		}
 		const { start, end } = current.marker;
@@ -189,11 +196,18 @@ export class CommentService {
 			note,
 			original,
 		};
-		const outcome = await this.replaceMarker(path, comment, (current) => ({
-			...current,
-			addressed,
-		}));
+		// Decline rather than overwrite. Every sibling transition inspects
+		// `current` before it acts, and this one did not, so a second writer
+		// (an assistant, another pane, a sync) that addressed the same comment
+		// after this caller's snapshot had its author, date, note and original
+		// replaced. The original is the ONLY revert source rejectAddressed has,
+		// so that overwrite is unrecoverable text loss, not just a lost label.
+		const outcome = await this.replaceMarker(path, comment, (current) =>
+			current.addressed ? undefined : { ...current, addressed },
+		);
 		if (outcome === 'written') new Notice('Marked as addressed.');
+		else if (outcome === 'declined')
+			new Notice('This comment is already awaiting review.');
 	}
 
 	// addressed → resolved. The reviewer keeps the applied edit. Honors
@@ -279,9 +293,8 @@ export class CommentService {
 		// The identify-or-refuse rule this needs is now freshComment's, shared
 		// with every other verb rather than stated twice. Its comment carries the
 		// reasoning that was worked out here.
-		const current = this.freshComment(content, comment);
+		const current = this.resolveFresh(content, comment);
 		if (!current) {
-			this.noticeVanished();
 			return;
 		}
 		// Everything from here reads `current`, never the caller's `comment`
@@ -418,11 +431,8 @@ export class CommentService {
 			return 'missing';
 		}
 		const content = await this.readCurrentContent(file, path);
-		const current = this.freshComment(content, prev);
-		if (!current) {
-			this.noticeVanished();
-			return 'missing';
-		}
+		const current = this.resolveFresh(content, prev);
+		if (!current) return 'missing';
 		const next = apply(current);
 		if (!next) return 'declined';
 		const serialized = serialize({
@@ -498,21 +508,50 @@ export class CommentService {
 	//
 	// This is the predicate rejectAddressed worked out across four review rounds
 	// in PR A; it is shared now rather than written twice.
-	private freshComment(
-		content: string,
-		comment: Comment,
-	): Comment | undefined {
+	private freshComment(content: string, comment: Comment): FreshLookup {
 		const parsed = parseAll(content);
 		if (comment.id !== undefined) {
-			return parsed.find((c) => c.id === comment.id);
+			// Exactly one, or refuse. Ids live in file text, so copy-pasting a
+			// marker inside a note produces two markers carrying the same id,
+			// and `find` would hand back the first one whether or not it is the
+			// marker the card points at. The id-less branch below is already
+			// this strict.
+			//
+			// 'ambiguous' rather than 'missing' because the two need different
+			// words. "Moved or deleted, reopen the note" is false for a
+			// duplicated id, and reopening cannot fix it, so it would leave
+			// every action dead with no way to understand why.
+			const matches = parsed.filter((c) => c.id === comment.id);
+			const only = matches[0];
+			if (matches.length === 1 && only !== undefined)
+				return { kind: 'found', comment: only };
+			return matches.length > 1
+				? { kind: 'ambiguous', id: comment.id }
+				: { kind: 'missing' };
 		}
-		return parsed.find(
+		const found = parsed.find(
 			(c) =>
 				c.marker.start === comment.marker.start &&
 				c.marker.end === comment.marker.end &&
 				c.category === comment.category &&
 				c.body === comment.body,
 		);
+		return found === undefined
+			? { kind: 'missing' }
+			: { kind: 'found', comment: found };
+	}
+
+	// Look the marker up and narrate the failure, so the four write paths do not
+	// each have to remember which message goes with which kind of miss.
+	private resolveFresh(
+		content: string,
+		comment: Comment,
+	): Comment | undefined {
+		const lookup = this.freshComment(content, comment);
+		if (lookup.kind === 'found') return lookup.comment;
+		if (lookup.kind === 'ambiguous') this.noticeAmbiguous(lookup.id);
+		else this.noticeVanished();
+		return undefined;
 	}
 
 	// One message for "the file this action was aimed at is gone". A Hub card can
@@ -533,6 +572,16 @@ export class CommentService {
 	private noticeVanished(): void {
 		new Notice(
 			'This comment has moved or been deleted since it was loaded. Reopen the note and try again.',
+		);
+	}
+
+	// One message for "this note has two comments with the same identifier".
+	// Deliberately not the vanished wording: nothing has moved, reopening the
+	// note changes nothing, and the user cannot act on it without being told
+	// what is actually wrong and which identifier to go and find.
+	private noticeAmbiguous(id: string): void {
+		new Notice(
+			`More than one comment in this note has the identifier ${id}, so this action cannot tell which one you meant. Give one of them a different identifier, or delete the copy.`,
 		);
 	}
 

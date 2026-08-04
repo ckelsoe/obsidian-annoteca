@@ -24,6 +24,8 @@ import {
 	DEFAULT_SETTINGS,
 	AnnotecaSettingTab,
 	resolveSettingsCategories,
+	normalizeRenderMarkdownBodies,
+	mergeRestoredSettings,
 } from './settings';
 import { getCategoryOrFallback } from './categories';
 import {
@@ -275,15 +277,10 @@ export default class AnnotecaPlugin extends Plugin {
 				loaded?.markerClickAction,
 				isMobile(),
 			),
-			// data.json is user-editable and also arrives over sync, so a stored
-			// value is not guaranteed to be the type it was written as. The
-			// spread would take a string "false" verbatim, and every read of
-			// this setting is a truthiness test, so a disabled setting would
-			// come back on. Fall back to the default for anything non-boolean.
-			renderMarkdownBodies:
-				typeof loaded?.renderMarkdownBodies === 'boolean'
-					? loaded.renderMarkdownBodies
-					: DEFAULT_SETTINGS.renderMarkdownBodies,
+			renderMarkdownBodies: normalizeRenderMarkdownBodies(
+				loaded?.renderMarkdownBodies,
+				DEFAULT_SETTINGS.renderMarkdownBodies,
+			),
 		};
 
 		// Migrate legacy indicatorStyle values. Prior to the underline rewrite,
@@ -1693,11 +1690,12 @@ export default class AnnotecaPlugin extends Plugin {
 		const body = await this.app.vault.read(file);
 		try {
 			const parsed = JSON.parse(body) as Partial<AnnotecaSettings>;
-			this.settings = {
-				...DEFAULT_SETTINGS,
-				...this.settings,
-				...parsed,
-			};
+			// A backup file is the same untrusted shape as data.json, so it gets
+			// the same normalizing the load path does. The merge is a pure
+			// function in settings.ts so it is reachable by tests; inline here it
+			// was not, and mutation showed the normalizing could be deleted
+			// outright with the suite still green.
+			this.settings = mergeRestoredSettings(this.settings, parsed);
 			await this.saveSettings();
 			new Notice('Settings restored.');
 		} catch (err) {

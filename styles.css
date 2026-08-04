@@ -2151,6 +2151,12 @@ settings:
    the paragraph the parser already made. */
 .annoteca-md {
 	white-space: normal;
+	/* A long unbroken token in a paragraph, heading, or quote is neither an
+	   <a> nor <code>, so the two rules below that already break anywhere do
+	   not reach it, and it would set the surface's minimum width by itself and
+	   paint outside the popover. The `pre code` override further down keeps
+	   fenced code scrolling rather than wrapping. */
+	overflow-wrap: anywhere;
 }
 
 /* Obsidian wraps even a one-line body in a <p>, whose margins would otherwise

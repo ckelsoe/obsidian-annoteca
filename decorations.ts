@@ -1262,10 +1262,19 @@ function buildReplyComposerDom(
 			saveTimer = undefined;
 		}
 		if (draftKey) ctx.saveDraft(draftKey, textarea.value);
-		const release = (): void => {
+		// The write is awaited, and the composer can be dismissed across that
+		// await: Escape, Cancel, or anything that tears the tooltip down. Then
+		// release() re-enables a Send button and a textarea that are no longer
+		// in the document, and the catch branch raises a Notice about a
+		// composer the user has already closed. Checking the textarea rather
+		// than a flag catches every teardown path, including the ones that do
+		// not run through this closure at all.
+		const release = (): boolean => {
+			if (!textarea.isConnected) return false;
 			pending = false;
 			send.disabled = false;
 			textarea.readOnly = false;
+			return true;
 		};
 		void ctx
 			.submitReply(m, body, authorSelect.value, sourcePathFor(ctx, view))
@@ -1285,8 +1294,9 @@ function buildReplyComposerDom(
 				// transient I/O error. Without this the composer stays disabled
 				// with the user's text trapped in it, and the rejection surfaces
 				// as an unhandled promise. The text is kept and Send works again.
-				release();
-				new Notice('Could not save the reply. Try again.');
+				// A dismissed composer stays dismissed and says nothing.
+				if (release())
+					new Notice('Could not save the reply. Try again.');
 			});
 	};
 	send.addEventListener('click', (e) => {

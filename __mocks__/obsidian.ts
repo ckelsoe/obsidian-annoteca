@@ -11,9 +11,25 @@ export class TFile {}
 export class MarkdownView {}
 export class Modal {}
 export class App {}
+// Every Notice raised during a test, oldest first. A test imports this from
+// '../__mocks__/obsidian' (a relative path, so it types against THIS file
+// rather than obsidian.d.ts) and clears it in beforeEach.
+//
+// This is not a member added to a mocked class, which the Component note below
+// rightly forbids: production code type-checks against the real obsidian.d.ts,
+// so a convenience member there would compile under Jest and fail `npm run
+// build`. A module-level export is only ever reachable through the relative
+// import, so the mock stays a subset of the real API.
+//
+// It exists because the abort BEHAVIOUR was locked by tests while the
+// user-facing message, which is the entire point of several of these paths, had
+// no coverage at all: every noticeFileGone and noticeVanished call could be
+// replaced with a no-op and the suite stayed green.
+export const noticeLog: string[] = [];
+
 export class Notice {
-	constructor(_message?: string) {
-		// no-op
+	constructor(message?: string) {
+		if (message !== undefined) noticeLog.push(message);
 	}
 }
 export class Menu {}

@@ -1,8 +1,14 @@
 import { TFile } from 'obsidian';
 
+// Relative, so it types against __mocks__/obsidian.ts rather than obsidian.d.ts.
+import { noticeLog } from '../__mocks__/obsidian';
 import type AnnotecaPlugin from '../main';
 import { CommentService } from '../comment-service';
 import { parseAll } from '../parser';
+
+beforeEach(() => {
+	noticeLog.length = 0;
+});
 
 const NOTE = [
 	'Prose under review. <!-- annoteca/clarify: which products?',
@@ -705,5 +711,163 @@ describe('#12: a write aimed at a missing file reports instead of no-oping', () 
 		await expect(
 			service.deleteComment('gone.md', snapshot),
 		).resolves.toBeUndefined();
+	});
+});
+
+describe('applyAddressed refuses to overwrite a concurrent addressed state', () => {
+	const OPEN = [
+		'<!-- annoteca/clarify: tighten this',
+		'[id=conc0001]',
+		'-->',
+		'',
+		'Body.',
+	].join('\n');
+
+	// The addressed note that lands after the caller took its snapshot: an
+	// assistant applying an edit, another pane, or a sync.
+	const addressedByOther = [
+		'<!-- annoteca/clarify: tighten this',
+		'[id=conc0001]',
+		'[addressed claude 2026-06-20]: they replaced it first',
+		'```annoteca-original',
+		'the FIRST original',
+		'```',
+		'-->',
+		'',
+		'Body.',
+	].join('\n');
+
+	it('keeps the original the other writer stored, instead of replacing it', async () => {
+		const h = makeHarnessWith(OPEN);
+		const snapshot = firstComment(h.content);
+		h.content = addressedByOther;
+
+		await h.service.applyAddressed(
+			'note.md',
+			snapshot,
+			'mine',
+			'the SECOND original',
+		);
+
+		const c = firstComment(h.content);
+		// The original is the only revert source rejectAddressed has, so
+		// clobbering it loses the earlier prose permanently.
+		expect(c.addressed?.author).toBe('claude');
+		expect(c.addressed?.note).toBe('they replaced it first');
+		expect(c.addressed?.original).toBe('the FIRST original');
+		expect(h.content).not.toContain('the SECOND original');
+	});
+
+	it('says so rather than failing silently', async () => {
+		const h = makeHarnessWith(OPEN);
+		const snapshot = firstComment(h.content);
+		h.content = addressedByOther;
+
+		await h.service.applyAddressed('note.md', snapshot, 'mine', 'x');
+
+		expect(noticeLog).toContain('This comment is already awaiting review.');
+		expect(noticeLog).not.toContain('Marked as addressed.');
+	});
+
+	it('still writes when nothing addressed it first', async () => {
+		const h = makeHarnessWith(OPEN);
+		await h.service.applyAddressed(
+			'note.md',
+			firstComment(h.content),
+			'mine',
+			'the old text',
+		);
+
+		expect(firstComment(h.content).addressed?.note).toBe('mine');
+		expect(noticeLog).toContain('Marked as addressed.');
+	});
+});
+
+describe('a duplicated marker id refuses instead of writing to the wrong one', () => {
+	// Copy-pasting a marker inside a note is the ordinary way this happens; ids
+	// live in file text, so nothing stops two markers carrying one id.
+	const TWINS = [
+		'<!-- annoteca/clarify: the first one',
+		'[id=twin0001]',
+		'-->',
+		'',
+		'Prose.',
+		'',
+		'<!-- annoteca/clarify: the second one',
+		'[id=twin0001]',
+		'-->',
+	].join('\n');
+
+	const secondOf = (content: string) => {
+		const all = parseAll(content);
+		expect(all).toHaveLength(2);
+		const c = all[1];
+		if (!c) throw new Error('no second comment parsed');
+		return c;
+	};
+
+	it('does not resolve the first twin when the card points at the second', async () => {
+		const h = makeHarnessWith(TWINS);
+		await h.service.resolveComment('note.md', secondOf(h.content));
+
+		// Neither is resolved: the lookup is ambiguous, so it declines.
+		expect(
+			parseAll(h.content).every((c) => c.resolution === undefined),
+		).toBe(true);
+	});
+
+	it('names the duplicated identifier instead of claiming the comment vanished', () => {
+		// "Moved or deleted, reopen the note" is false here and reopening
+		// cannot fix it, so it would leave every action dead with no way to
+		// understand why. The message has to say what is actually wrong.
+		const h = makeHarnessWith(TWINS);
+		return h.service
+			.resolveComment('note.md', secondOf(h.content))
+			.then(() => {
+				expect(noticeLog).toHaveLength(1);
+				expect(noticeLog[0]).toContain('twin0001');
+				expect(noticeLog[0]).toContain('More than one comment');
+				expect(noticeLog[0]).not.toContain('moved or been deleted');
+			});
+	});
+
+	it('still says "vanished" when the marker really is gone', () => {
+		const h = makeHarnessWith(TWINS);
+		const snapshot = secondOf(h.content);
+		h.content = 'Prose with no markers at all.';
+
+		return h.service.resolveComment('note.md', snapshot).then(() => {
+			expect(noticeLog).toHaveLength(1);
+			expect(noticeLog[0]).toContain('moved or been deleted');
+		});
+	});
+
+	it('refuses the reply rather than appending it to the wrong marker', async () => {
+		const h = makeHarnessWith(TWINS);
+		const wrote = await h.service.appendReply(
+			'note.md',
+			secondOf(h.content),
+			{
+				author: 'charles',
+				date: '2026-06-22',
+				body: 'mine',
+			},
+		);
+
+		expect(wrote).toBe(false);
+		expect(h.content).not.toContain('mine');
+	});
+
+	it('still acts on a unique id', async () => {
+		const h = makeHarnessWith(
+			TWINS.replace('[id=twin0001]', '[id=twin0002]'),
+		);
+		await h.service.resolveComment('note.md', secondOf(h.content));
+
+		const resolved = parseAll(h.content).filter(
+			(c) => c.resolution !== undefined,
+		);
+		expect(resolved).toHaveLength(1);
+		expect(resolved[0]?.body).toBe('the second one');
 	});
 });
