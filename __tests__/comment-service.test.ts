@@ -1,4 +1,4 @@
-import { TFile } from 'obsidian';
+import { MarkdownView, TFile } from 'obsidian';
 
 // Relative, so it types against __mocks__/obsidian.ts rather than obsidian.d.ts.
 import { noticeLog } from '../__mocks__/obsidian';
@@ -33,9 +33,12 @@ function makeHarness(deleteOnResolve: boolean) {
 			vault: {
 				getAbstractFileByPath: () => file,
 				read: () => Promise.resolve(content),
-				modify: (_file: TFile, updated: string) => {
-					content = updated;
-					return Promise.resolve();
+				// The service writes through vault.process, which reads and
+				// writes under one lock. Modelled here as read-transform-store
+				// so a stale-offset write cannot slip past the comparison.
+				process: (_file: TFile, fn: (data: string) => string) => {
+					content = fn(content);
+					return Promise.resolve(content);
 				},
 			},
 			workspace: {
@@ -74,9 +77,12 @@ function makeHarnessWith(initial: string, deleteOnResolve = false) {
 				getAbstractFileByPath: (p: string) =>
 					p === 'note.md' ? file : null,
 				read: () => Promise.resolve(content),
-				modify: (_file: TFile, updated: string) => {
-					content = updated;
-					return Promise.resolve();
+				// The service writes through vault.process, which reads and
+				// writes under one lock. Modelled here as read-transform-store
+				// so a stale-offset write cannot slip past the comparison.
+				process: (_file: TFile, fn: (data: string) => string) => {
+					content = fn(content);
+					return Promise.resolve(content);
 				},
 			},
 			workspace: {
@@ -869,5 +875,259 @@ describe('a duplicated marker id refuses instead of writing to the wrong one', (
 		);
 		expect(resolved).toHaveLength(1);
 		expect(resolved[0]?.body).toBe('the second one');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// PR A item 3: the read-then-write window.
+//
+// Every verb computed splice offsets against one read, and applySplices then
+// performed a SECOND read and applied those offsets to whatever came back. Both
+// failure modes below were reproduced by execution in the 2026-08-04 review.
+// ---------------------------------------------------------------------------
+
+const TWO_COMMENTS = [
+	'First paragraph. <!-- annoteca/clarify: which products?',
+	'[id=aaaa1111]',
+	'-->',
+	'',
+	'Second paragraph. <!-- annoteca/tone: too sharp?',
+	'[id=bbbb2222]',
+	'-->',
+	'',
+	'Closing prose.',
+].join('\n');
+
+// Same closed-file harness, plus a one-shot hook that fires immediately AFTER a
+// read returns. That is precisely the race: the verb holds content it read a
+// moment ago, and the file has moved on before the write lands.
+function makeRacingHarness(initial: string) {
+	let content = initial;
+	let afterNextRead: (() => void) | undefined;
+	const file = new TFile();
+	const plugin = {
+		settings: {
+			enableAuthorTag: true,
+			authorTag: 'charles',
+			deleteOnResolve: false,
+		},
+		app: {
+			vault: {
+				getAbstractFileByPath: (p: string) =>
+					p === 'note.md' ? file : null,
+				read: () => {
+					const snapshot = content;
+					const hook = afterNextRead;
+					afterNextRead = undefined;
+					if (hook) hook();
+					return Promise.resolve(snapshot);
+				},
+				process: (_file: TFile, fn: (data: string) => string) => {
+					content = fn(content);
+					return Promise.resolve(content);
+				},
+			},
+			workspace: {
+				getLeavesOfType: () => [],
+				getActiveFile: () => null,
+			},
+		},
+		commentIndex: { rebuild: () => undefined },
+		events: { trigger: () => undefined },
+	} as unknown as AnnotecaPlugin;
+	return {
+		service: new CommentService(plugin),
+		get content() {
+			return content;
+		},
+		set content(updated: string) {
+			content = updated;
+		},
+		onceAfterRead(fn: () => void) {
+			afterNextRead = fn;
+		},
+	};
+}
+
+// Editor-path twin of the harness above: the file is open in a markdown leaf, so
+// the service reads and writes through the editor rather than the vault.
+function makeEditorHarness(initial: string) {
+	let content = initial;
+	let afterNextGetValue: (() => void) | undefined;
+	const file = new TFile();
+	const editor = {
+		getValue: () => {
+			const snapshot = content;
+			const hook = afterNextGetValue;
+			afterNextGetValue = undefined;
+			if (hook) hook();
+			return snapshot;
+		},
+		// Offsets stand in for positions one-for-one, which is all this path
+		// uses them for.
+		offsetToPos: (n: number) => n,
+		replaceRange: (insert: string, from: number, to: number) => {
+			content = content.slice(0, from) + insert + content.slice(to);
+		},
+	};
+	const view = Object.create(MarkdownView.prototype) as MarkdownView;
+	Object.assign(view, { file: { path: 'note.md' }, editor });
+	const plugin = {
+		settings: {
+			enableAuthorTag: true,
+			authorTag: 'charles',
+			deleteOnResolve: false,
+		},
+		app: {
+			vault: {
+				getAbstractFileByPath: (p: string) =>
+					p === 'note.md' ? file : null,
+				read: () => Promise.resolve(content),
+				process: (_f: TFile, fn: (data: string) => string) => {
+					content = fn(content);
+					return Promise.resolve(content);
+				},
+			},
+			workspace: {
+				getLeavesOfType: () => [{ view }],
+				getActiveFile: () => null,
+			},
+		},
+		commentIndex: { rebuild: () => undefined },
+		events: { trigger: () => undefined },
+	} as unknown as AnnotecaPlugin;
+	return {
+		service: new CommentService(plugin),
+		get content() {
+			return content;
+		},
+		set content(updated: string) {
+			content = updated;
+		},
+		onceAfterRead(fn: () => void) {
+			afterNextGetValue = fn;
+		},
+	};
+}
+
+describe('applySplices refuses a write computed against stale content', () => {
+	it('does not splice when the file changed between the read and the write', async () => {
+		const h = makeRacingHarness(TWO_COMMENTS);
+		const target = parseAll(h.content)[0];
+		expect(target).toBeDefined();
+		if (!target) return;
+
+		// A sync (or another app) prepends a paragraph the instant after the
+		// verb reads. Every offset the verb is holding is now short by that much.
+		h.onceAfterRead(() => {
+			h.content = `A paragraph that arrived from elsewhere.\n\n${h.content}`;
+		});
+		await h.service.resolveComment('note.md', target);
+
+		// The external writer's version is intact: no `[resolved ...]` line was
+		// spliced into the middle of it.
+		expect(h.content.startsWith('A paragraph that arrived')).toBe(true);
+		expect(h.content).not.toContain('[resolved');
+		expect(noticeLog.join('\n')).toContain('moved or been deleted');
+
+		// And the action is repeatable once the caller re-reads.
+		const retry = parseAll(h.content)[0];
+		expect(retry).toBeDefined();
+		if (!retry) return;
+		await h.service.resolveComment('note.md', retry);
+		expect(h.content).toContain('[resolved charles');
+	});
+
+	it('refuses on the editor path too', async () => {
+		// Same window, different write API: when the note is open the service
+		// reads the editor's value and writes back through replaceRange, so the
+		// comparison has to happen there as well.
+		const h = makeEditorHarness(TWO_COMMENTS);
+		const target = parseAll(h.content)[0];
+		expect(target).toBeDefined();
+		if (!target) return;
+
+		h.onceAfterRead(() => {
+			h.content = `Typed above the marker.\n\n${h.content}`;
+		});
+		await h.service.resolveComment('note.md', target);
+
+		expect(h.content.startsWith('Typed above the marker.')).toBe(true);
+		expect(h.content).not.toContain('[resolved');
+		expect(noticeLog.join('\n')).toContain('moved or been deleted');
+
+		const retry = parseAll(h.content)[0];
+		expect(retry).toBeDefined();
+		if (!retry) return;
+		await h.service.resolveComment('note.md', retry);
+		expect(h.content).toContain('[resolved charles');
+	});
+});
+
+describe('two lifecycle writes to one file do not lose each other', () => {
+	it('applies both resolves when they overlap', async () => {
+		const h = makeRacingHarness(TWO_COMMENTS);
+		const [first, second] = parseAll(h.content);
+		expect(first).toBeDefined();
+		expect(second).toBeDefined();
+		if (!first || !second) return;
+
+		// Executed failure: both reported "Resolved." and only one landed,
+		// because the second verb read before the first one wrote and then
+		// spliced its offsets into the newer text.
+		await Promise.all([
+			h.service.resolveComment('note.md', first),
+			h.service.resolveComment('note.md', second),
+		]);
+
+		const after = parseAll(h.content);
+		expect(after).toHaveLength(2);
+		expect(after[0]?.resolution).toBeDefined();
+		expect(after[1]?.resolution).toBeDefined();
+		expect(h.content).toContain('Closing prose.');
+	});
+});
+
+describe('a refused write is reported as a refusal, not a success', () => {
+	it('appendReply returns false so the composer keeps the reply', async () => {
+		// The staleness guard refuses correctly, but a refusal that does not
+		// reach the caller is indistinguishable from a success one layer up:
+		// appendReply returned true, the popover said "Reply added." and cleared
+		// the draft, and the reply the user had just typed was gone with nothing
+		// written to the file.
+		const h = makeRacingHarness(TWO_COMMENTS);
+		const target = parseAll(h.content)[0];
+		expect(target).toBeDefined();
+		if (!target) return;
+
+		h.onceAfterRead(() => {
+			h.content = `Arrived from elsewhere.\n\n${h.content}`;
+		});
+		const wrote = await h.service.appendReply('note.md', target, {
+			author: 'charles',
+			date: '2026-08-04T10:00:00',
+			body: 'a reply the user typed',
+		});
+
+		expect(wrote).toBe(false);
+		expect(h.content).not.toContain('a reply the user typed');
+	});
+
+	it('deleteAllResolvedInFile returns null rather than a count', async () => {
+		const resolvedDoc = [
+			'Prose. <!-- annoteca/clarify: done with this',
+			'[id=cccc3333]',
+			'[resolved charles 2026-08-01T10:00:00]:',
+			'-->',
+			'',
+			'More prose.',
+		].join('\n');
+		const h = makeRacingHarness(resolvedDoc);
+		h.onceAfterRead(() => {
+			h.content = `Arrived from elsewhere.\n\n${h.content}`;
+		});
+		const removed = await h.service.deleteAllResolvedInFile('note.md');
+		expect(removed).toBeNull();
+		expect(h.content).toContain('annoteca/clarify');
 	});
 });

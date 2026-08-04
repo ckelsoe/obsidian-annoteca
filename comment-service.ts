@@ -44,17 +44,44 @@ interface SpliceRange {
 	insert: string;
 }
 
+// The two "this action's target is not there any more" messages, exported so the
+// composer's edit path can refuse in the same words. It re-resolves its own
+// marker (it writes through the editor rather than through this service), and a
+// second copy of these strings would drift.
+export const VANISHED_MESSAGE =
+	'This comment has moved or been deleted since it was loaded. Reopen the note and try again.';
+
+export function ambiguousMessage(id: string): string {
+	return `More than one comment in this note has the identifier ${id}, so this action cannot tell which one you meant. Give one of them a different identifier, or delete the copy.`;
+}
+
+// Every public mutating verb is a thin `enqueue` wrapper around a private
+// `*Unqueued` method, and the verbs that delegate to one another call the
+// unqueued form. Queueing at both layers would deadlock: resolveComment waiting
+// on resolveAndRemoveComment, which is waiting behind resolveComment in the same
+// queue.
 export class CommentService {
+	private readonly writeQueue = new Map<string, Promise<void>>();
+
 	constructor(private readonly plugin: AnnotecaPlugin) {}
 
 	async resolveComment(path: string, comment: Comment): Promise<void> {
+		return this.enqueue(path, () =>
+			this.resolveCommentUnqueued(path, comment),
+		);
+	}
+
+	private async resolveCommentUnqueued(
+		path: string,
+		comment: Comment,
+	): Promise<void> {
 		if (comment.resolution) return;
 		if (this.plugin.settings.deleteOnResolve) {
 			// The toggle is the opt-in for destructive resolve; no per-action
 			// confirmation here. The explicit "Resolve and remove" action keeps
 			// its own confirmation for users who have NOT opted in globally.
 			// Guarded on the CURRENT state, matching the branch below.
-			const outcome = await this.resolveAndRemoveComment(
+			const outcome = await this.resolveAndRemoveCommentUnqueued(
 				path,
 				comment,
 				(c) => !c.resolution,
@@ -63,13 +90,16 @@ export class CommentService {
 			return;
 		}
 		const author = this.resolvedAuthor();
-		const outcome = await this.replaceMarker(path, comment, (current) =>
-			current.resolution
-				? undefined
-				: {
-						...current,
-						resolution: { author, date: nowISO(), note: '' },
-					},
+		const outcome = await this.replaceMarkerUnqueued(
+			path,
+			comment,
+			(current) =>
+				current.resolution
+					? undefined
+					: {
+							...current,
+							resolution: { author, date: nowISO(), note: '' },
+						},
 		);
 		if (outcome === 'written') new Notice('Resolved.');
 		else if (outcome === 'declined') new Notice('Already resolved.');
@@ -95,6 +125,16 @@ export class CommentService {
 		comment: Comment,
 		stillApplies?: (current: Comment) => boolean,
 	): Promise<WriteOutcome> {
+		return this.enqueue(path, () =>
+			this.resolveAndRemoveCommentUnqueued(path, comment, stillApplies),
+		);
+	}
+
+	private async resolveAndRemoveCommentUnqueued(
+		path: string,
+		comment: Comment,
+		stillApplies?: (current: Comment) => boolean,
+	): Promise<WriteOutcome> {
 		const file = this.plugin.app.vault.getAbstractFileByPath(path);
 		if (!(file instanceof TFile)) {
 			this.noticeFileGone(path);
@@ -111,17 +151,30 @@ export class CommentService {
 		if (stillApplies && !stillApplies(current)) return 'declined';
 		const { start, end } = current.marker;
 		const splice = this.buildDeleteSplice(content, start, end);
-		await this.applySplices(path, file, [splice]);
+		const wrote = await this.applySplices(path, file, [splice], content);
+		if (!wrote) return 'missing';
 		new Notice('Resolved and removed.');
 		return 'written';
 	}
 
 	async reopenComment(path: string, comment: Comment): Promise<void> {
+		return this.enqueue(path, () =>
+			this.reopenCommentUnqueued(path, comment),
+		);
+	}
+
+	private async reopenCommentUnqueued(
+		path: string,
+		comment: Comment,
+	): Promise<void> {
 		if (!comment.resolution) return;
-		const outcome = await this.replaceMarker(path, comment, (current) =>
-			current.resolution
-				? { ...current, resolution: undefined }
-				: undefined,
+		const outcome = await this.replaceMarkerUnqueued(
+			path,
+			comment,
+			(current) =>
+				current.resolution
+					? { ...current, resolution: undefined }
+					: undefined,
 		);
 		if (outcome === 'written') new Notice('Reopened.');
 		// 'declined' means another writer reopened it first. Every sibling verb
@@ -130,6 +183,15 @@ export class CommentService {
 	}
 
 	async deleteComment(path: string, comment: Comment): Promise<void> {
+		return this.enqueue(path, () =>
+			this.deleteCommentUnqueued(path, comment),
+		);
+	}
+
+	private async deleteCommentUnqueued(
+		path: string,
+		comment: Comment,
+	): Promise<void> {
 		const file = this.plugin.app.vault.getAbstractFileByPath(path);
 		if (!(file instanceof TFile)) {
 			this.noticeFileGone(path);
@@ -142,7 +204,8 @@ export class CommentService {
 		}
 		const { start, end } = current.marker;
 		const splice = this.buildDeleteSplice(content, start, end);
-		await this.applySplices(path, file, [splice]);
+		const wrote = await this.applySplices(path, file, [splice], content);
+		if (!wrote) return;
 		new Notice('Deleted.');
 	}
 
@@ -168,10 +231,24 @@ export class CommentService {
 		reply: Reply,
 	): Promise<boolean> {
 		if (!path) return false;
-		const outcome = await this.replaceMarker(path, comment, (current) => ({
-			...current,
-			replies: [...current.replies, reply],
-		}));
+		return this.enqueue(path, () =>
+			this.appendReplyUnqueued(path, comment, reply),
+		);
+	}
+
+	private async appendReplyUnqueued(
+		path: string,
+		comment: Comment,
+		reply: Reply,
+	): Promise<boolean> {
+		const outcome = await this.replaceMarkerUnqueued(
+			path,
+			comment,
+			(current) => ({
+				...current,
+				replies: [...current.replies, reply],
+			}),
+		);
 		return outcome === 'written';
 	}
 
@@ -190,6 +267,17 @@ export class CommentService {
 		note: string,
 		original?: string,
 	): Promise<void> {
+		return this.enqueue(path, () =>
+			this.applyAddressedUnqueued(path, comment, note, original),
+		);
+	}
+
+	private async applyAddressedUnqueued(
+		path: string,
+		comment: Comment,
+		note: string,
+		original?: string,
+	): Promise<void> {
 		const addressed: Addressed = {
 			author: this.resolvedAuthor(),
 			date: nowISO(),
@@ -202,8 +290,11 @@ export class CommentService {
 		// after this caller's snapshot had its author, date, note and original
 		// replaced. The original is the ONLY revert source rejectAddressed has,
 		// so that overwrite is unrecoverable text loss, not just a lost label.
-		const outcome = await this.replaceMarker(path, comment, (current) =>
-			current.addressed ? undefined : { ...current, addressed },
+		const outcome = await this.replaceMarkerUnqueued(
+			path,
+			comment,
+			(current) =>
+				current.addressed ? undefined : { ...current, addressed },
 		);
 		if (outcome === 'written') new Notice('Marked as addressed.');
 		else if (outcome === 'declined')
@@ -214,12 +305,21 @@ export class CommentService {
 	// deleteOnResolve exactly like resolveComment. The original fence is dropped
 	// (revert is no longer needed; Git retains history).
 	async acceptAddressed(path: string, comment: Comment): Promise<void> {
+		return this.enqueue(path, () =>
+			this.acceptAddressedUnqueued(path, comment),
+		);
+	}
+
+	private async acceptAddressedUnqueued(
+		path: string,
+		comment: Comment,
+	): Promise<void> {
 		if (!comment.addressed) return;
 		if (this.plugin.settings.deleteOnResolve) {
 			// Refuse when the edit is no longer awaiting review. This branch
 			// deletes the marker and its whole thread, so acting on a snapshot
 			// here destroys more than any other path in this service.
-			const outcome = await this.resolveAndRemoveComment(
+			const outcome = await this.resolveAndRemoveCommentUnqueued(
 				path,
 				comment,
 				(c) => Boolean(c.addressed),
@@ -229,18 +329,21 @@ export class CommentService {
 			return;
 		}
 		const author = this.resolvedAuthor();
-		const outcome = await this.replaceMarker(path, comment, (current) =>
-			current.addressed
-				? {
-						...current,
-						addressed: undefined,
-						resolution: {
-							author,
-							date: nowISO(),
-							note: 'accepted',
-						},
-					}
-				: undefined,
+		const outcome = await this.replaceMarkerUnqueued(
+			path,
+			comment,
+			(current) =>
+				current.addressed
+					? {
+							...current,
+							addressed: undefined,
+							resolution: {
+								author,
+								date: nowISO(),
+								note: 'accepted',
+							},
+						}
+					: undefined,
 		);
 		if (outcome === 'written') new Notice('Accepted.');
 		else if (outcome === 'declined')
@@ -251,11 +354,23 @@ export class CommentService {
 	// [addressed ...] line (and its fence) so the comment returns to the open
 	// queue. The applied prose is left in place for the reviewer to edit.
 	async reviseAddressed(path: string, comment: Comment): Promise<void> {
+		return this.enqueue(path, () =>
+			this.reviseAddressedUnqueued(path, comment),
+		);
+	}
+
+	private async reviseAddressedUnqueued(
+		path: string,
+		comment: Comment,
+	): Promise<void> {
 		if (!comment.addressed) return;
-		const outcome = await this.replaceMarker(path, comment, (current) =>
-			current.addressed
-				? { ...current, addressed: undefined }
-				: undefined,
+		const outcome = await this.replaceMarkerUnqueued(
+			path,
+			comment,
+			(current) =>
+				current.addressed
+					? { ...current, addressed: undefined }
+					: undefined,
 		);
 		if (outcome === 'written') new Notice('Reopened for revision.');
 		else if (outcome === 'declined')
@@ -270,10 +385,19 @@ export class CommentService {
 	// nothing to revert, so this degrades to reviseAddressed. Git is the backstop
 	// for multi-line replacements beyond the marker's line.
 	async rejectAddressed(path: string, comment: Comment): Promise<void> {
+		return this.enqueue(path, () =>
+			this.rejectAddressedUnqueued(path, comment),
+		);
+	}
+
+	private async rejectAddressedUnqueued(
+		path: string,
+		comment: Comment,
+	): Promise<void> {
 		const addressed = comment.addressed;
 		if (!addressed) return;
 		if (addressed.original === undefined) {
-			await this.reviseAddressed(path, comment);
+			await this.reviseAddressedUnqueued(path, comment);
 			return;
 		}
 
@@ -331,14 +455,20 @@ export class CommentService {
 			resolution: reopened.resolution,
 		});
 
-		await this.applySplices(path, file, [
-			{ from: markerStart, to: markerEnd, insert: markerText },
-			{
-				from: proseStart,
-				to: lineEnd,
-				insert: currentAddressed.original,
-			},
-		]);
+		const wrote = await this.applySplices(
+			path,
+			file,
+			[
+				{ from: markerStart, to: markerEnd, insert: markerText },
+				{
+					from: proseStart,
+					to: lineEnd,
+					insert: currentAddressed.original,
+				},
+			],
+			content,
+		);
+		if (!wrote) return;
 		new Notice('Reverted to the original text.');
 	}
 
@@ -367,6 +497,14 @@ export class CommentService {
 	// reads as "there were none" rather than "the file is gone". This path is
 	// reachable, the modal sits between the check and the write.
 	async deleteAllResolvedInFile(path: string): Promise<number | null> {
+		return this.enqueue(path, () =>
+			this.deleteAllResolvedInFileUnqueued(path),
+		);
+	}
+
+	private async deleteAllResolvedInFileUnqueued(
+		path: string,
+	): Promise<number | null> {
 		const file = this.plugin.app.vault.getAbstractFileByPath(path);
 		if (!(file instanceof TFile)) {
 			this.noticeFileGone(path);
@@ -396,7 +534,11 @@ export class CommentService {
 			splices.push({ from: start, to: end, insert: '' });
 		}
 
-		await this.applySplices(path, file, splices);
+		const wrote = await this.applySplices(path, file, splices, content);
+		// null, matching the file-is-gone case: the service has already said
+		// what happened, and a count here would claim a deletion that did not
+		// happen.
+		if (!wrote) return null;
 		return resolved.length;
 	}
 
@@ -425,6 +567,16 @@ export class CommentService {
 		prev: Comment,
 		apply: (current: Comment) => Comment | undefined,
 	): Promise<WriteOutcome> {
+		return this.enqueue(path, () =>
+			this.replaceMarkerUnqueued(path, prev, apply),
+		);
+	}
+
+	private async replaceMarkerUnqueued(
+		path: string,
+		prev: Comment,
+		apply: (current: Comment) => Comment | undefined,
+	): Promise<WriteOutcome> {
 		const file = this.plugin.app.vault.getAbstractFileByPath(path);
 		if (!(file instanceof TFile)) {
 			this.noticeFileGone(path);
@@ -446,14 +598,22 @@ export class CommentService {
 			addressed: next.addressed,
 			resolution: next.resolution,
 		});
-		await this.applySplices(path, file, [
-			{
-				from: current.marker.start,
-				to: current.marker.end,
-				insert: serialized,
-			},
-		]);
-		return 'written';
+		const wrote = await this.applySplices(
+			path,
+			file,
+			[
+				{
+					from: current.marker.start,
+					to: current.marker.end,
+					insert: serialized,
+				},
+			],
+			content,
+		);
+		// 'missing' rather than 'written': applySplices has already narrated the
+		// refusal, and 'missing' is the outcome that makes appendReply return
+		// false so the popover keeps the reply the user typed.
+		return wrote ? 'written' : 'missing';
 	}
 
 	resolvedAuthor(): string {
@@ -570,9 +730,7 @@ export class CommentService {
 	// write would have destroyed. The wording covers deletion as well as
 	// movement, because the id lookup cannot tell the two apart.
 	private noticeVanished(): void {
-		new Notice(
-			'This comment has moved or been deleted since it was loaded. Reopen the note and try again.',
-		);
+		new Notice(VANISHED_MESSAGE);
 	}
 
 	// One message for "this note has two comments with the same identifier".
@@ -580,9 +738,7 @@ export class CommentService {
 	// note changes nothing, and the user cannot act on it without being told
 	// what is actually wrong and which identifier to go and find.
 	private noticeAmbiguous(id: string): void {
-		new Notice(
-			`More than one comment in this note has the identifier ${id}, so this action cannot tell which one you meant. Give one of them a different identifier, or delete the copy.`,
-		);
+		new Notice(ambiguousMessage(id));
 	}
 
 	private buildDeleteSplice(
@@ -599,37 +755,62 @@ export class CommentService {
 
 	// Apply a set of splices to a file, mutating via the editor's transaction
 	// API when the file is open (keeps in-memory document and disk in sync,
-	// avoids autosave clobber) and falling back to vault.modify otherwise.
+	// avoids autosave clobber) and falling back to the vault otherwise.
 	// Always rebuilds the index and fires "index-changed" after the write.
+	//
+	// `expected` is the EXACT content the caller computed its offsets against,
+	// and this refuses to write when the file no longer matches it.
+	//
+	// It used to read the file a SECOND time here and apply the caller's offsets
+	// to whatever came back. Every verb therefore had a window between its own
+	// read and this one, and both failure modes were reproduced: a sync write
+	// landing in that window spliced a `[resolved ...]` line into the middle of a
+	// word and left two markers sharing an id, and the file had no marker where
+	// the offsets said one was.
+	//
+	// Refusing is the right answer rather than re-resolving, because this
+	// function does not know what the caller was trying to do. The caller's
+	// freshness guards already decided that; the action is repeatable once the
+	// note catches up, and prose overwritten by a stale splice is not.
+	//
+	// Returns whether the write happened. Callers MUST honour it: a refusal here
+	// looks exactly like a success to the code above unless it is propagated, and
+	// then a verb reports "Reply added." and the popover clears the draft while
+	// nothing reached the file. That is the same class of loss as the race this
+	// guard exists to stop, arriving one layer up.
 	private async applySplices(
 		path: string,
 		file: TFile,
 		splices: SpliceRange[],
-	): Promise<void> {
-		if (splices.length === 0) return;
+		expected: string,
+	): Promise<boolean> {
+		if (splices.length === 0) return false;
+
+		// Apply in reverse so earlier splices do not shift later offsets.
+		const sorted = [...splices].sort((a, b) => a.from - b.from);
+		const spliced = (source: string): string => {
+			let out = source;
+			for (let i = sorted.length - 1; i >= 0; i--) {
+				const s = sorted[i];
+				if (!s) continue;
+				out = out.slice(0, s.from) + s.insert + out.slice(s.to);
+			}
+			return out;
+		};
 
 		const view = this.getOpenMarkdownView(path);
-		const before = view
-			? view.editor.getValue()
-			: await this.plugin.app.vault.read(file);
-
-		// Compute updated content by applying splices in reverse so earlier
-		// splices do not shift later offsets.
-		const sorted = [...splices].sort((a, b) => a.from - b.from);
-		let updated = before;
-		for (let i = sorted.length - 1; i >= 0; i--) {
-			const s = sorted[i];
-			if (!s) continue;
-			updated = updated.slice(0, s.from) + s.insert + updated.slice(s.to);
-		}
+		let updated: string;
 
 		if (view) {
-			// Apply via editor.replaceRange in reverse order so earlier
-			// splices do not shift later offsets. This is the same API the
-			// edit composer uses (composer.ts) and keeps the CodeMirror
-			// EditorState authoritative — Obsidian persists the editor's
-			// content, so vault.modify is not needed (and would race the
-			// editor's autosave).
+			if (view.editor.getValue() !== expected) {
+				this.noticeVanished();
+				return false;
+			}
+			updated = spliced(expected);
+			// Via editor.replaceRange, the same API the edit composer uses. It
+			// keeps the CodeMirror EditorState authoritative; Obsidian persists
+			// the editor's content, so a vault write is not needed here and
+			// would race the editor's autosave.
 			for (let i = sorted.length - 1; i >= 0; i--) {
 				const s = sorted[i];
 				if (!s) continue;
@@ -640,10 +821,55 @@ export class CommentService {
 				);
 			}
 		} else {
-			await this.plugin.app.vault.modify(file, updated);
+			// vault.process reads and writes under one lock, so nothing can land
+			// between the comparison and the write. read + modify could not
+			// promise that however carefully it compared.
+			let stale = false;
+			updated = await this.plugin.app.vault.process(file, (current) => {
+				if (current !== expected) {
+					stale = true;
+					return current;
+				}
+				return spliced(current);
+			});
+			if (stale) {
+				this.noticeVanished();
+				return false;
+			}
 		}
 
 		this.plugin.commentIndex.rebuild(path, updated);
 		this.plugin.events.trigger('index-changed', { path });
+		return true;
+	}
+
+	// Serialize this plugin's own writes per file.
+	//
+	// The staleness check above is the backstop for writers this plugin does not
+	// control (a sync, another app, the user in another editor). This is for the
+	// ones it does: every verb reads, computes offsets from what it read, and
+	// then writes, and two verbs in flight against the same note interleave those
+	// steps. Executed: `Promise.all` of two resolves on different comments in one
+	// file silently lost the first write while both reported "Resolved."
+	//
+	// The READ has to be inside the critical section, not just the write, which
+	// is why this wraps whole verbs rather than sitting inside applySplices.
+	private enqueue<T>(path: string, task: () => Promise<T>): Promise<T> {
+		const previous = this.writeQueue.get(path) ?? Promise.resolve();
+		// `then(task, task)`: a verb that threw must not wedge every later write
+		// to the same file behind a rejected promise.
+		const result = previous.then(task, task);
+		const tail = result.then(
+			() => undefined,
+			() => undefined,
+		);
+		this.writeQueue.set(path, tail);
+		void tail.then(() => {
+			// Identity check: by now a later verb may already have replaced the
+			// tail, and deleting that one would let the next verb start early.
+			if (this.writeQueue.get(path) === tail)
+				this.writeQueue.delete(path);
+		});
+		return result;
 	}
 }

@@ -9,9 +9,12 @@ import type { AnchorText, Comment } from './types';
 import {
 	buildAnchorFromSelection,
 	generateId,
+	parseAll,
+	parseAt,
 	serialize,
 	nowISO,
 } from './parser';
+import { VANISHED_MESSAGE, ambiguousMessage } from './comment-service';
 import { resolveSettingsCategories } from './settings';
 import { shouldSubmitOnKeydown } from './view-utils';
 import {
@@ -51,6 +54,12 @@ export class ComposerForm {
 	private readonly request: ComposerRequest;
 	private readonly hooks: ComposerHooks;
 	private readonly state: ComposerState;
+	// Where the marker being edited started WHEN THE FORM OPENED. Only used for
+	// id-less markers, which cannot be re-found any other way. Captured here
+	// rather than derived at submit time because an EditorPosition is a
+	// line/column pair: text inserted above the marker moves the marker without
+	// changing the pair, so converting it late silently points somewhere else.
+	private readonly editingStartOffset: number;
 
 	constructor(
 		plugin: AnnotecaPlugin,
@@ -60,6 +69,9 @@ export class ComposerForm {
 		this.plugin = plugin;
 		this.request = request;
 		this.hooks = hooks;
+		this.editingStartOffset = request.editing
+			? request.editor.posToOffset(request.editing.from)
+			: 0;
 		this.state = {
 			selectedCategory: request.scratchpad
 				? 'uncategorized'
@@ -253,6 +265,47 @@ export class ComposerForm {
 		return id;
 	}
 
+	// Find the marker this form is editing in the document as it stands NOW.
+	//
+	// Returns undefined on every refusal, and the caller then leaves the form
+	// OPEN. The text in the body field is something the user just typed; closing
+	// on a refusal would destroy it, which is the same class of loss this whole
+	// change is about.
+	//
+	// The id path is exactly-one-or-refuse for the reason CommentService's
+	// freshComment gives: ids live in file text, so copy-pasting a marker inside
+	// a note produces two markers with the same id, and picking the first would
+	// be a coin flip.
+	private resolveEditTarget(editor: Editor): Comment | undefined {
+		const editing = this.request.editing;
+		if (!editing) return undefined;
+		const content = editor.getValue();
+		const snapshot = editing.comment;
+
+		if (snapshot.id !== undefined) {
+			const matches = parseAll(content).filter(
+				(c) => c.id === snapshot.id,
+			);
+			const only = matches[0];
+			if (matches.length === 1 && only !== undefined) return only;
+			new Notice(
+				matches.length > 1
+					? ambiguousMessage(snapshot.id)
+					: VANISHED_MESSAGE,
+			);
+			return undefined;
+		}
+
+		// Id-less markers stay supported because the format supports them. They
+		// resolve by position plus category, which is all the file carries; a
+		// document edited above the marker fails this check and refuses, rather
+		// than writing at an offset that now points at prose.
+		const at = parseAt(content, this.editingStartOffset);
+		if (at !== undefined && at.category === snapshot.category) return at;
+		new Notice(VANISHED_MESSAGE);
+		return undefined;
+	}
+
 	private async submit(): Promise<void> {
 		const finalBody = this.composeFinalBody();
 		if (finalBody === '') {
@@ -270,32 +323,49 @@ export class ComposerForm {
 		const editor = this.request.editor;
 
 		if (this.request.editing) {
-			const existing = this.request.editing.comment;
-			const updated: Comment = { ...existing, category, body: finalBody };
+			// Re-resolve against the CURRENT document rather than writing the
+			// snapshot back over a remembered range. Both of the old inputs were
+			// stale by the time Save was pressed, and the default composer is the
+			// side panel, where the editor stays live behind the form:
+			//
+			//   - The SNAPSHOT was taken when the form opened, so a reply or an
+			//     addressed state that landed while it was open was overwritten.
+			//     It also omitted `addressed` entirely, which silently degraded
+			//     Reject to Revise and dropped the annoteca-original fence, the
+			//     only copy of the pre-edit prose in the file.
+			//   - The RANGE drifted whenever the document changed above the
+			//     marker, so the write landed on whatever now occupied those
+			//     line/column pairs.
+			//
+			// This path does not go through CommentService, so none of its
+			// freshness work covered it.
+			const fresh = this.resolveEditTarget(editor);
+			if (fresh === undefined) return;
+
+			// Every tail field is listed rather than spread, because the defect
+			// here was an omitted one and a list is checkable against the format.
 			const serialized = serialize({
-				id: updated.id,
-				category: updated.category,
-				body: updated.body,
-				date: updated.date,
-				author: updated.author,
+				id: fresh.id,
+				category,
+				body: finalBody,
+				date: fresh.date,
+				author: fresh.author,
 				// Preserve the anchor from the original comment. Editing
 				// changes the body / category, not what the comment is anchored
 				// to — per data-format.md the anchor reflects the original
 				// commented text and is not updated by edits.
-				anchor: updated.anchor,
-				replies: updated.replies,
-				resolution: updated.resolution,
+				anchor: fresh.anchor,
+				replies: fresh.replies,
+				addressed: fresh.addressed,
+				resolution: fresh.resolution,
 			});
 			editor.replaceRange(
 				serialized,
-				this.request.editing.from,
-				this.request.editing.to,
+				editor.offsetToPos(fresh.marker.start),
+				editor.offsetToPos(fresh.marker.end),
 			);
 			this.hooks.close();
-			this.hooks.onSubmitted?.(
-				this.request.filePath,
-				editor.posToOffset(this.request.editing.from),
-			);
+			this.hooks.onSubmitted?.(this.request.filePath, fresh.marker.start);
 			return;
 		}
 
