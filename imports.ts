@@ -52,14 +52,45 @@ interface ProtectedRange {
 // A mask rather than a per-pattern predicate, because the predicate only ever
 // saw the matched TEXT and this question is about the match's POSITION.
 function protectedRanges(content: string): ProtectedRange[] {
+	const markers = scanMarkers(content);
 	const out: ProtectedRange[] = [];
-	for (const m of scanMarkers(content))
-		out.push({ from: m.start, to: m.end });
+	for (const m of markers) out.push({ from: m.start, to: m.end });
+
+	// A marker's interior is OPAQUE to the fence and code-span scanners.
+	//
+	// Marker bodies are arbitrary user text, and the format stores the
+	// annoteca-original block as a literal fence, so ``` lines inside a marker
+	// are ordinary rather than exotic. Reading them as document structure let a
+	// body with a single unbalanced fence line open a block that never closed,
+	// which marked the entire rest of the file protected: bulk import then
+	// silently converted nothing after that marker and reported "converted 0",
+	// which reads as "there was nothing to convert."
+	//
+	// Skipping them costs nothing, because every marker span is already in `out`
+	// on its own account. The test for this is the same question the parser's
+	// own fence rule turns on: what can a body CONTAIN?
+	let markerAt = 0;
+	const insideMarker = (lineStart: number): boolean => {
+		while (
+			markerAt < markers.length &&
+			(markers[markerAt]?.end ?? 0) <= lineStart
+		)
+			markerAt++;
+		const m = markers[markerAt];
+		return m !== undefined && lineStart >= m.start && lineStart < m.end;
+	};
 
 	let offset = 0;
 	let openFence: { char: string; length: number; from: number } | undefined;
 	for (const line of content.split('\n')) {
 		const lineEnd = offset + line.length;
+		if (insideMarker(offset)) {
+			// Neither opens nor closes a fence, and contributes no code spans. A
+			// fence opened OUTSIDE a marker stays open across it, which is what
+			// a renderer does too.
+			offset = lineEnd + 1;
+			continue;
+		}
 		const fence = FENCE_LINE_RE.exec(line);
 		const run = fence?.[2];
 		if (openFence !== undefined) {

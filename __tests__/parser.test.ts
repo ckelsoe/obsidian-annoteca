@@ -1819,6 +1819,60 @@ describe('parser: findMalformedMarkers sees unclosed openers', () => {
 		expect(found.map((f) => f.kind)).toContain('possible-merge');
 	});
 
+	it('reports one finding per container and sorts every finding by position', () => {
+		// Two behaviours that had no test: several openers inside ONE container
+		// collapse to a single possible-merge finding rather than a wall of
+		// them, and the findings come back in document order whichever scan
+		// produced them.
+		const text = [
+			'<!-- annoteca/clarify: first',
+			'[id=dup00001]',
+			'',
+			'Prose.',
+			'',
+			'<!-- annoteca/tone: second',
+			'',
+			'More prose.',
+			'',
+			'<!-- annoteca/cut: third',
+			'[id=dup00002]',
+			'-->',
+			'',
+			'Tail prose. <!-- annoteca/note: never closed',
+		].join('\n');
+
+		const found = findMalformedMarkers(text);
+		const merges = found.filter((f) => f.kind === 'possible-merge');
+		expect(merges).toHaveLength(1);
+		expect(merges[0]?.start).toBe(0);
+		expect(found.filter((f) => f.kind === 'unclosed-opener')).toHaveLength(
+			1,
+		);
+	});
+
+	it('returns findings in document order across both scans', () => {
+		// The two scans run one after the other, so their findings are only in
+		// document order if something puts them there. Here the LATER problem is
+		// the one the first scan reports: an invalid-category marker that closes
+		// itself, sitting after an opener that never closed.
+		const text = [
+			'<!-- annoteca/clarify: this one never closes',
+			'[id=ord00001]',
+			'',
+			'<!-- annoteca/tone: an opener swallowed by the one above',
+			'-->',
+			'',
+			'<!-- annoteca/1bad: closed, but the category is invalid -->',
+		].join('\n');
+
+		const found = findMalformedMarkers(text);
+		expect(found.length).toBeGreaterThanOrEqual(2);
+		const starts = found.map((f) => f.start);
+		expect(starts).toEqual([...starts].sort((a, b) => a - b));
+		// Specifically: the second scan's finding is the earlier one.
+		expect(found[0]?.kind).toBe('possible-merge');
+	});
+
 	it('says nothing about a well-formed document', () => {
 		const text = [
 			'Prose. <!-- annoteca/tone: fine -->',

@@ -297,11 +297,21 @@ export class ComposerForm {
 		}
 
 		// Id-less markers stay supported because the format supports them. They
-		// resolve by position plus category, which is all the file carries; a
-		// document edited above the marker fails this check and refuses, rather
-		// than writing at an offset that now points at prose.
+		// resolve by position plus category plus extent, which is all the file
+		// carries; a document edited above the marker fails this check and
+		// refuses, rather than writing at an offset that now points at prose.
+		//
+		// The end offset is checked as well as the start, matching what
+		// CommentService.freshComment does for the same case. It cannot compare
+		// the BODY the way that one does, because the body is what the user is
+		// changing, so extent is the only other thing left to identify with.
 		const at = parseAt(content, this.editingStartOffset);
-		if (at !== undefined && at.category === snapshot.category) return at;
+		if (
+			at !== undefined &&
+			at.category === snapshot.category &&
+			at.marker.end === snapshot.marker.end
+		)
+			return at;
 		new Notice(VANISHED_MESSAGE);
 		return undefined;
 	}

@@ -310,6 +310,35 @@ describe('parser: serialize/parse round trip (seeded fuzz)', () => {
 			)
 				throw new Error(context(`resolution lost: ${first}`));
 
+			// The anchor survives if anything of it survives sanitization, and
+			// comes back inside the serialize-time ceiling. Text equality is not
+			// asserted: `]` is stripped and a long value is mid-truncated, both
+			// by contract.
+			if (input.anchor !== undefined) {
+				const keeps = collapseInline(input.anchor.text)
+					.replace(/\]/g, '')
+					.trim();
+				if (keeps !== '') {
+					if (parsed.anchor === undefined)
+						throw new Error(context(`anchor lost: ${first}`));
+					if (parsed.anchor.text.length > 200)
+						throw new Error(
+							context(
+								`anchor over the cap: ${String(parsed.anchor.text.length)}`,
+							),
+						);
+				}
+			}
+
+			// The date is a singleton with no sanitization, so it is the one
+			// field that must come back byte-identical.
+			if (input.date !== undefined && parsed.date !== input.date)
+				throw new Error(
+					context(
+						`date ${input.date} -> ${String(parsed.date)}: ${first}`,
+					),
+				);
+
 			// Fixed point: one round trip may reorder, further ones may not.
 			const second = serialize(toInput(parsed));
 			const reparsed = parseOne(second, context('second parse'));

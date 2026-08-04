@@ -192,6 +192,74 @@ describe('imports: protected regions', () => {
 		expect(r.updated).toBe(doc);
 	});
 
+	it('does not let a fence inside a marker body swallow the rest of the file', () => {
+		// Marker bodies are arbitrary user text and the format stores the
+		// annoteca-original block as a literal fence, so a ``` line inside a
+		// marker is ordinary. Reading those as document structure let one
+		// unbalanced fence line mark everything after it protected, so import
+		// silently converted nothing and reported a count of zero.
+		const doc = [
+			serialize({
+				id: 'fence001',
+				category: 'note',
+				body: 'this body mentions a fence\n```\nand never closes it',
+			}),
+			'',
+			'Real prose with %%a real comment%% in it.',
+			'',
+			'And %%another one%% here.',
+		].join('\n');
+		const r = convertAllComments(doc, 'all', 'note');
+		expect(r.converted).toBe(2);
+		expect(r.updated).toContain('annoteca/note: a real comment');
+		expect(r.updated).toContain('annoteca/note: another one');
+		// The marker itself is still untouched.
+		expect(r.updated).toContain(
+			'annoteca/note: this body mentions a fence',
+		);
+		expect(parseAll(r.updated)).toHaveLength(3);
+	});
+
+	it("does not let an addressed marker's original fence leak either", () => {
+		const doc = [
+			serialize({
+				id: 'fence002',
+				category: 'note',
+				body: 'body',
+				addressed: {
+					author: 'ai',
+					date: '2026-08-01T10:00:00',
+					note: 'applied',
+					// The stored original holds a lone fence line of its own,
+					// which serialize widens the delimiter to survive.
+					original: 'old text\n```\nunbalanced',
+				},
+			}),
+			'',
+			'Prose with %%a real comment%% after it.',
+		].join('\n');
+		const r = convertAllComments(doc, 'all', 'note');
+		expect(r.converted).toBe(1);
+		expect(r.updated).toContain('annoteca/note: a real comment');
+	});
+
+	it('keeps protecting a fence that opens outside a marker and closes after one', () => {
+		const doc = [
+			'```',
+			'Use %%like this%%.',
+			serialize({ id: 'fence003', category: 'note', body: 'inside' }),
+			'Still %%in the fence%%.',
+			'```',
+			'',
+			'Out here %%is real%%.',
+		].join('\n');
+		const r = convertAllComments(doc, 'all', 'note');
+		expect(r.converted).toBe(1);
+		expect(r.updated).toContain('Use %%like this%%.');
+		expect(r.updated).toContain('Still %%in the fence%%.');
+		expect(r.updated).toContain('annoteca/note: is real');
+	});
+
 	it('is idempotent: a second run converts nothing and changes nothing', () => {
 		const doc = 'a %%x%% b %%y%% c <!-- z --> d';
 		const first = convertAllComments(doc, 'all', 'note');

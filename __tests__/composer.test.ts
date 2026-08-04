@@ -231,6 +231,74 @@ describe('composer edit: the write lands on the marker, not on a remembered rang
 	});
 });
 
+// The id-less branch of resolveEditTarget. Every test above uses a marker with an
+// id, so only the id branch ran; this is the branch that identifies by position
+// and can therefore point at unrelated text.
+const IDLESS_NOTE = [
+	'Some prose before.',
+	'',
+	serialize({ category: 'clarify', body: 'the original body' }),
+	'',
+	'Some prose after.',
+].join('\n');
+
+describe('composer edit: markers with no id', () => {
+	it('rewrites the marker at the captured offset when nothing moved', async () => {
+		const host = makeEditor(IDLESS_NOTE);
+		const { form, closed } = openEditor(host, only(host.content));
+
+		form.state.body = 'the edited body';
+		await form.submit();
+
+		expect(closed()).toBe(true);
+		expect(host.content).toBe(
+			IDLESS_NOTE.replace('the original body', 'the edited body'),
+		);
+	});
+
+	it('refuses when the document changed above it, keeping the form open', async () => {
+		const host = makeEditor(IDLESS_NOTE);
+		const { form, closed } = openEditor(host, only(host.content));
+
+		const inserted = 'INSERTED ABOVE!!!!!\n';
+		host.content = inserted + host.content;
+		const before = host.content;
+
+		form.state.body = 'the edited body';
+		await form.submit();
+
+		// Nothing in the file carries an identity for an id-less marker beyond
+		// its position, so a drifted offset has to refuse rather than guess.
+		expect(host.content).toBe(before);
+		expect(noticeLog.join('\n')).toContain('moved or been deleted');
+		expect(closed()).toBe(false);
+	});
+
+	it('refuses when a different marker of the same category now starts there', async () => {
+		const host = makeEditor(IDLESS_NOTE);
+		const { form, closed } = openEditor(host, only(host.content));
+
+		// Same category, same start offset, different extent: the end-offset
+		// check is the only thing that can tell them apart.
+		const current = only(host.content);
+		host.content =
+			host.content.slice(0, current.marker.start) +
+			serialize({
+				category: 'clarify',
+				body: 'an entirely different comment',
+			}) +
+			host.content.slice(current.marker.end);
+		const before = host.content;
+
+		form.state.body = 'the edited body';
+		await form.submit();
+
+		expect(host.content).toBe(before);
+		expect(noticeLog.join('\n')).toContain('moved or been deleted');
+		expect(closed()).toBe(false);
+	});
+});
+
 describe('composer edit: a vanished marker refuses instead of writing', () => {
 	it('leaves the document alone, warns, and keeps the form open', async () => {
 		const host = makeEditor(ADDRESSED_NOTE);
