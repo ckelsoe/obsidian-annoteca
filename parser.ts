@@ -234,34 +234,162 @@ interface ParsedTail {
 	resolution: Resolution | undefined;
 }
 
-function parseInnerContent(inner: string): ParsedTail {
-	// Pull the annoteca-original fence out first (F-271). It is the only
-	// multi-line element in the trailing block; removing it lets the backward
-	// line-walk below treat [addressed ...] as an ordinary single structured
-	// line. The fence always lives directly after the [addressed ...] line, so
-	// its content unambiguously belongs to the (at most one) addressed note.
-	// ADJACENCY IS ENFORCED, not merely assumed. Lifting out any block that
-	// happens to be tagged annoteca-original deletes it from the file, because
-	// originalText is discarded when there is no addressed note to hang it on.
-	// A body that documents the format by showing a fence is a normal thing to
-	// write, and the exported skill describes the fence, so assistants write
-	// them too. Only a fence sitting DIRECTLY after the [addressed ...] line is
-	// the addressed note's original; everything else stays body text.
-	let originalText: string | undefined;
-	let stripped = inner;
-	for (const fenceMatch of inner.matchAll(ORIGINAL_FENCE_RE)) {
-		const content = fenceMatch[2];
-		if (content === undefined || fenceMatch.index === undefined) continue;
-		const before = inner.slice(0, fenceMatch.index).replace(/\r?\n$/, '');
-		const precedingLine = before.slice(before.lastIndexOf('\n') + 1);
-		if (!ADDRESSED_LINE_RE.test(precedingLine)) continue;
-		originalText = unescapeTerminator(content);
-		stripped =
-			before + inner.slice(fenceMatch.index + fenceMatch[0].length);
-		break;
-	}
+interface FenceBlock {
+	start: number;
+	end: number;
+	content: string;
+}
 
-	const lines = stripped.split('\n');
+function findOriginalFences(inner: string): FenceBlock[] {
+	const out: FenceBlock[] = [];
+	for (const match of inner.matchAll(ORIGINAL_FENCE_RE)) {
+		const content = match[2];
+		if (content === undefined || match.index === undefined) continue;
+		out.push({
+			start: match.index,
+			end: match.index + match[0].length,
+			content,
+		});
+	}
+	return out;
+}
+
+// Character offset of the LAST [addressed ...] line that is not itself inside a
+// fence, or -1.
+//
+// Last, not first, because that is the one the walk itself keeps: it runs
+// backward and takes the first [addressed ...] it meets. Anchoring anywhere
+// else attributes a fence to a note the parsed comment does not carry.
+//
+// Last is also what cannot be fooled by a marker quoted inside a body. The
+// trailing block is a SUFFIX of the lines, so a real [addressed ...] always
+// sits below a quoted one; the last one is therefore the real one whenever
+// there is a real one at all. When there is not, the walk comes back with no
+// addressed note and parseInnerContent throws the strip away.
+//
+// FENCED CONTENT IS SKIPPED, and that is not an edge case. The fence holds
+// prose lifted verbatim out of the user's document, so it can hold a line
+// shaped like [addressed ...] the same way it can hold a code fence or a `-->`,
+// and serialize() writes exactly that. Counting one would put the anchor INSIDE
+// the block, which sits before it, so the real fence would look like a body
+// fence and be left in place to stop the walk. That is the whole failure this
+// function exists to prevent, arriving through the back door.
+function lastAddressedOffset(inner: string, fences: FenceBlock[]): number {
+	let offset = 0;
+	let found = -1;
+	let next = 0;
+	for (const line of inner.split('\n')) {
+		let fence = fences[next];
+		while (fence !== undefined && fence.end <= offset) {
+			next++;
+			fence = fences[next];
+		}
+		const insideFence = fence !== undefined && offset >= fence.start;
+		if (!insideFence && ADDRESSED_LINE_RE.test(line)) found = offset;
+		offset += line.length + 1;
+	}
+	return found;
+}
+
+interface StrippedFence {
+	stripped: string;
+	originalText: string;
+}
+
+// Lift the annoteca-original fence out of the inner content (F-271).
+//
+// The strip does TWO jobs, and they are easy to conflate:
+//
+//   1. attribute the fenced text to the [addressed ...] note, and
+//   2. remove the block, so the backward line-walk is not stopped by it.
+//
+// Job 2 is not optional. The walk is line-oriented, and a fence line matches
+// nothing, so a fence left in place ends the walk on the spot and collapses
+// every structured line above it (the [addressed ...] itself, the [id=...], the
+// replies) into the body. That is silent, permanent damage to a marker that was
+// perfectly well-formed, so findMalformedMarkers never flags it.
+//
+// So the question a fence has to answer is NOT "is this one adjacent to the
+// [addressed ...] line" but "is this one the addressed note's original". Only
+// the second question is safe to answer with `continue`.
+//
+// The rule is position, not adjacency: a fence is the original if it appears
+// anywhere after the last [addressed ...] line. serialize() writes it
+// immediately after, but nothing in the format requires that, and
+// data-format.md only ever said "inside the [addressed ...] note". A blank line
+// before a fenced block is ordinary Markdown, an assistant writing a marker by
+// hand puts one there, and [reply ...] or [resolved ...] lines can sit in
+// between.
+//
+// A fence ABOVE that line, or in a marker with no addressed note at all, is
+// body text and stays put: a comment that documents the format by showing a
+// fence is a normal thing to write, and the exported skill describes the fence,
+// so assistants write them too.
+//
+// THE ONE CASE THAT STAYS AMBIGUOUS, and it is irreducible. A body whose LAST
+// lines quote the format ([addressed ...] then a fence, with nothing but the
+// trailing block after them) is byte-identical to a real addressed note. The
+// quote is absorbed: the comment gains an addressed state it did not mean.
+//
+// Do not "fix" this by requiring the fence to touch the [addressed ...] line.
+// That was tried, and it is the trade running the wrong way. Adjacency turns a
+// real, well-formed marker into permanent damage (the whole trailing block
+// collapses into the body, Reject loses the prose it was holding), while this
+// costs a misread on a marker whose every character still survives the next
+// rewrite. Prefer the recoverable failure, which is the same rule the
+// forward-compatibility shapes above are chosen by. The pin is in
+// __tests__/parser.test.ts, "absorbs a format example that ends a body".
+//
+// Returns undefined when there is nothing to lift, in which case the caller
+// walks the untouched content.
+function stripOriginalFence(inner: string): StrippedFence | undefined {
+	const fences = findOriginalFences(inner);
+	if (fences.length === 0) return undefined;
+	const addressedAt = lastAddressedOffset(inner, fences);
+	if (addressedAt < 0) return undefined;
+
+	let originalText: string | undefined;
+	let kept = '';
+	let cursor = 0;
+	for (const fence of fences) {
+		if (fence.start <= addressedAt) continue;
+		// Every attributable fence is removed, not just the one that supplies
+		// the original. A second one is degenerate (serialize writes at most
+		// one), but leaving it behind would stop the walk, which is the failure
+		// this whole function exists to prevent. Dropping the extra block is the
+		// same trade the walk already makes for a duplicate [addressed ...] or
+		// [resolved ...] line: the format carries one, so the first wins.
+		kept += inner.slice(cursor, fence.start).replace(/\r?\n$/, '');
+		cursor = fence.end;
+		originalText ??= unescapeTerminator(fence.content);
+	}
+	if (originalText === undefined) return undefined;
+	return { stripped: kept + inner.slice(cursor), originalText };
+}
+
+function parseInnerContent(inner: string): ParsedTail {
+	// Lift the fence out first, then check the walk's own verdict: if it did
+	// not come back with an addressed note, the [addressed ...] line the fence
+	// was attributed to was body text (a marker quoted inside a comment, say),
+	// so the strip was wrong and the fence is prose. Re-walk the untouched
+	// content rather than deleting it. The walk classifies body vs trailing
+	// block; asking it is what keeps a second, drifting copy of that rule out
+	// of this function.
+	const lifted = stripOriginalFence(inner);
+	if (lifted !== undefined) {
+		const parsed = walkTrailingLines(
+			lifted.stripped.split('\n'),
+			lifted.originalText,
+		);
+		if (parsed.addressed !== undefined) return parsed;
+	}
+	return walkTrailingLines(inner.split('\n'), undefined);
+}
+
+function walkTrailingLines(
+	lines: string[],
+	originalText: string | undefined,
+): ParsedTail {
 	let id: string | undefined;
 	let date: string | undefined;
 	let author: string | undefined;
