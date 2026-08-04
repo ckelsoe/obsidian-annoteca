@@ -30,11 +30,18 @@ const ID_LINE_RE = /^\s*\[id=([a-z0-9]{1,32})\]\s*$/;
 const STAMP_SRC = '\\d{4}-\\d{2}-\\d{2}(?:T\\d{2}:\\d{2}(?::\\d{2})?)?';
 const DATE_LINE_RE = new RegExp(`^\\s*\\[date=(${STAMP_SRC})\\]\\s*$`);
 const AUTHOR_LINE_RE = /^\s*\[author=([^\s\]<>]{1,32})\]\s*$/;
-// Anchor value is permissive: anything but `]` or a line break. Length is
-// capped to 80 visible chars + an optional single ellipsis character to
-// indicate truncation (per data-format.md). Longer values are still parsed —
-// forward-compat — but the cap is enforced at serialize time.
-const ANCHOR_LINE_RE = /^\s*\[anchor=([^\]\r\n]{1,200})\]\s*$/;
+// Anchor value is permissive: anything but `]` or a line break, at any length.
+//
+// The length is UNBOUNDED here and capped at serialize time instead, which is
+// what the comment this replaces already claimed. It was not true: the pattern
+// required 1 to 200 characters, and neither end of that range was enforced on
+// the way out. A longer value fell through to UNKNOWN_KV_LINE_RE, which absorbs
+// the line and drops it, so an anchor that arrived from a hand edit or an older
+// build was silently deleted on the next rewrite rather than parsed
+// forward-compatibly. The `*` covers the other end: `[anchor=]` is now an empty
+// structured line the walk consumes without inventing an anchor, instead of an
+// unknown line.
+const ANCHOR_LINE_RE = /^\s*\[anchor=([^\]\r\n]*)\]\s*$/;
 const REPLY_LINE_RE = new RegExp(
 	`^\\s*\\[reply\\s+([^\\s\\]<>]{1,32})\\s+(${STAMP_SRC})\\]:\\s?([\\s\\S]*)$`,
 );
@@ -108,6 +115,69 @@ function fenceFor(content: string): string {
 // "keep the marker file compact." Mirrors data-format.md.
 export const ANCHOR_MAX_CHARS = 80;
 const ANCHOR_ELLIPSIS = '…';
+
+// Hard ceiling enforced on the way out, on the ESCAPED text, so the stored line
+// cannot grow past it after `-->` escaping. Larger than ANCHOR_MAX_CHARS because
+// that one is the selection-capture budget and this one is the format's: an
+// anchor can also arrive already stored, and re-truncating a value that is
+// merely long would edit the user's file for no reason.
+const ANCHOR_LINE_MAX_CHARS = 200;
+
+// Mid-truncate, keeping both ends searchable. Shared by the selection capture
+// and the serialize-time cap, which had drifted: the capture truncated and the
+// cap did not exist at all, so the only enforcement was a parser pattern that
+// silently dropped anything longer.
+function midTruncate(text: string, max: number): string {
+	if (text.length <= max) return text;
+	const keep = max - 1; // 1 char reserved for the ellipsis
+	const headLen = Math.ceil(keep / 2);
+	const tailLen = keep - headLen;
+	const head = text.slice(0, headLen).trimEnd();
+	const tail = text.slice(text.length - tailLen).trimStart();
+	return `${head}${ANCHOR_ELLIPSIS}${tail}`;
+}
+
+// Author tokens are a closed grammar (`[^\s\]<>]{1,32}`, see AUTHOR_LINE_RE) and
+// nothing enforced it on the way out. The tag reaches serialize from data.json,
+// which is user-editable and arrives over sync, so whatever is in there was
+// interpolated straight into the marker.
+//
+// Both failures are executed data loss rather than cosmetics. A display name
+// with a space (`Charles Kelsoe`) makes the line unparseable, so the walk breaks
+// on it and the ENTIRE trailing block above it collapses into the body: the id,
+// the thread, the addressed state. A tag holding `-->` closes the HTML comment
+// early and spills the rest of the marker into the document as visible prose.
+//
+// Repaired at the funnel rather than only at the settings boundary, because
+// serialize() is the one place every marker write goes through and the ingress
+// is untrusted by definition. The settings boundary gets its own validation
+// separately; this must hold regardless of how the value arrived.
+const AUTHOR_MAX_CHARS = 32;
+
+export function sanitizeAuthorToken(raw: string): string {
+	// `String(...)` rather than trusting the parameter type. The value can be
+	// the author tag straight out of data.json, which is untyped at runtime, and
+	// a hand edit or a synced backup can make it a number or null. Throwing here
+	// would take the whole write with it, which is a worse failure than the one
+	// this function exists to prevent. Validating the tag at the settings
+	// boundary is a separate change; this has to hold either way.
+	const token = String(raw ?? '')
+		.trim()
+		.replace(/\s+/g, '-')
+		.replace(/[\]<>]/g, '');
+	const capped = capCodeUnits(token, AUTHOR_MAX_CHARS);
+	return capped === '' ? 'user' : capped;
+}
+
+// Cap without leaving a lone surrogate behind. The grammar counts UTF-16 code
+// units, so half of an emoji still matches the class and still round-trips; it
+// just is not a character any more.
+function capCodeUnits(text: string, max: number): string {
+	if (text.length <= max) return text;
+	const cut = text.slice(0, max);
+	const last = cut.charCodeAt(cut.length - 1);
+	return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
+}
 
 const ID_BASE36_ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyz';
 
@@ -197,14 +267,18 @@ function escapeInline(text: string): string {
 	return escapeTerminator(text).replace(LINE_BREAK_RUN_RE, ' ');
 }
 
-interface RawMarker {
+export interface RawMarker {
 	start: number;
 	end: number;
 	category: string;
 	innerContent: string;
 }
 
-function scanMarkers(content: string): RawMarker[] {
+// Exported so callers that REWRITE a document can see where the markers already
+// are. imports.ts is the one that needs it: a bulk conversion that cannot tell
+// marker text from ordinary text converts the `%%...%%` inside an existing
+// marker's body and nests a marker in a marker.
+export function scanMarkers(content: string): RawMarker[] {
 	const out: RawMarker[] = [];
 	MARKER_RE.lastIndex = 0;
 	let match: RegExpExecArray | null;
@@ -386,6 +460,40 @@ function parseInnerContent(inner: string): ParsedTail {
 	return walkTrailingLines(inner.split('\n'), undefined);
 }
 
+// The backward walk that separates the trailing block from the body.
+//
+// TWO RULES GOVERN A SINGLETON LINE (id, date, author, anchor, addressed,
+// resolution), and both exist because the body sits ABOVE the trailing block and
+// can legitimately contain a line shaped exactly like one of them. serialize()
+// emits the body raw, so a comment whose text quotes the format round-trips
+// through here.
+//
+//   1. FIRST MET WINS. The walk runs bottom-up, so the first line of a kind it
+//      meets is the bottom-most one, which is the one serialize() wrote. The
+//      four `[key=value]` singletons used to assign unconditionally, so the
+//      body-side copy won instead: a comment whose body ended `[id=deadbeef]`
+//      came back carrying that id, which orphans its stars, drafts and every
+//      later re-lookup, and rewrites the wrong marker on the next write.
+//
+//   2. A DUPLICATE ENDS THE WALK WITHOUT ABSORBING. Meeting a second line of a
+//      kind already assigned means the walk has reached body text, so it stops
+//      and leaves that line where it is. Absorbing it instead deleted it: the
+//      value was ignored (rule 1) but `bodyEndExclusive` still moved past it, so
+//      the body lost its last line with nothing to show the user.
+//
+// THE CASE THAT STAYS AMBIGUOUS, and it is irreducible. A body whose last line
+// mimics a kind the marker does NOT already carry is indistinguishable from a
+// real trailing line: `[reply mallory 2020-01-01]: injected` at the end of a
+// body becomes a real reply, and an `[id=...]` on an id-less marker becomes its
+// id. Nothing in the text says otherwise. The rules above only fix the case
+// where the marker's own line is present to be preferred, which is every marker
+// this plugin writes. Replies are not singletons at all, so a mimic simply joins
+// the thread.
+//
+// Do not "fix" the ambiguous case by escaping bracket-leading body lines on
+// write. That changes what every existing marker serializes to, and the failure
+// it prevents (a phantom reply, visible in the thread) is recoverable, while the
+// failure it would introduce (rewriting the user's prose) is not.
 function walkTrailingLines(
 	lines: string[],
 	originalText: string | undefined,
@@ -397,6 +505,16 @@ function walkTrailingLines(
 	const replies: Reply[] = [];
 	let addressed: Addressed | undefined;
 	let resolution: Resolution | undefined;
+
+	// Tracked separately from the values because a line can be well-formed and
+	// still yield no value: `[anchor=]` is a real structured line carrying
+	// nothing, and a second one above it is still a duplicate.
+	let seenId = false;
+	let seenDate = false;
+	let seenAuthor = false;
+	let seenAnchor = false;
+	let seenAddressed = false;
+	let seenResolution = false;
 
 	let bodyEndExclusive = lines.length;
 
@@ -411,6 +529,8 @@ function walkTrailingLines(
 
 		const idMatch = ID_LINE_RE.exec(line);
 		if (idMatch && idMatch[1] !== undefined) {
+			if (seenId) break;
+			seenId = true;
 			id = idMatch[1];
 			bodyEndExclusive = i;
 			continue;
@@ -418,6 +538,8 @@ function walkTrailingLines(
 
 		const dateMatch = DATE_LINE_RE.exec(line);
 		if (dateMatch && dateMatch[1] !== undefined) {
+			if (seenDate) break;
+			seenDate = true;
 			date = dateMatch[1];
 			bodyEndExclusive = i;
 			continue;
@@ -425,6 +547,8 @@ function walkTrailingLines(
 
 		const authorMatch = AUTHOR_LINE_RE.exec(line);
 		if (authorMatch && authorMatch[1] !== undefined) {
+			if (seenAuthor) break;
+			seenAuthor = true;
 			author = authorMatch[1];
 			bodyEndExclusive = i;
 			continue;
@@ -432,9 +556,19 @@ function walkTrailingLines(
 
 		const anchorMatch = ANCHOR_LINE_RE.exec(line);
 		if (anchorMatch && anchorMatch[1] !== undefined) {
+			if (seenAnchor) break;
+			seenAnchor = true;
 			const raw = unescapeTerminator(anchorMatch[1]);
-			const truncated = raw.includes(ANCHOR_ELLIPSIS);
-			anchor = { text: raw, truncated };
+			// An empty value is a structured line with nothing in it, not an
+			// anchor of "". serialize() never writes one, but a hand edit can,
+			// and inventing an empty anchor would make the marker claim it is
+			// anchored to nothing.
+			if (raw.trim() !== '') {
+				anchor = {
+					text: raw,
+					truncated: raw.includes(ANCHOR_ELLIPSIS),
+				};
+			}
 			bodyEndExclusive = i;
 			continue;
 		}
@@ -460,14 +594,14 @@ function walkTrailingLines(
 			addressedMatch[1] !== undefined &&
 			addressedMatch[2] !== undefined
 		) {
-			if (!addressed) {
-				addressed = {
-					author: addressedMatch[1],
-					date: addressedMatch[2],
-					note: unescapeTerminator(addressedMatch[3] ?? ''),
-					original: originalText,
-				};
-			}
+			if (seenAddressed) break;
+			seenAddressed = true;
+			addressed = {
+				author: addressedMatch[1],
+				date: addressedMatch[2],
+				note: unescapeTerminator(addressedMatch[3] ?? ''),
+				original: originalText,
+			};
 			bodyEndExclusive = i;
 			continue;
 		}
@@ -478,13 +612,13 @@ function walkTrailingLines(
 			resolvedMatch[1] !== undefined &&
 			resolvedMatch[2] !== undefined
 		) {
-			if (!resolution) {
-				resolution = {
-					author: resolvedMatch[1],
-					date: resolvedMatch[2],
-					note: unescapeTerminator(resolvedMatch[3] ?? ''),
-				};
-			}
+			if (seenResolution) break;
+			seenResolution = true;
+			resolution = {
+				author: resolvedMatch[1],
+				date: resolvedMatch[2],
+				note: unescapeTerminator(resolvedMatch[3] ?? ''),
+			};
 			bodyEndExclusive = i;
 			continue;
 		}
@@ -604,17 +738,31 @@ export function serialize(c: SerializeInput): string {
 	lines.push(`<!-- annoteca/${c.category}: ${body}`);
 	if (c.id !== undefined) lines.push(`[id=${c.id}]`);
 	if (c.date !== undefined) lines.push(`[date=${c.date}]`);
-	if (c.author !== undefined) lines.push(`[author=${c.author}]`);
-	if (c.anchor !== undefined)
-		lines.push(`[anchor=${escapeInline(c.anchor.text)}]`);
+	if (c.author !== undefined)
+		lines.push(`[author=${sanitizeAuthorToken(c.author)}]`);
+	if (c.anchor !== undefined) {
+		// `]` closes the bracket, so it is to the anchor what `-->` is to the
+		// marker: not escapable within the line grammar, only removable.
+		// buildAnchorFromSelection already strips it, which is why no capture
+		// path can produce one today; this is the same guard at the funnel every
+		// write goes through, so a stored or hand-edited anchor cannot break the
+		// line either.
+		const text = midTruncate(
+			escapeInline(c.anchor.text).replace(/\]/g, ''),
+			ANCHOR_LINE_MAX_CHARS,
+		);
+		if (text.trim() !== '') lines.push(`[anchor=${text}]`);
+	}
 	for (const r of c.replies ?? []) {
-		lines.push(`[reply ${r.author} ${r.date}]: ${escapeInline(r.body)}`);
+		lines.push(
+			`[reply ${sanitizeAuthorToken(r.author)} ${r.date}]: ${escapeInline(r.body)}`,
+		);
 	}
 	if (c.addressed) {
 		const rawNote = escapeInline(c.addressed.note);
 		const note = rawNote.length > 0 ? ` ${rawNote}` : '';
 		lines.push(
-			`[addressed ${c.addressed.author} ${c.addressed.date}]:${note}`,
+			`[addressed ${sanitizeAuthorToken(c.addressed.author)} ${c.addressed.date}]:${note}`,
 		);
 		// F-271: the verbatim replaced text lives in a fenced annoteca-original
 		// block directly after the [addressed ...] line. The captured prose is
@@ -636,7 +784,7 @@ export function serialize(c: SerializeInput): string {
 		const rawNote = escapeInline(c.resolution.note);
 		const note = rawNote.length > 0 ? ` ${rawNote}` : '';
 		lines.push(
-			`[resolved ${c.resolution.author} ${c.resolution.date}]:${note}`,
+			`[resolved ${sanitizeAuthorToken(c.resolution.author)} ${c.resolution.date}]:${note}`,
 		);
 	}
 	lines.push(`-->`);
@@ -661,14 +809,7 @@ export function buildAnchorFromSelection(raw: string): AnchorText | undefined {
 	if (cleaned.length <= ANCHOR_MAX_CHARS) {
 		return { text: cleaned, truncated: false };
 	}
-	// Mid-truncate: keep both ends searchable. Ellipsis itself counts toward
-	// the cap so the stored value never exceeds ANCHOR_MAX_CHARS.
-	const keep = ANCHOR_MAX_CHARS - 1; // 1 char reserved for the ellipsis
-	const headLen = Math.ceil(keep / 2);
-	const tailLen = keep - headLen;
-	const head = cleaned.slice(0, headLen).trimEnd();
-	const tail = cleaned.slice(cleaned.length - tailLen).trimStart();
-	return { text: `${head}${ANCHOR_ELLIPSIS}${tail}`, truncated: true };
+	return { text: midTruncate(cleaned, ANCHOR_MAX_CHARS), truncated: true };
 }
 
 // 8-character lowercase base36 ID. Uses Math.random so it works in the
@@ -701,33 +842,106 @@ export function nowISO(now: Date = new Date()): string {
 	return `${date}T${time}`;
 }
 
+// What kind of problem was found. Split out because the three need different
+// words and different fixes, and because the two new ones describe a document
+// that still PARSES, which the original reason line does not cover.
+export type MalformedMarkerKind =
+	'malformed' | 'unclosed-opener' | 'possible-merge';
+
 export interface MalformedMarker {
 	start: number;
 	excerpt: string;
 	reason: string;
+	kind: MalformedMarkerKind;
 }
 
 const OPENING_TOKEN_RE =
 	/<!--\s*annoteca\/(?![a-z][a-z0-9-]*\s*:)[^>]{0,120}-->|<!--\s*annoteca\/[^a-z][^>]*-->/g;
 
+// A marker opener, anywhere. Deliberately looser than MARKER_RE's category group
+// (case-insensitive, leading digits allowed) so a near-miss is still reported.
+//
+// NOT anchored to a line start, though that would cut the false positives. The
+// plugin places a marker at the HEAD of the text it concerns, so most markers in
+// a real vault sit mid-line after prose, and anchoring here missed exactly the
+// shape this diagnostic exists to catch.
+//
+// The cost is a false positive on a note that quotes an opener inside a comment
+// body, since serialize escapes `-->` but has no reason to escape `<!--`. That
+// trade runs the right way: this reports, it never rewrites, so a false positive
+// costs a line in a report the user can dismiss, while a false negative costs a
+// paragraph that has silently vanished from reading view. The reason text says
+// "probably" for the same reason.
+const OPENER_ANYWHERE_RE = /<!--\s*annoteca\/[a-z0-9-]+:/gi;
+
+// Reported when an opener has no `-->` of its own.
+//
+// This is the diagnostic half of the merge failure. Delete one `-->`, or let an
+// assistant hand-write a marker and forget the close, and MARKER_RE pairs that
+// opener with the NEXT marker's terminator: everything between them, prose and
+// all, becomes inner content of one merged comment. The prose disappears from
+// reading view, the second comment disappears from the Hub, and the merged
+// comment carries the second marker's id under the first one's category. A
+// lifecycle write then cements it.
+//
+// Nothing flagged it, because OPENING_TOKEN_RE only ever matched candidates that
+// themselves end in `-->`, and the merged result is a perfectly well-formed
+// marker. Only the count of openers against the count of markers gives it away.
+//
+// PARSING IS NOT CHANGED HERE. Whether an unclosed opener should refuse to merge
+// is a format question with its own irreducible ambiguity (the opener may be
+// quoted prose), and changing it silently would rewrite how existing documents
+// read. The merge behaviour is pinned by test; this only makes it visible.
 export function findMalformedMarkers(content: string): MalformedMarker[] {
+	const markers = scanMarkers(content);
 	const valid = new Set<number>();
-	for (const m of scanMarkers(content)) valid.add(m.start);
+	for (const m of markers) valid.add(m.start);
 
 	const out: MalformedMarker[] = [];
+	const reported = new Set<number>();
+	const excerptAt = (start: number): string =>
+		content.slice(start, Math.min(content.length, start + 120));
+
 	OPENING_TOKEN_RE.lastIndex = 0;
 	let match: RegExpExecArray | null;
 	while ((match = OPENING_TOKEN_RE.exec(content)) !== null) {
 		if (valid.has(match.index)) continue;
-		const excerpt = content.slice(
-			match.index,
-			Math.min(content.length, match.index + 120),
-		);
+		reported.add(match.index);
 		out.push({
 			start: match.index,
-			excerpt,
+			excerpt: excerptAt(match.index),
 			reason: 'Marker did not match the canonical Annoteca format.',
+			kind: 'malformed',
 		});
 	}
+
+	// One finding per containing marker, not per opener inside it, so a document
+	// with several merged markers reads as several problems rather than a wall.
+	const merged = new Set<number>();
+	OPENER_ANYWHERE_RE.lastIndex = 0;
+	while ((match = OPENER_ANYWHERE_RE.exec(content)) !== null) {
+		const at = match.index;
+		if (valid.has(at) || reported.has(at)) continue;
+		const container = markers.find((m) => at > m.start && at < m.end);
+		if (container === undefined) {
+			out.push({
+				start: at,
+				excerpt: excerptAt(at),
+				reason: 'Marker opener has no closing `-->`.',
+				kind: 'unclosed-opener',
+			});
+			continue;
+		}
+		if (merged.has(container.start)) continue;
+		merged.add(container.start);
+		out.push({
+			start: container.start,
+			excerpt: excerptAt(container.start),
+			reason: 'This marker contains another marker opener, so two markers have probably merged into one. Check for a missing `-->`.',
+			kind: 'possible-merge',
+		});
+	}
+
+	out.sort((a, b) => a.start - b.start);
 	return out;
 }

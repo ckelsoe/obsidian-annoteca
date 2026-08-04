@@ -21,6 +21,14 @@ export class ConfirmDeleteCommentModal extends Modal {
 	private readonly comment: Comment;
 	private readonly onConfirm: () => void;
 	private readonly labels: ConfirmCommentLabels;
+	// Optional, because most callers only care about the confirm path. The one
+	// that needs it wraps this modal in a promise, and without a cancel signal
+	// that promise never settles: backing out left it pending forever.
+	private readonly onCancel: (() => void) | undefined;
+	// Fired from onClose rather than from the Cancel button, because the button
+	// is only one of the ways out. Escape and a click on the background both go
+	// straight to onClose, and those are the common dismissals.
+	private confirmed = false;
 
 	constructor(
 		app: App,
@@ -31,12 +39,14 @@ export class ConfirmDeleteCommentModal extends Modal {
 			title: 'Delete comment',
 			cta: 'Delete',
 		},
+		onCancel?: () => void,
 	) {
 		super(app);
 		this.settings = settings;
 		this.comment = comment;
 		this.onConfirm = onConfirm;
 		this.labels = labels;
+		this.onCancel = onCancel;
 	}
 
 	onOpen(): void {
@@ -70,6 +80,10 @@ export class ConfirmDeleteCommentModal extends Modal {
 					.setButtonText(this.labels.cta)
 					.then((btn) => btn.buttonEl.addClass('mod-warning'))
 					.onClick(() => {
+						// Set BEFORE close(), because close() runs onClose
+						// synchronously and onClose is where cancellation is
+						// decided.
+						this.confirmed = true;
 						this.close();
 						this.onConfirm();
 					}),
@@ -81,6 +95,7 @@ export class ConfirmDeleteCommentModal extends Modal {
 
 	onClose(): void {
 		this.contentEl.empty();
+		if (!this.confirmed) this.onCancel?.();
 	}
 }
 

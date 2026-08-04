@@ -1434,3 +1434,453 @@ describe('parser: the original fence need not touch the [addressed ...] line', (
 		expect(serialize(again as Comment)).toBe(rewritten);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// PR A item 4: body lines that mimic a structured trailing line.
+//
+// serialize() emits the body raw and the walk reads bottom-up, so a comment
+// whose text quotes the format meets its own quote on the way back in. Every
+// repro below was executed against the shipped parser in the 2026-08-04 review.
+// ---------------------------------------------------------------------------
+
+describe('parser: body lines that mimic structured lines', () => {
+	it('keeps the real id and leaves an [id=...] mimic in the body', () => {
+		const text = serialize({
+			id: 'realid12',
+			category: 'note',
+			body: 'see the marker line:\n[id=deadbeef]',
+		});
+		const c = parseAll(text)[0];
+		expect(c).toBeDefined();
+		if (!c) return;
+		// Before the fix the body-side line won, so the comment came back
+		// carrying deadbeef: every star, draft and re-lookup keyed on realid12
+		// dangled, and the next write rewrote the wrong marker.
+		expect(c.id).toBe('realid12');
+		expect(c.body).toBe('see the marker line:\n[id=deadbeef]');
+		// And it must not walk further on the next pass.
+		const again = parseAll(serialize(c))[0];
+		expect(again?.id).toBe('realid12');
+		expect(again?.body).toBe('see the marker line:\n[id=deadbeef]');
+		expect(serialize(again as Comment)).toBe(serialize(c));
+	});
+
+	it('keeps the real date and leaves a [date=...] mimic in the body', () => {
+		const text = serialize({
+			id: 'realid12',
+			category: 'note',
+			body: 'stamped like this:\n[date=2020-01-01]',
+			date: '2026-08-04T09:00:00',
+		});
+		const c = parseAll(text)[0];
+		expect(c?.date).toBe('2026-08-04T09:00:00');
+		expect(c?.body).toBe('stamped like this:\n[date=2020-01-01]');
+	});
+
+	it('keeps the real author and leaves an [author=...] mimic in the body', () => {
+		const text = serialize({
+			id: 'realid12',
+			category: 'note',
+			body: 'attributed like this:\n[author=someone]',
+			author: 'charles',
+		});
+		const c = parseAll(text)[0];
+		expect(c?.author).toBe('charles');
+		expect(c?.body).toBe('attributed like this:\n[author=someone]');
+	});
+
+	it('keeps the real anchor and leaves an [anchor=...] mimic in the body', () => {
+		const text = serialize({
+			id: 'realid12',
+			category: 'note',
+			body: 'anchored like this:\n[anchor=whatever]',
+			anchor: { text: 'the real anchor', truncated: false },
+		});
+		const c = parseAll(text)[0];
+		expect(c?.anchor?.text).toBe('the real anchor');
+		expect(c?.body).toBe('anchored like this:\n[anchor=whatever]');
+	});
+
+	it('still round-trips a full tail exactly', () => {
+		const text = serialize({
+			id: 'fulltail',
+			category: 'tone',
+			body: 'the body',
+			date: '2026-08-01T10:00:00',
+			author: 'charles',
+			anchor: { text: 'anchored words', truncated: false },
+			replies: [
+				{ author: 'ai', date: '2026-08-01T10:05:00', body: 'first' },
+				{
+					author: 'charles',
+					date: '2026-08-01T10:06:00',
+					body: 'second',
+				},
+			],
+			addressed: {
+				author: 'ai',
+				date: '2026-08-01T10:07:00',
+				note: 'applied',
+				original: 'the old sentence',
+			},
+			resolution: {
+				author: 'charles',
+				date: '2026-08-01T10:08:00',
+				note: 'good',
+			},
+		});
+		const c = parseAll(text)[0];
+		expect(c).toBeDefined();
+		if (!c) return;
+		expect(c.id).toBe('fulltail');
+		expect(c.body).toBe('the body');
+		expect(c.date).toBe('2026-08-01T10:00:00');
+		expect(c.author).toBe('charles');
+		expect(c.anchor?.text).toBe('anchored words');
+		expect(c.replies.map((r) => r.body)).toEqual(['first', 'second']);
+		expect(c.addressed?.original).toBe('the old sentence');
+		expect(c.resolution?.note).toBe('good');
+		expect(serialize(c)).toBe(text);
+	});
+
+	it('documents the irreducible case: an id-less marker adopts the mimic', () => {
+		// No real [id=...] line to prefer, so the body-side one is the only
+		// candidate and the walk takes it. Nothing in the text distinguishes the
+		// two. Pinned so a future change to the walk has to argue with it.
+		const text = serialize({
+			category: 'note',
+			body: 'quotes the format:\n[id=deadbeef]',
+		});
+		const c = parseAll(text)[0];
+		expect(c?.id).toBe('deadbeef');
+		expect(c?.body).toBe('quotes the format:');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// PR A item 5: author tokens.
+// ---------------------------------------------------------------------------
+
+describe('parser: serialize sanitizes author tokens', () => {
+	it('survives a resolution author with a space', () => {
+		// Executed failure: `[resolved Charles Kelsoe ...]` matches neither the
+		// resolved pattern nor the forward-compat shapes, so the walk broke on it
+		// and the whole trailing block above it collapsed into the body. The
+		// comment lost its id, its thread and its resolution in one write.
+		const text = serialize({
+			id: 'authr001',
+			category: 'note',
+			body: 'body text',
+			replies: [{ author: 'ai', date: '2026-08-01', body: 'a reply' }],
+			resolution: {
+				author: 'Charles Kelsoe',
+				date: '2026-08-02',
+				note: 'done',
+			},
+		});
+		const c = parseAll(text)[0];
+		expect(c).toBeDefined();
+		if (!c) return;
+		expect(c.id).toBe('authr001');
+		expect(c.replies).toHaveLength(1);
+		expect(c.resolution?.author).toBe('Charles-Kelsoe');
+		expect(c.body).toBe('body text');
+	});
+
+	it('survives an author token containing the terminator', () => {
+		const text = serialize({
+			id: 'authr002',
+			category: 'note',
+			body: 'body text',
+			author: 'ai-->bot',
+			replies: [{ author: 'ai-->bot', date: '2026-08-01', body: 'hi' }],
+		});
+		// The marker must still be closed exactly once, and the reply must
+		// survive: `-->` in the author line used to end the HTML comment early
+		// and spill the rest into the document.
+		expect(parseAll(text)).toHaveLength(1);
+		const c = parseAll(text)[0];
+		expect(c?.author).toBe('ai--bot');
+		expect(c?.replies[0]?.body).toBe('hi');
+		expect(c?.marker.end).toBe(text.length);
+	});
+
+	it('truncates a 33-character token to 32 and round-trips it', () => {
+		const long = 'z'.repeat(33);
+		const text = serialize({
+			id: 'authr003',
+			category: 'note',
+			body: 'body text',
+			author: long,
+		});
+		const c = parseAll(text)[0];
+		expect(c?.author).toBe('z'.repeat(32));
+		expect(serialize(c as Comment)).toBe(text);
+	});
+
+	it('does not throw on an author value that is not a string', () => {
+		// data.json is untyped at runtime: a hand edit or a synced backup can
+		// make authorTag a number or null, and it reaches serialize through the
+		// composer without passing a type check. Throwing here would take the
+		// whole write with it, which is worse than the malformed line the
+		// sanitizer exists to prevent.
+		const text = serialize({
+			id: 'authr005',
+			category: 'note',
+			body: 'body text',
+			author: 42 as unknown as string,
+		});
+		expect(parseAll(text)).toHaveLength(1);
+		expect(parseAll(text)[0]?.author).toBe('42');
+		expect(parseAll(text)[0]?.body).toBe('body text');
+	});
+
+	it('falls back to `user` for a token that sanitizes to nothing', () => {
+		const text = serialize({
+			id: 'authr004',
+			category: 'note',
+			body: 'body text',
+			author: '   ',
+		});
+		expect(text).toContain('[author=user]');
+		expect(parseAll(text)[0]?.author).toBe('user');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// PR A item 6: anchors at any length.
+// ---------------------------------------------------------------------------
+
+describe('parser: anchor round trip', () => {
+	it('keeps a 201-character anchor, truncated, through a lifecycle rewrite', () => {
+		// The parser pattern used to cap the value at 200 characters, so a longer
+		// one fell through to the unknown-line shape, was absorbed, and vanished
+		// on the next write. Nothing enforced the cap on the way out.
+		const long = 'a'.repeat(201);
+		const text = serialize({
+			id: 'anchr001',
+			category: 'note',
+			body: 'body text',
+			anchor: { text: long, truncated: false },
+		});
+		const c = parseAll(text)[0];
+		expect(c).toBeDefined();
+		if (!c) return;
+		expect(c.anchor).toBeDefined();
+		expect(c.anchor?.text.length).toBeLessThanOrEqual(200);
+		expect(c.anchor?.truncated).toBe(true);
+		expect(serialize(c)).toBe(text);
+	});
+
+	it('parses an over-long anchor line already in a file, instead of eating it', () => {
+		// This is the half serialize() cannot cover. A marker that arrived from
+		// a hand edit, an assistant, or a build with no serialize-time cap can
+		// hold a value longer than the old 200-character pattern allowed. It
+		// then matched the unknown-line shape instead, which ABSORBS the line and
+		// drops it, so the anchor was deleted on the next rewrite with nothing to
+		// show the user. Forward-compatible parsing is what the pattern's own
+		// comment promised.
+		const long = 'b'.repeat(250);
+		const text = [
+			'<!-- annoteca/note: body text',
+			'[id=anchr005]',
+			`[anchor=${long}]`,
+			'-->',
+		].join('\n');
+		const c = parseAll(text)[0];
+		expect(c).toBeDefined();
+		if (!c) return;
+		expect(c.anchor?.text).toBe(long);
+		expect(c.body).toBe('body text');
+		expect(c.id).toBe('anchr005');
+		// And the next write brings it inside the cap rather than losing it.
+		const rewritten = parseAll(serialize(c))[0];
+		expect(rewritten?.anchor).toBeDefined();
+		expect(rewritten?.anchor?.text.length).toBeLessThanOrEqual(200);
+	});
+
+	it('treats [anchor=] as an empty structured line, not an anchor', () => {
+		const text = [
+			'<!-- annoteca/note: body text',
+			'[id=anchr002]',
+			'[anchor=]',
+			'-->',
+		].join('\n');
+		const c = parseAll(text)[0];
+		expect(c?.anchor).toBeUndefined();
+		// And it does not eat the body line above it.
+		expect(c?.body).toBe('body text');
+	});
+
+	it('skips the anchor line entirely for a blank anchor', () => {
+		const text = serialize({
+			id: 'anchr003',
+			category: 'note',
+			body: 'body text',
+			anchor: { text: '   ', truncated: false },
+		});
+		expect(text).not.toContain('[anchor=');
+		expect(parseAll(text)[0]?.anchor).toBeUndefined();
+	});
+
+	it('strips a bracket from the anchor so the line stays parseable', () => {
+		const text = serialize({
+			id: 'anchr004',
+			category: 'note',
+			body: 'body text',
+			anchor: { text: 'bracket ] inside', truncated: false },
+		});
+		const c = parseAll(text)[0];
+		expect(c?.anchor?.text).toBe('bracket  inside');
+		expect(c?.body).toBe('body text');
+		expect(c?.id).toBe('anchr004');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// PR A item 7: an unclosed opener is visible.
+// ---------------------------------------------------------------------------
+
+describe('parser: findMalformedMarkers sees unclosed openers', () => {
+	const MERGED = [
+		'<!-- annoteca/clarify: first comment',
+		'[id=mrg00001]',
+		'',
+		'Prose that is about to disappear.',
+		'',
+		'<!-- annoteca/tone: second comment',
+		'[id=mrg00002]',
+		'-->',
+	].join('\n');
+
+	it('still merges the two markers, which is pinned rather than endorsed', () => {
+		// Current behaviour: MARKER_RE pairs the first opener with the second
+		// marker's terminator, so the prose between them becomes inner content
+		// and the second comment disappears. Whether that should refuse to merge
+		// is a format question with its own ambiguity, so parsing is unchanged
+		// here and this assertion exists to make any future change deliberate.
+		const comments = parseAll(MERGED);
+		expect(comments).toHaveLength(1);
+		expect(comments[0]?.category).toBe('clarify');
+		expect(comments[0]?.id).toBe('mrg00002');
+	});
+
+	it('reports the containing marker as a possible merge', () => {
+		const found = findMalformedMarkers(MERGED);
+		expect(found.map((f) => f.kind)).toContain('possible-merge');
+		const merge = found.find((f) => f.kind === 'possible-merge');
+		expect(merge?.start).toBe(0);
+	});
+
+	it('reports a lone unclosed opener', () => {
+		const text = [
+			'Some prose.',
+			'',
+			'<!-- annoteca/clarify: this one was never closed',
+			'[id=unc00001]',
+			'',
+			'More prose.',
+		].join('\n');
+		expect(parseAll(text)).toHaveLength(0);
+		const found = findMalformedMarkers(text);
+		expect(found).toHaveLength(1);
+		expect(found[0]?.kind).toBe('unclosed-opener');
+	});
+
+	it('reports an unclosed opener that sits mid-line after prose', () => {
+		// Markers lead the text they concern, so most of them in a real vault
+		// sit after prose rather than in column zero. Anchoring the scan to a
+		// line start missed exactly the shape this diagnostic exists to catch.
+		const text = [
+			'Some prose. <!-- annoteca/clarify: this one was never closed',
+			'[id=inl00001]',
+			'',
+			'More prose.',
+		].join('\n');
+		expect(parseAll(text)).toHaveLength(0);
+		const found = findMalformedMarkers(text);
+		expect(found).toHaveLength(1);
+		expect(found[0]?.kind).toBe('unclosed-opener');
+	});
+
+	it('reports a merge where both markers sit mid-line', () => {
+		const text = [
+			'First. <!-- annoteca/clarify: first comment',
+			'[id=inl00002]',
+			'',
+			'Prose that is about to disappear.',
+			'',
+			'Second. <!-- annoteca/tone: second comment',
+			'[id=inl00003]',
+			'-->',
+		].join('\n');
+		expect(parseAll(text)).toHaveLength(1);
+		const found = findMalformedMarkers(text);
+		expect(found.map((f) => f.kind)).toContain('possible-merge');
+	});
+
+	it('reports one finding per container and sorts every finding by position', () => {
+		// Two behaviours that had no test: several openers inside ONE container
+		// collapse to a single possible-merge finding rather than a wall of
+		// them, and the findings come back in document order whichever scan
+		// produced them.
+		const text = [
+			'<!-- annoteca/clarify: first',
+			'[id=dup00001]',
+			'',
+			'Prose.',
+			'',
+			'<!-- annoteca/tone: second',
+			'',
+			'More prose.',
+			'',
+			'<!-- annoteca/cut: third',
+			'[id=dup00002]',
+			'-->',
+			'',
+			'Tail prose. <!-- annoteca/note: never closed',
+		].join('\n');
+
+		const found = findMalformedMarkers(text);
+		const merges = found.filter((f) => f.kind === 'possible-merge');
+		expect(merges).toHaveLength(1);
+		expect(merges[0]?.start).toBe(0);
+		expect(found.filter((f) => f.kind === 'unclosed-opener')).toHaveLength(
+			1,
+		);
+	});
+
+	it('returns findings in document order across both scans', () => {
+		// The two scans run one after the other, so their findings are only in
+		// document order if something puts them there. Here the LATER problem is
+		// the one the first scan reports: an invalid-category marker that closes
+		// itself, sitting after an opener that never closed.
+		const text = [
+			'<!-- annoteca/clarify: this one never closes',
+			'[id=ord00001]',
+			'',
+			'<!-- annoteca/tone: an opener swallowed by the one above',
+			'-->',
+			'',
+			'<!-- annoteca/1bad: closed, but the category is invalid -->',
+		].join('\n');
+
+		const found = findMalformedMarkers(text);
+		expect(found.length).toBeGreaterThanOrEqual(2);
+		const starts = found.map((f) => f.start);
+		expect(starts).toEqual([...starts].sort((a, b) => a - b));
+		// Specifically: the second scan's finding is the earlier one.
+		expect(found[0]?.kind).toBe('possible-merge');
+	});
+
+	it('says nothing about a well-formed document', () => {
+		const text = [
+			'Prose. <!-- annoteca/tone: fine -->',
+			'',
+			'<!-- annoteca/clarify: also fine',
+			'[id=ok000001]',
+			'-->',
+		].join('\n');
+		expect(findMalformedMarkers(text)).toEqual([]);
+	});
+});

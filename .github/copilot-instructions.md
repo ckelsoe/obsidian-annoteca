@@ -110,7 +110,7 @@ it landed as a shock to the whole team
 - Reserved category names (used as structural keywords): `reply`, `resolved`, `id`, `date`, `author`.
 - Timestamps: `YYYY-MM-DDTHH:MM:SS` (no timezone). Legacy date-only `YYYY-MM-DD` still parses but new writes use the full timestamp.
 - ID: 8-character lowercase base36 string.
-- Anchor text: up to 80 visible characters; mid-truncated with `…` when longer.
+- Anchor text: the SELECTION capture caps at 80 visible characters, mid-truncated with `…`. `serialize()` enforces a separate 200-character ceiling on the escaped value, and the parser accepts any length so an anchor written by hand or by an older build is read rather than silently dropped. Two limits, two jobs: 80 is the capture budget, 200 is the format's.
 - Replies are sorted chronologically by timestamp on read; file order is the tiebreak for equal timestamps.
 - The `-->` sequence cannot appear literally in any free-text field, because it closes the HTML comment wrapper. `parser.ts` escapes it as `--\>` on write and restores it on read, for the body, `[anchor=...]`, reply bodies, the addressed and resolved notes, and the `annoteca-original` fence. Anything that writes a marker must go through `serialize()`; do not hand-build one.
 - Every bracketed trailing line is a SINGLE-LINE grammar, so `serialize()` collapses a run of line breaks to one space in `[anchor=...]`, reply bodies, and the addressed and resolved notes. A raw newline in one of those emits a continuation line that matches nothing, which ends the parser's backward walk on the spot and absorbs the `[id=...]` and every other trailing line into the body. The comment body and the `annoteca-original` fence are multi-line by contract and are NOT collapsed. `skill-export.ts` states this rule for assistants; it applies to plugin code too.
@@ -136,7 +136,9 @@ These are enforced by CI and the Obsidian marketplace review — violating them 
 - Use `MarkdownRenderer.render()` (not the deprecated `renderMarkdown()`).
 - Use `getLeaf('tab')` / `getLeaf('split')` (not `getLeaf(true)` / `getLeaf(false)`).
 - Use `Notice.messageEl` (not the deprecated `Notice.noticeEl`).
-- Editor-aware writes: when a file is open in a markdown leaf, mutate through `editor.transaction(...)` rather than `vault.modify(...)`. `vault.modify` on an open file can be clobbered by the editor's autosave flushing its stale in-memory document back to disk.
+- Editor-aware writes: when a file is open in a markdown leaf, mutate through the editor's `replaceRange` rather than a vault write. A vault write on an open file can be clobbered by the editor's autosave flushing its stale in-memory document back to disk. When the file is NOT open, write with `vault.process(file, fn)`, never `read` then `modify`: process reads and writes under one lock, so nothing can land in between.
+- `applySplices` takes the exact content the caller computed its offsets against and REFUSES when the file no longer matches it. Two rules follow, and both have already been broken once. Pass the content you actually read, not a fresh read. Honour the return value: a refusal that is not propagated looks identical to a success one layer up, and the verb then reports "Reply added." and clears the draft while nothing reached the file.
+- Every public mutating verb on `CommentService` is an `enqueue` wrapper around a private `*Unqueued` method, so this plugin's own writes to one file cannot interleave. A verb that delegates to another verb MUST call the `*Unqueued` form. Calling the public one deadlocks: it waits behind the caller that is already holding that path's queue slot.
 
 ### CSS
 

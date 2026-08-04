@@ -941,12 +941,34 @@ export default class AnnotecaPlugin extends Plugin {
 				this.settings,
 				comment,
 				() => {
+					// Both arms settle. `then(resolve)` alone left this promise
+					// pending forever when the vault read or write rejected (a
+					// locked or deleted note), which today shows up as a silent
+					// unhandled rejection because every call site voids the
+					// result, and would be a hang the moment one awaits it.
 					void this.comments
 						.deleteComment(path, comment)
-						.then(resolve);
+						.then(resolve, (err: unknown) => {
+							this.noticeVerbFailed('delete the comment', err);
+							resolve();
+						});
 				},
+				undefined,
+				// Cancel settles the promise too. Without this it stayed pending
+				// for the life of the session every time the user backed out.
+				resolve,
 			).open();
 		});
+	}
+
+	// One wording for "the lifecycle write threw". Distinct from the service's
+	// own notices, which cover the cases it decided about; this covers the ones
+	// it could not, so the user is not left looking at a button that did nothing.
+	private noticeVerbFailed(what: string, err: unknown): void {
+		console.error(`Annoteca: could not ${what}`, err);
+		new Notice(
+			`Could not ${what}. The note may be locked, missing, or open elsewhere.`,
+		);
 	}
 
 	async resolveAndRemoveComment(
@@ -967,12 +989,22 @@ export default class AnnotecaPlugin extends Plugin {
 					// on whatever is currently at the marker.
 					void this.comments
 						.resolveAndRemoveComment(path, comment)
-						.then(() => resolve());
+						.then(
+							() => resolve(),
+							(err: unknown) => {
+								this.noticeVerbFailed(
+									'remove the comment',
+									err,
+								);
+								resolve();
+							},
+						);
 				},
 				{
 					title: 'Resolve and remove comment',
 					cta: 'Resolve and remove',
 				},
+				resolve,
 			).open();
 		});
 	}
