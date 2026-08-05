@@ -8,6 +8,8 @@ import {
 	findMalformedMarkers,
 	buildAnchorFromSelection,
 	ANCHOR_MAX_CHARS,
+	isAuthorToken,
+	sanitizeAuthorToken,
 } from '../parser';
 import type { Comment } from '../types';
 
@@ -1959,5 +1961,55 @@ describe('parser: serialize refuses a category it cannot re-parse', () => {
 		expect(comments[0]?.category).toBe('uncategorized');
 		expect(comments[0]?.id).toBe('abcd1234');
 		expect(comments[0]?.replies).toHaveLength(1);
+	});
+});
+
+describe('parser: isAuthorToken', () => {
+	// The predicate the settings tab asks before storing a tag or offering it in
+	// the collaborator list. It lives beside AUTHOR_LINE_RE because the class was
+	// written out in eight places, and eight copies of a grammar is eight chances
+	// for one to drift from the format.
+	it('accepts what the author line can carry', () => {
+		for (const tag of ['bob', 'Reviewer.2', 'a_b', 'ann-marie', 'é', 'x']) {
+			expect(isAuthorToken(tag)).toBe(true);
+		}
+	});
+
+	it('rejects exactly the characters that break the format', () => {
+		// Whitespace is the field delimiter in [reply ...]; `]` closes the
+		// bracket; `<` and `>` can form the `-->` that ends the HTML comment.
+		for (const tag of ['Bob Smith', 'a]b', 'a<b', 'a>b', 'a\tb', 'a\nb']) {
+			expect(isAuthorToken(tag)).toBe(false);
+		}
+	});
+
+	it('rejects empty and over-long tags', () => {
+		// Empty is deliberately NOT a token. Callers that treat it as "no tag
+		// set" say so themselves, so the predicate answers one question.
+		expect(isAuthorToken('')).toBe(false);
+		expect(isAuthorToken('a'.repeat(32))).toBe(true);
+		expect(isAuthorToken('a'.repeat(33))).toBe(false);
+	});
+
+	it('agrees with what the parser actually reads back', () => {
+		// The point of sharing the source: this is the contract, executed.
+		for (const tag of ['bob', 'Reviewer.2', 'a'.repeat(32)]) {
+			const text = serialize({
+				category: 'clarify',
+				body: 'body',
+				author: tag,
+			});
+			expect(isAuthorToken(tag)).toBe(true);
+			expect(parseAll(text)[0]?.author).toBe(tag);
+		}
+	});
+
+	it('agrees with sanitizeAuthorToken on what needs repairing', () => {
+		for (const raw of ['Bob Smith', 'a]b', 'a<b', 'a'.repeat(40)]) {
+			expect(isAuthorToken(raw)).toBe(false);
+			// Whatever the repair produces must itself be a token, or the repair
+			// is not a repair.
+			expect(isAuthorToken(sanitizeAuthorToken(raw))).toBe(true);
+		}
 	});
 });

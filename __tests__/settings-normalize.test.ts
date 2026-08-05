@@ -305,6 +305,33 @@ describe('normalizeSettings: structural keys', () => {
 		expect(s.skillStaleNoticeShownFor).toBe(2);
 	});
 
+	it('keeps a drift snapshot stored under a __proto__ key', () => {
+		// The KEYS here are untrusted too, not just the values. On a plain object
+		// literal `out['__proto__'] = snap` runs the inherited setter instead of
+		// creating a key, so the snapshot vanishes and the accumulator ends up
+		// with a prototype nobody asked for.
+		//
+		// Built with JSON.parse, not an object literal: `__proto__:` in a literal
+		// is the prototype-setter syntax and never creates an own key, so a
+		// literal here would test nothing. JSON.parse is also how the value
+		// really arrives.
+		const s = normalizeSettings(
+			JSON.parse(
+				'{"driftSnapshots":{"__proto__":{"before":"was","after":"now"},"abcd1234":{"before":"a","after":"b"}}}',
+			),
+		);
+		expect(Object.keys(s.driftSnapshots ?? {}).sort()).toEqual([
+			'__proto__',
+			'abcd1234',
+		]);
+		expect(s.driftSnapshots?.['__proto__']).toEqual({
+			before: 'was',
+			after: 'now',
+		});
+		// And nothing leaked onto Object.prototype along the way.
+		expect(({} as Record<string, unknown>).before).toBeUndefined();
+	});
+
 	it('leaves an optional key absent rather than storing an explicit undefined', () => {
 		const s = normalizeSettings({ exportedSkillVersion: 'three' });
 		expect('exportedSkillVersion' in s).toBe(false);

@@ -23,6 +23,7 @@ import { CommentIndex } from './index';
 import {
 	AnnotecaSettingTab,
 	resolveSettingsCategories,
+	isRecord,
 	normalizeSettings,
 	mergeRestoredSettings,
 } from './settings';
@@ -321,10 +322,14 @@ export default class AnnotecaPlugin extends Plugin {
 	}
 
 	async loadSettings(): Promise<void> {
-		const loaded = (await this.loadData()) as Record<
-			string,
-			unknown
-		> | null;
+		// Narrowed, not asserted. The migrations below reach into this value
+		// directly, and an assertion proves nothing about what is on disk: a
+		// data.json holding a top-level JSON primitive made `'markerScrollAlign'
+		// in loaded` throw, loadSettings reject and onload fail, which is the
+		// same total-load failure this change exists to stop, arriving through
+		// the sibling shape.
+		const raw: unknown = await this.loadData();
+		const loaded = isRecord(raw) ? raw : null;
 
 		// Every value in data.json is validated in exactly one place. Nothing
 		// below re-checks a type; what is left here is migration, which needs the

@@ -25,7 +25,11 @@ import {
 	reorderCategories,
 	moveCategory,
 } from './categories';
-import { isSerializableCategory, sanitizeAuthorToken } from './parser';
+import {
+	isAuthorToken,
+	isSerializableCategory,
+	sanitizeAuthorToken,
+} from './parser';
 import {
 	createStackedRow,
 	createColorPicker,
@@ -123,7 +127,11 @@ type SettingValidator<K extends SettingKey> = (
 	raw: unknown,
 ) => Required<AnnotecaSettings>[K] | undefined;
 
-function isRecord(raw: unknown): raw is Record<string, unknown> {
+// Exported because loadSettings needs the SAME narrowing for the migrations it
+// runs against the raw stored blob. A second copy there is a second thing to
+// keep in step, and the one that matters is not the check itself but the
+// question it settles: is this thing safe to reach into at all.
+export function isRecord(raw: unknown): raw is Record<string, unknown> {
 	return typeof raw === 'object' && raw !== null && !Array.isArray(raw);
 }
 
@@ -268,7 +276,15 @@ function validDriftSnapshots(
 	raw: unknown,
 ): Record<string, { before: string; after: string }> | undefined {
 	if (!isRecord(raw)) return undefined;
-	const out: Record<string, { before: string; after: string }> = {};
+	// Null prototype because the KEYS here are untrusted too, not just the
+	// values. On a plain object literal, `out['__proto__'] = snap` runs the
+	// inherited setter rather than creating a key, so a hand-edited file with a
+	// `__proto__` entry would lose that snapshot AND leave `out` with a
+	// prototype nobody asked for.
+	const out = Object.create(null) as Record<
+		string,
+		{ before: string; after: string }
+	>;
 	for (const [id, snap] of Object.entries(raw)) {
 		if (!isRecord(snap)) continue;
 		if (typeof snap.before !== 'string' || typeof snap.after !== 'string')
@@ -278,16 +294,13 @@ function validDriftSnapshots(
 	return out;
 }
 
-// Same grammar as AUTHOR_LINE_RE in parser.ts, and the same one the author-tag
-// and collaborator rows validate against in the UI.
-const AUTHOR_TAG_RE = /^[^\s\]<>]{1,32}$/;
-
 const validAuthorTag: SettingValidator<'authorTag'> = (raw) => {
 	if (typeof raw !== 'string') return undefined;
 	// Empty is a legitimate stored value: it is what "no tag set" looks like,
 	// and sanitizing it would invent the token "user" for someone who never
-	// asked for one.
-	if (raw === '' || AUTHOR_TAG_RE.test(raw)) return raw;
+	// asked for one. isAuthorToken deliberately answers only the grammar
+	// question, so the "no tag set" case is spelled out here.
+	if (raw === '' || isAuthorToken(raw)) return raw;
 	// A display name with a space is the common shape here and is not a reason
 	// to throw the tag away. sanitizeAuthorToken is the same repair serialize()
 	// applies at the write funnel, imported rather than restated so the token
@@ -748,7 +761,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 									typeof value === 'string'
 										? value.trim()
 										: '';
-								return v === '' || /^[^\s\]<>]{1,32}$/.test(v)
+								return v === '' || isAuthorToken(v)
 									? undefined
 									: 'Use a single tag with no spaces (max 32 characters).';
 							},
@@ -906,8 +919,13 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		}
 
 		if (defaultMoved) {
+			// The display name, not the id. `defaultCategory` holds `source-needed`
+			// where every other string this tab shows the user says "Source needed".
+			const moved = resolveSettingsCategories(this.plugin.settings).find(
+				(c) => c.id === this.plugin.settings.defaultCategory,
+			);
 			new Notice(
-				`Default category is now "${this.plugin.settings.defaultCategory}".`,
+				`Default category is now "${moved?.displayName ?? this.plugin.settings.defaultCategory}".`,
 			);
 		}
 		// The bound dropdown still shows the old id until the definitions are
@@ -1660,7 +1678,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		addBtn.addEventListener('click', () => {
 			const tag = input.value.trim();
 			if (tag === '') return;
-			if (!/^[^\s\]<>]{1,32}$/.test(tag)) {
+			if (!isAuthorToken(tag)) {
 				new Notice(
 					'Use a single tag with no spaces (max 32 characters).',
 				);

@@ -25,6 +25,16 @@ export const ANNOTECA_HUB_VIEW_TYPE = 'annoteca-hub-view';
 
 export type HubTab = 'thread' | 'outline' | 'starred';
 
+// Resolve a stored tab to one the panel can actually draw. `lastHubTab` is
+// validated on the way out of data.json, so this should never have work to do;
+// it exists because the failure it prevents is silent. An unrecognised value
+// left in place renders the Thread panel with no tab lit and no refresh on a
+// scope change, which reads as the plugin being broken rather than as a bad
+// stored value.
+export function normalizeHubTab(tab: unknown): HubTab {
+	return tab === 'outline' || tab === 'starred' ? tab : 'thread';
+}
+
 // Shared scaffolding for every Annoteca ItemView: plugin injection in the
 // constructor and contentEl cleanup on close. Subclasses still own their
 // view-type identity methods and onOpen wiring.
@@ -375,7 +385,12 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 	}
 
 	async onOpen(): Promise<void> {
-		this.activeTab = this.plugin.settings.lastHubTab;
+		// Normalized here rather than only at the switch that renders it. The
+		// stored value reaches three other places (the tab strip's active
+		// marker, and the starred-changed and scope-changed refresh guards), so
+		// falling back at render time alone produced a panel showing Thread
+		// content with no tab lit and no refresh on a scope change.
+		this.activeTab = normalizeHubTab(this.plugin.settings.lastHubTab);
 		const file = this.app.workspace.getActiveFile();
 		this.threadRenderer.activePath = file?.path;
 		this.scheduleRefresh();
@@ -503,11 +518,11 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 			case 'starred':
 				this.starredRenderer.render(content);
 				break;
-			// Thread is the default arm, not a case of its own. lastHubTab comes
-			// out of data.json and is validated on the way in, but a switch with
-			// no default renders an EMPTY panel for anything unexpected, and an
-			// empty panel reads as "the plugin is broken" rather than as a bad
-			// stored value. One line to make the failure mode a wrong tab.
+			// Thread is the default arm, not a case of its own. `activeTab` is
+			// already normalized at both places that set it, so this arm should be
+			// unreachable; it stays because a switch with no default renders an
+			// EMPTY panel, and an empty panel reads as "the plugin is broken"
+			// rather than as a bad stored value.
 			case 'thread':
 			default:
 				this.threadRenderer.render(content);

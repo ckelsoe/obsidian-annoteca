@@ -56,7 +56,26 @@ const ID_LINE_RE = /^\s*\[id=([a-z0-9]{1,32})\]\s*$/;
 // below from drifting apart.
 const STAMP_SRC = '\\d{4}-\\d{2}-\\d{2}(?:T\\d{2}:\\d{2}(?::\\d{2})?)?';
 const DATE_LINE_RE = new RegExp(`^\\s*\\[date=(${STAMP_SRC})\\]\\s*$`);
-const AUTHOR_LINE_RE = /^\s*\[author=([^\s\]<>]{1,32})\]\s*$/;
+// The author-token class, shared the same way STAMP_SRC is. It appeared in five
+// patterns here and three more in settings.ts, and eight copies of a grammar is
+// eight chances for one of them to drift from the format.
+const AUTHOR_SRC = '[^\\s\\]<>]{1,32}';
+const AUTHOR_LINE_RE = new RegExp(`^\\s*\\[author=(${AUTHOR_SRC})\\]\\s*$`);
+const AUTHOR_TOKEN_RE = new RegExp(`^${AUTHOR_SRC}$`);
+
+// Is this string usable as an author token as it stands? The settings tab asks
+// this before storing a tag and before offering it in the collaborator list, so
+// the question is answered here, next to the lines the answer is about, rather
+// than restated at each call site.
+//
+// An empty string is NOT a token, and callers that treat empty as "no tag set"
+// have to say so themselves. Folding that in here would make the predicate
+// answer two questions and hide the difference between "nothing configured" and
+// "something unusable".
+export function isAuthorToken(tag: string): boolean {
+	return AUTHOR_TOKEN_RE.test(tag);
+}
+
 // Anchor value is permissive: anything but `]` or a line break, at any length.
 //
 // The length is UNBOUNDED here and capped at serialize time instead, which is
@@ -70,15 +89,15 @@ const AUTHOR_LINE_RE = /^\s*\[author=([^\s\]<>]{1,32})\]\s*$/;
 // unknown line.
 const ANCHOR_LINE_RE = /^\s*\[anchor=([^\]\r\n]*)\]\s*$/;
 const REPLY_LINE_RE = new RegExp(
-	`^\\s*\\[reply\\s+([^\\s\\]<>]{1,32})\\s+(${STAMP_SRC})\\]:\\s?([\\s\\S]*)$`,
+	`^\\s*\\[reply\\s+(${AUTHOR_SRC})\\s+(${STAMP_SRC})\\]:\\s?([\\s\\S]*)$`,
 );
 // Addressed trailing line (F-270). Same shape as reply/resolved. Positioned
 // after [reply ...] lines and before any [resolved ...] line; at most one.
 const ADDRESSED_LINE_RE = new RegExp(
-	`^\\s*\\[addressed\\s+([^\\s\\]<>]{1,32})\\s+(${STAMP_SRC})\\]:\\s?([\\s\\S]*)$`,
+	`^\\s*\\[addressed\\s+(${AUTHOR_SRC})\\s+(${STAMP_SRC})\\]:\\s?([\\s\\S]*)$`,
 );
 const RESOLVED_LINE_RE = new RegExp(
-	`^\\s*\\[resolved\\s+([^\\s\\]<>]{1,32})\\s+(${STAMP_SRC})\\]:\\s?([\\s\\S]*)$`,
+	`^\\s*\\[resolved\\s+(${AUTHOR_SRC})\\s+(${STAMP_SRC})\\]:\\s?([\\s\\S]*)$`,
 );
 
 // Forward-compatibility shapes for trailing lines this version does not know
@@ -102,7 +121,7 @@ const RESOLVED_LINE_RE = new RegExp(
 // recoverable failure.
 const UNKNOWN_KV_LINE_RE = /^\s*\[[a-z][a-z0-9-]*=[^\]\r\n]*\]\s*$/;
 const UNKNOWN_STAMPED_LINE_RE = new RegExp(
-	`^\\s*\\[[a-z][a-z0-9-]*\\s+[^\\s\\]<>]{1,32}\\s+${STAMP_SRC}\\]:`,
+	`^\\s*\\[[a-z][a-z0-9-]*\\s+${AUTHOR_SRC}\\s+${STAMP_SRC}\\]:`,
 );
 
 // The lossless-original fence (F-271): a fenced block tagged annoteca-original
