@@ -1202,25 +1202,22 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 	}
 
 	// Persist a mutation to `settings.categories` and bring the UI back in step.
-	// The two repaints are not interchangeable and both are needed: the custom
-	// block does not refresh via update(), so the rows are repainted directly,
-	// and rerender() then reconciles the bound default-category dropdown against
-	// the new list. Reorder, remove, and move-button all need exactly this, so it
-	// lives here rather than being written out at each call site where the two
-	// steps could drift apart.
-	private commitCategoryChange(list: HTMLElement): void {
+	// Reorder, remove, and the move buttons all need exactly this, so it lives
+	// here rather than being written out at each call site.
+	//
+	// rerender() is the whole repaint. It used to be preceded by a direct
+	// refreshCategoryList(list) call, on the belief that update() left a custom
+	// block's DOM alone. It does not: update() runs the block's render callback
+	// again against a new host, synchronously, so the hand repaint landed on a
+	// node that was detached and replaced microseconds later.
+	private commitCategoryChange(): void {
 		void this.plugin.saveSettings();
-		this.refreshCategoryList(list);
 		this.rerender();
 	}
 
-	// Repaint the category rows into their existing list element. Used after a
-	// reorder or remove. We refresh the list directly instead of calling
-	// rerender(): on the 1.13 declarative path, update() reconciles bound
-	// controls (the default-category dropdown) from fresh definitions but does
-	// NOT re-invoke a custom block's render callback, so the list would not
-	// repaint until the settings pane was reopened. `list` stays attached
-	// because nothing here rebuilds the host around it.
+	// Paint the category rows into a freshly created list element. Called from
+	// renderCategoryList, which is the custom block's render callback, so this
+	// runs once per render of the block and update() is what re-runs it.
 	private refreshCategoryList(list: HTMLElement): void {
 		list.empty();
 		for (const cat of this.plugin.settings.categories) {
@@ -1296,23 +1293,17 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		// button just used is now disabled, so hand focus to the opposite one
 		// rather than to something inert.
 		//
-		// update() leaves a custom block's DOM alone, so `list` is normally still
-		// the live element and the first root hits. The containerEl fallback and
-		// the isConnected test stay because this code cannot prove that: whether a
-		// re-render replaces the block is Obsidian's decision, not ours, and
-		// focus() on a detached node is a silent no-op, so getting it wrong looks
-		// like the feature simply not working rather than like an error.
+		// Searched from containerEl, and only from containerEl. `list` is the
+		// element this row was painted into, and by the time this runs
+		// commitCategoryChange has called update(), which replaced the whole
+		// custom block: `list` is detached and holds the pre-move order. The
+		// search used to try `list` first and fall back to containerEl, which
+		// read as belt and braces but could only ever take the fallback.
+		// containerEl survives the re-render, so it is the one root that works.
 		const refocusAfterMove = (direction: 'up' | 'down'): void => {
-			let moved: HTMLElement | undefined;
-			for (const root of [list, this.containerEl]) {
-				const found = root
-					.findAll('.annoteca-category-row')
-					.find((r) => r.dataset.annotecaCategory === cat.id);
-				if (found?.isConnected) {
-					moved = found;
-					break;
-				}
-			}
+			const moved = this.containerEl
+				.findAll('.annoteca-category-row')
+				.find((r) => r.dataset.annotecaCategory === cat.id);
 			if (!moved) return;
 			const button = (d: 'up' | 'down') =>
 				moved?.querySelector<HTMLButtonElement>(
@@ -1371,7 +1362,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 					cat.id,
 					direction,
 				);
-				this.commitCategoryChange(list);
+				this.commitCategoryChange();
 				refocusAfterMove(direction);
 			});
 		};
@@ -1461,7 +1452,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 				dragId,
 				cat.id,
 			);
-			this.commitCategoryChange(list);
+			this.commitCategoryChange();
 		});
 
 		const controls = detail.createDiv({
@@ -1618,7 +1609,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 						(c) => c.id !== cat.id,
 					);
 				this.expandedCategoryIds.delete(cat.id);
-				this.commitCategoryChange(list);
+				this.commitCategoryChange();
 			});
 		}
 	}

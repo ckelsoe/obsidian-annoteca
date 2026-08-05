@@ -1131,3 +1131,37 @@ describe('a refused write is reported as a refusal, not a success', () => {
 		expect(h.content).toContain('annoteca/clarify');
 	});
 });
+
+// The tag reaches this method already repaired: normalizeSettings is the single
+// ingress for data.json and runs authorTag through the token grammar. These pin
+// that resolvedAuthor consumes that guarantee rather than restating it, because
+// a second copy of a rule is the thing that drifts from the first.
+describe('resolvedAuthor reads the tag and does not re-validate it', () => {
+	const author = (settings: Record<string, unknown>): string =>
+		new CommentService({
+			settings,
+		} as unknown as AnnotecaPlugin).resolvedAuthor();
+
+	it('returns the stored tag verbatim, surrounding whitespace included', () => {
+		// normalizeSettings cannot produce this, which is the point: the only
+		// way to observe a trim here is to put back the one that was removed.
+		expect(author({ enableAuthorTag: true, authorTag: ' charles ' })).toBe(
+			' charles ',
+		);
+	});
+
+	it('does not throw on a tag that is not a string', () => {
+		// A hand-edited data.json is what makes this reachable, and absorbing it
+		// is normalizeSettings' job. Throwing here took every write with it.
+		expect(() =>
+			author({ enableAuthorTag: true, authorTag: 42 }),
+		).not.toThrow();
+	});
+
+	it('falls back to "user" for an empty tag or a disabled one', () => {
+		expect(author({ enableAuthorTag: true, authorTag: '' })).toBe('user');
+		expect(author({ enableAuthorTag: false, authorTag: 'charles' })).toBe(
+			'user',
+		);
+	});
+});

@@ -16,6 +16,7 @@ import {
 	EditorView,
 	WidgetType,
 	ViewPlugin,
+	getTooltip,
 	hoverTooltip,
 	repositionTooltips,
 	showTooltip,
@@ -1678,7 +1679,22 @@ function dismissReplyOnOutsideClick(): Extension {
 			// not throw away their work. Cancel and Escape still dismiss.
 			// Drafts are persisted on input, so even if the composer dies the
 			// text is recoverable, but keeping it visible avoids the surprise.
-			const textarea = view.dom.querySelector<HTMLTextAreaElement>(
+			//
+			// Asked of the tooltip CodeMirror actually mounted, not of
+			// `view.dom`. The composer is a tooltip, and tooltips mount into a
+			// per-window host outside the editor (see `perWindowTooltipHost`),
+			// so the `view.dom.querySelector` this replaces found nothing, the
+			// guard read that as "nothing typed", and every outside click threw
+			// a draft off the screen. Reproduced in the running app: 22
+			// characters in the box, one mousedown in the editor, composer gone.
+			//
+			// getTooltip matches on object identity against the tooltip the
+			// state field provides, so this finds THIS view's composer and not
+			// a sibling split's, which a document-wide query would.
+			const textarea = getTooltip(
+				view,
+				open.tooltip,
+			)?.dom.querySelector<HTMLTextAreaElement>(
 				'.annoteca-reply-composer-textarea',
 			);
 			if (textarea && textarea.value.length > 0) return false;
