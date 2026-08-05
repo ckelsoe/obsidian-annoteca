@@ -18,7 +18,7 @@
 // exactly the hand-written imitation `live-views.test.ts` argues against
 // standing between a test and the thing it claims to verify.
 
-import { AnnotecaPanelView } from '../views';
+import { AnnotecaPanelView, normalizeHubTab } from '../views';
 import { DEFAULT_SETTINGS } from '../settings';
 import type AnnotecaPlugin from '../main';
 import type { WorkspaceLeaf } from 'obsidian';
@@ -115,5 +115,33 @@ describe('hub refresh coalescing', () => {
 		await tick();
 
 		expect(renders()).toBe(0);
+	});
+});
+
+// The stored tab reaches four places: the switch that picks a renderer, the tab
+// strip's active marker, and the starred-changed and scope-changed refresh
+// guards. Falling back at the switch alone left the other three holding a value
+// none of them recognise, so the panel drew Thread content with no tab lit and
+// stopped refreshing on a scope change.
+describe('views: normalizeHubTab', () => {
+	it('keeps each tab the panel can actually draw', () => {
+		expect(normalizeHubTab('thread')).toBe('thread');
+		expect(normalizeHubTab('outline')).toBe('outline');
+		expect(normalizeHubTab('starred')).toBe('starred');
+	});
+
+	it('sends anything else to thread', () => {
+		for (const stored of [
+			'garbage',
+			'',
+			null,
+			undefined,
+			42,
+			{},
+			[],
+			'Thread',
+		]) {
+			expect(normalizeHubTab(stored)).toBe('thread');
+		}
 	});
 });

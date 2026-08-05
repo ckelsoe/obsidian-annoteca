@@ -43,7 +43,6 @@ All TypeScript source files are in the **root** of the repository (not in a `src
 | `__tests__/` | Jest unit tests |
 | `__mocks__/obsidian.ts` | Minimal Obsidian stub for Jest (no real plugin host) |
 | `scripts/check-submission.mjs` | Obsidian marketplace submission pre-check (runs as part of lint) |
-| `scripts/check-settings-parity.mjs` | Fails when a setting is missing from one of the two settings render paths (runs as part of lint) |
 | `docs/pandoc-annoteca.lua` | Pandoc Lua filter that strips markers at export time |
 | `esbuild.config.mjs` | esbuild config; dev build auto-copies artifacts into a sibling `obs-test-vault` if it exists |
 | `version-bump.mjs` | Bumps version in `manifest.json` and `versions.json` |
@@ -57,7 +56,7 @@ npm install          # install all dependencies
 npm run dev          # dev build with file watching (auto-copies to obs-test-vault if present)
 npm run build        # TypeScript type-check (noEmit) + esbuild production bundle → main.js
 npm run lint         # ESLint (zero warnings allowed) + prettier --check "**/*.ts"
-                     #   + scripts/check-submission.mjs + scripts/check-settings-parity.mjs
+                     #   + scripts/check-submission.mjs
 npm test             # Jest unit tests
 ```
 
@@ -171,11 +170,17 @@ Worked example: category reordering. Move up / move down buttons render everywhe
 
 Settings tab section headings must not contain the words "settings", "options", "general", or the plugin name ("Annoteca").
 
-### Every setting row goes in BOTH render paths
+### There is exactly one settings render path
 
-`minAppVersion` is 1.8.7, so both are live: `getSettingDefinitions()` for Obsidian 1.13+, and `renderImperativeSettings()` for everything older. A row added to one is invisible to half the supported range, and the dev vault runs 1.13.x, so testing by hand only ever exercises the declarative path.
+`minAppVersion` is 1.13.0, so `getSettingDefinitions()` is the only path. The imperative `display()` fallback and the parity script that kept the two in step are both deleted. Do not reintroduce either: a second path that the dev vault never exercises is how a row ends up invisible to half the supported range.
 
-`npm run lint` runs `scripts/check-settings-parity.mjs`, which fails when a key appears in one path and not the other, or in `DEFAULT_SETTINGS` with no row at all. A key that genuinely has no plain row (bespoke UI, or persisted state) goes in that script's `NO_PLAIN_ROW` list with a reason.
+`update()` is the re-render entry point, reached through `rerender()`. It reconciles bound controls from fresh definitions but does NOT re-invoke a custom block's `render` callback. So a custom block whose contents change MUST repaint its own DOM as well as calling `rerender()`; `commitCategoryChange` is the worked example. `rerender()` alone leaves the block showing what it drew last.
+
+### Every value read out of data.json goes through `normalizeSettings`
+
+`data.json` is user-editable and arrives over sync and out of restored backups, so nothing in it is guaranteed to be the type it was written as. `normalizeSettings(raw, fallback)` in `settings.ts` is the single choke point: it starts from the defaults and copies a key only if that key's validator accepts it. `loadSettings` and `mergeRestoredSettings` are both thin wrappers over it, and no validation logic lives anywhere else.
+
+`SETTING_VALIDATORS` is a mapped type over `Required<AnnotecaSettings>`, so a new setting with no validator fails the build rather than arriving unchecked.
 
 ---
 

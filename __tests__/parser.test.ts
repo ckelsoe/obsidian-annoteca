@@ -8,6 +8,8 @@ import {
 	findMalformedMarkers,
 	buildAnchorFromSelection,
 	ANCHOR_MAX_CHARS,
+	isAuthorToken,
+	sanitizeAuthorToken,
 } from '../parser';
 import type { Comment } from '../types';
 
@@ -1882,5 +1884,132 @@ describe('parser: findMalformedMarkers sees unclosed openers', () => {
 			'-->',
 		].join('\n');
 		expect(findMalformedMarkers(text)).toEqual([]);
+	});
+});
+
+describe('parser: serialize refuses a category it cannot re-parse', () => {
+	// data.json is the way a category like this gets in. The settings UI enforces
+	// the stricter isValidCategoryName, but a hand edit or a synced file is not
+	// obliged to, and serialize()'s output is spliced straight into the document.
+	const roundTrip = (category: string) => {
+		const text = serialize({ category, body: 'the body survives' });
+		return { text, comments: parseAll(text) };
+	};
+
+	it('emits uncategorized for a category holding a bracket and a newline', () => {
+		const { comments } = roundTrip('bad]cat\nname');
+		// The original finding: without the guard the marker is written but
+		// MARKER_RE never matches it, so the comment is invisible everywhere
+		// while its words sit in the document as prose.
+		expect(comments).toHaveLength(1);
+		expect(comments[0]?.category).toBe('uncategorized');
+		expect(comments[0]?.body).toBe('the body survives');
+	});
+
+	it('emits uncategorized rather than the bare category string', () => {
+		// One review round proposed `if (!valid) return c.category`. serialize()'s
+		// return value replaces the whole marker, so that deletes the comment.
+		const { text } = roundTrip('bad]cat\nname');
+		expect(text.startsWith('<!-- annoteca/uncategorized:')).toBe(true);
+		expect(text).toContain('the body survives');
+	});
+
+	it('rejects every shape that breaks the marker grammar', () => {
+		for (const category of [
+			'bad]cat\nname',
+			'has space',
+			'Uppercase',
+			'9leading-digit',
+			'holds-->terminator',
+			'',
+			'trailing:colon',
+		]) {
+			const { comments } = roundTrip(category);
+			expect(comments).toHaveLength(1);
+			expect(comments[0]?.category).toBe('uncategorized');
+		}
+	});
+
+	it('leaves alone every category the grammar can actually read back', () => {
+		// Deliberately wider than isValidCategoryName, which also forbids double
+		// dashes, trailing dashes and the reserved keywords. Those all parse, so
+		// rewriting them would destroy a working category to fix nothing.
+		for (const category of [
+			'clarify',
+			'source-needed',
+			'my--topic',
+			'trailing-',
+			'reply',
+			'a',
+			'a1',
+		]) {
+			const { comments } = roundTrip(category);
+			expect(comments).toHaveLength(1);
+			expect(comments[0]?.category).toBe(category);
+		}
+	});
+
+	it('holds on the multi-line branch too', () => {
+		const text = serialize({
+			category: 'bad]cat\nname',
+			body: 'the body survives',
+			id: 'abcd1234',
+			replies: [{ author: 'bob', date: '2026-08-05', body: 'a reply' }],
+		});
+		const comments = parseAll(text);
+		expect(comments).toHaveLength(1);
+		expect(comments[0]?.category).toBe('uncategorized');
+		expect(comments[0]?.id).toBe('abcd1234');
+		expect(comments[0]?.replies).toHaveLength(1);
+	});
+});
+
+describe('parser: isAuthorToken', () => {
+	// The predicate the settings tab asks before storing a tag or offering it in
+	// the collaborator list. It lives beside AUTHOR_LINE_RE because the class was
+	// written out in eight places, and eight copies of a grammar is eight chances
+	// for one to drift from the format.
+	it('accepts what the author line can carry', () => {
+		for (const tag of ['bob', 'Reviewer.2', 'a_b', 'ann-marie', 'é', 'x']) {
+			expect(isAuthorToken(tag)).toBe(true);
+		}
+	});
+
+	it('rejects exactly the characters that break the format', () => {
+		// Whitespace is the field delimiter in [reply ...]; `]` closes the
+		// bracket; `<` and `>` can form the `-->` that ends the HTML comment.
+		for (const tag of ['Bob Smith', 'a]b', 'a<b', 'a>b', 'a\tb', 'a\nb']) {
+			expect(isAuthorToken(tag)).toBe(false);
+		}
+	});
+
+	it('rejects empty and over-long tags', () => {
+		// Empty is deliberately NOT a token. Callers that treat it as "no tag
+		// set" say so themselves, so the predicate answers one question.
+		expect(isAuthorToken('')).toBe(false);
+		expect(isAuthorToken('a'.repeat(32))).toBe(true);
+		expect(isAuthorToken('a'.repeat(33))).toBe(false);
+	});
+
+	it('agrees with what the parser actually reads back', () => {
+		// The point of sharing the source: this is the contract, executed.
+		for (const tag of ['bob', 'Reviewer.2', 'a'.repeat(32)]) {
+			const text = serialize({
+				category: 'clarify',
+				body: 'body',
+				author: tag,
+			});
+			expect(isAuthorToken(tag)).toBe(true);
+			expect(parseAll(text)[0]?.author).toBe(tag);
+		}
+	});
+
+	it('agrees with sanitizeAuthorToken on what needs repairing', () => {
+		for (const raw of ['Bob Smith', 'a]b', 'a<b', 'a'.repeat(40)]) {
+			expect(isAuthorToken(raw)).toBe(false);
+			// Whatever the repair produces must itself be a token, or the repair
+			// is not a repair.
+			expect(isAuthorToken(sanitizeAuthorToken(raw))).toBe(true);
+		}
 	});
 });
