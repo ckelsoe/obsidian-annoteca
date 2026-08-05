@@ -3,8 +3,10 @@
 // F-033, F-034, F-037, F-038 from features.md.
 
 import {
+	Compartment,
 	StateField,
 	StateEffect,
+	type EditorState,
 	type Extension,
 	type Range,
 	type Transaction,
@@ -60,14 +62,20 @@ export interface DecorationContext {
 	getSourcePath(): string;
 	getSettings(): AnnotecaSettings;
 	onMarkerClick(marker: Comment): void;
-	openInReviewer(marker: Comment): void;
 	addCommentForSelection(): void;
 	categoryFor(id: string): CategoryDefinition;
-	toggleResolution(marker: Comment): void;
-	resolveAndRemove(marker: Comment): void;
-	acceptAddressed(marker: Comment): void;
-	reviseAddressed(marker: Comment): void;
-	rejectAddressed(marker: Comment): void;
+	// Everything below that takes a `sourcePath` acts on a specific note, and
+	// the popover is the only place it can come from (#22). A hover popover
+	// does not activate the leaf it is anchored in, and clicking a button on it
+	// does not either, so asking the workspace for the active file ran every
+	// one of these against whichever note happened to be focused. `view` is in
+	// scope wherever the popover is built, so each is `sourcePathFor(ctx, view)`.
+	openInReviewer(marker: Comment, sourcePath: string): void;
+	toggleResolution(marker: Comment, sourcePath: string): void;
+	resolveAndRemove(marker: Comment, sourcePath: string): void;
+	acceptAddressed(marker: Comment, sourcePath: string): void;
+	reviseAddressed(marker: Comment, sourcePath: string): void;
+	rejectAddressed(marker: Comment, sourcePath: string): void;
 	copyPermalink(marker: Comment): void;
 	// Resolves to whether the reply was actually written. The write can be
 	// refused (the marker was deleted, or an id-less one changed underneath),
@@ -179,15 +187,17 @@ const settingsEpochField = StateField.define<number>({
 });
 
 // Reply composer state. The pinned tooltip below uses this to render a textarea
-// at a specific marker. `null` means no composer is open.
-const setReplyComposerEffect = StateEffect.define<number | null>();
+// at a specific marker. `null` means no composer is open. Exported so tests can
+// open the surface without a live DOM, the same way the hide-all and
+// show-bodies effects already are.
+export const setReplyComposerEffect = StateEffect.define<number | null>();
 
 // Tap-popover state. Carries the marker start of the comment whose popover is
 // pinned open by a click, or `null` for none. Separate from the hover tooltip
 // because that one is driven entirely by CodeMirror's pointer tracking and
 // vanishes on mouse-out, which is exactly the behaviour a touch user cannot
 // use.
-const setTapPopoverEffect = StateEffect.define<number | null>();
+export const setTapPopoverEffect = StateEffect.define<number | null>();
 
 // Dismiss the pinned popover. Used by the popover's own actions that navigate
 // away from it: the outside-click handler deliberately exempts clicks inside
@@ -204,7 +214,7 @@ function closeTapPopover(view: EditorView): void {
 // clears it when the panel closes; the StateField below paints a background
 // over the active comment so the reviewer never loses track of which marker the
 // thread belongs to. Mirrors the reply-composer effect/field pair.
-const setActiveCommentEffect = StateEffect.define<number | null>();
+export const setActiveCommentEffect = StateEffect.define<number | null>();
 
 // Dispatch the active-comment highlight into a specific editor. `null` clears
 // it. Called from main.ts on panel focus / close.
@@ -716,6 +726,170 @@ function sourcePathFor(ctx: DecorationContext, view: EditorView): string {
 	return info?.file?.path ?? ctx.getSourcePath();
 }
 
+// `instanceof` is realm-bound: it compares against the constructor belonging to
+// the window this module was loaded into. Tooltips mount in their own editor's
+// window (see `perWindowTooltipHost`), so in a popout every element making up a
+// popover comes from a different realm and an `instanceof HTMLElement` guard is
+// false for all of them, silently disabling whatever it protects. `nodeType` is
+// data rather than a constructor, so it survives the crossing.
+//
+// Deliberately `Element`, not `HTMLElement`: nodeType 1 is any element, and the
+// popover really does contain SVG (setIcon builds it), so a click target can be
+// an SVGElement. Both call-site needs, `addClass` and `closest`, are Element
+// members, so widening the guard costs nothing and claiming `HTMLElement` here
+// would be an unsound predicate.
+function isElementAcrossRealms(t: unknown): t is Element {
+	return (
+		t instanceof Element ||
+		(t != null &&
+			typeof t === 'object' &&
+			(t as Partial<Node>).nodeType === 1)
+	);
+}
+
+// A tooltip mount point that follows its editor's window ---------------------
+//
+// Without a `parent`, CodeMirror mounts tooltips inside `view.dom`, which is
+// not usable in Obsidian: `.workspace-leaf` is `contain: strict`, making the
+// leaf the containing block for `position: fixed` descendants AND paint-
+// clipping them to it. Verified in the running app rather than reasoned about:
+// a fixed element appended inside `.cm-editor` reports its origin at the leaf's
+// corner, and `elementFromPoint` just past the leaf edge does not hit it. A
+// parentless popover in a narrow sidebar leaf is therefore not merely squeezed,
+// it is cut off.
+//
+// The override this replaces passed `parent: activeDocument.body`, evaluated
+// ONCE when the plugin loaded. That is one element for the whole app, so every
+// editor's tooltips went to whichever window was active at load time: a popout
+// window got no popover UI at all, and reloading while a popout was focused
+// broke the main window instead.
+//
+// `tooltips({parent})` is a state facet, so the parent cannot be a function of
+// the view, and it cannot be re-pointed after the fact either: `tooltipConfig`
+// combines by taking the FIRST value carrying a parent, and anything appended
+// to a state's configuration lands last. What CAN change is the element itself.
+// So each view gets its own host and the host is moved into whichever window
+// the editor currently lives in.
+//
+// Moving it must work at any moment, because Obsidian re-parents the SAME
+// EditorView into the popout when a leaf is moved to a new window (verified:
+// the instance is identical afterwards, only `ownerDocument` differs). That is
+// why the host is a DOM move rather than a reconfiguration: it needs no
+// transaction, and CodeMirror's own container sits inside the host, so the live
+// tooltips travel with it instead of being stranded in the old window.
+// Holds the per-view `tooltips({parent})`. A compartment rather than
+// `StateEffect.appendConfig`, and the difference is not cosmetic: appended
+// extensions ACCUMULATE, and `tooltipConfig` combines by taking the FIRST value
+// carrying a parent, so once a host had been appended it won for the life of
+// that state. Re-enabling the plugin with a note open therefore left the
+// container inside the PREVIOUS generation's host, which `destroy()` had already
+// removed from the document, and every popover in that editor went into a
+// detached element. Verified in the running app before this was a compartment:
+// the live host sat empty and no later transaction recovered it.
+//
+// `reconfigure` replaces the compartment's contents instead of adding to them,
+// and the compartment sits in the extension array below, ahead of anything
+// appended, so it also wins over any stale appended value from an older build.
+const tooltipParentCompartment = new Compartment();
+
+// How many times one view will try to hand CodeMirror its tooltip host before
+// giving up. Reset once the host is attached, so a reconfiguration that drops
+// the parent later gets a fresh budget rather than inheriting a spent one.
+const MAX_TOOLTIP_HOST_CLAIMS = 3;
+
+function perWindowTooltipHost(): Extension {
+	return ViewPlugin.fromClass(
+		class {
+			private readonly view: EditorView;
+			private readonly host: HTMLElement;
+			private destroyed = false;
+			private pending = false;
+			private claimAttempts = 0;
+
+			constructor(view: EditorView) {
+				this.view = view;
+				this.host = view.dom.ownerDocument.win.createDiv({
+					cls: 'annoteca-tooltip-host',
+				});
+				this.moveHostToOwnWindow();
+				this.claimHost();
+			}
+
+			update(): void {
+				this.moveHostToOwnWindow();
+				this.claimHost();
+			}
+
+			destroy(): void {
+				this.destroyed = true;
+				this.host.remove();
+			}
+
+			// Point this view's tooltips at our host, and keep doing it for as
+			// long as it does not stick.
+			//
+			// It has to be re-applied, not set once. The parent is added with
+			// `StateEffect.appendConfig`, and a full reconfiguration of the
+			// state replaces the configuration outright, taking every appended
+			// extension with it. Obsidian reconfigures editors whenever
+			// `workspace.updateOptions()` runs, which includes re-enabling the
+			// plugin with notes already open, and this ViewPlugin survives that
+			// reconfiguration rather than being rebuilt. Verified in the running
+			// app: after a disable/enable cycle the host existed but was empty,
+			// and no later transaction healed it, so every popover in that
+			// editor was mounting back inside the leaf and being clipped by it.
+			//
+			// CodeMirror appends its own container to the parent as soon as the
+			// config takes, and leaves it there, so an empty host is an exact
+			// signal that the parent is not currently in effect. Checking that
+			// on every update costs one property read and makes the repair
+			// automatic whenever a reconfiguration drops it.
+			private claimHost(): void {
+				if (this.destroyed || this.pending) return;
+				if (this.host.firstChild) {
+					// Attached. Clearing the budget here rather than never
+					// touching it again is what lets a LATER reconfiguration
+					// that drops the parent be repaired too.
+					this.claimAttempts = 0;
+					return;
+				}
+				// Bounded, because the repair is self-feeding: the dispatch
+				// below produces an update, the update calls this again, and if
+				// attaching ever stopped working the pair would spin on a 0 ms
+				// timer for as long as the editor stayed open. A handful of
+				// attempts covers a transient miss; past that, popovers mount
+				// unparented, which is a visual bug, where a permanent dispatch
+				// loop would burn the CPU.
+				if (this.claimAttempts >= MAX_TOOLTIP_HOST_CLAIMS) return;
+				this.claimAttempts += 1;
+				this.pending = true;
+				// A dispatch cannot happen inside a view update, and this runs
+				// from both the constructor and update(). A timeout puts it
+				// after the current cycle in every case.
+				this.view.dom.win.setTimeout(() => {
+					this.pending = false;
+					if (this.destroyed || this.host.firstChild) return;
+					this.view.dispatch({
+						effects: tooltipParentCompartment.reconfigure(
+							tooltips({ parent: this.host }),
+						),
+					});
+				}, 0);
+			}
+
+			// Cheap enough to run on every update, which is what makes the
+			// popout move self-correcting without listening for it: the first
+			// transaction in the new window puts the host there, and opening a
+			// popover is itself a transaction.
+			private moveHostToOwnWindow(): void {
+				const body = this.view.dom.ownerDocument.body;
+				if (this.host.parentElement === body) return;
+				body.appendChild(this.host);
+			}
+		},
+	);
+}
+
 // Builds the comment popover DOM. Extracted from the hover tooltip so the
 // tap-anchored popover renders the identical surface instead of a second,
 // drifting copy: every action here (accept, revise, reject, star, reply,
@@ -729,8 +903,14 @@ function sourcePathFor(ctx: DecorationContext, view: EditorView): string {
 function buildCommentPopover(
 	ctx: DecorationContext,
 	view: EditorView,
-	m: Comment,
+	ref: CommentRef,
 ): { dom: HTMLElement; destroy: () => void } {
+	// The comment as it stands now, for everything this function draws. The
+	// action callbacks below fire later and read `ref.current` instead: the
+	// pinned popover keeps this DOM across edits that only move the marker, and
+	// an id-less comment is resolved by its offsets, so acting on the open-time
+	// copy would be refused as "vanished".
+	const m = ref.current;
 	// One lifetime per popover instance. Whatever a rendered body creates
 	// (embeds, code-block processors, another plugin's post-processor) hangs off
 	// this and is unloaded when CodeMirror destroys the tooltip. A popover is
@@ -738,10 +918,14 @@ function buildCommentPopover(
 	// than the tooltip would accumulate for as long as the vault stays open.
 	const lifetime = new MarkdownLifetime();
 	lifetime.load();
+	// The note THIS popover belongs to. Resolves links in a rendered body, and
+	// is also what every lifecycle action below writes to, so an action taken on
+	// a popover in an unfocused split hits that split's note (#22).
+	const sourcePath = sourcePathFor(ctx, view);
 	const host: MarkdownRenderHost = {
 		app: ctx.app,
 		component: lifetime,
-		sourcePath: sourcePathFor(ctx, view),
+		sourcePath,
 		enabled: ctx.getSettings().renderMarkdownBodies,
 		// MarkdownRenderer.render is async, but a CodeMirror tooltip measures and
 		// positions itself synchronously right after create() returns. So the
@@ -762,7 +946,7 @@ function buildCommentPopover(
 	// parentElement so this still works if CodeMirror ever does wrap it.
 	queueMicrotask(() => {
 		const tip = dom.closest('.cm-tooltip');
-		if (tip instanceof HTMLElement) tip.addClass('annoteca-hover-tooltip');
+		if (isElementAcrossRealms(tip)) tip.addClass('annoteca-hover-tooltip');
 	});
 
 	const header = dom.createDiv({
@@ -803,7 +987,7 @@ function buildCommentPopover(
 		cls: 'annoteca-hover-star',
 		hasId: Boolean(m.id),
 		starred: Boolean(m.id) && ctx.isStarred(m),
-		onToggle: () => ctx.toggleStarred(m),
+		onToggle: () => ctx.toggleStarred(ref.current),
 		reflectInPlace: true,
 	});
 
@@ -829,7 +1013,7 @@ function buildCommentPopover(
 				e.preventDefault();
 				e.stopPropagation();
 				closeTapPopover(view);
-				ctx.openInReviewer(m);
+				ctx.openInReviewer(ref.current, sourcePath);
 			});
 		}
 		for (const r of shown) renderReplyRow(r, repliesBlock, ctx, host);
@@ -919,7 +1103,7 @@ function buildCommentPopover(
 		acceptBtn.addEventListener('click', (e) => {
 			e.preventDefault();
 			e.stopPropagation();
-			ctx.acceptAddressed(m);
+			ctx.acceptAddressed(ref.current, sourcePath);
 		});
 		const reviseBtn = actions.createEl('button', {
 			cls: 'annoteca-hover-action',
@@ -928,7 +1112,7 @@ function buildCommentPopover(
 		reviseBtn.addEventListener('click', (e) => {
 			e.preventDefault();
 			e.stopPropagation();
-			ctx.reviseAddressed(m);
+			ctx.reviseAddressed(ref.current, sourcePath);
 		});
 		const rejectBtn = actions.createEl('button', {
 			cls: 'annoteca-hover-action',
@@ -937,7 +1121,7 @@ function buildCommentPopover(
 		rejectBtn.addEventListener('click', (e) => {
 			e.preventDefault();
 			e.stopPropagation();
-			ctx.rejectAddressed(m);
+			ctx.rejectAddressed(ref.current, sourcePath);
 		});
 	}
 
@@ -949,7 +1133,7 @@ function buildCommentPopover(
 		e.preventDefault();
 		e.stopPropagation();
 		closeTapPopover(view);
-		ctx.openInReviewer(m);
+		ctx.openInReviewer(ref.current, sourcePath);
 	});
 
 	const replyBtn = actions.createEl('button', {
@@ -960,7 +1144,7 @@ function buildCommentPopover(
 		e.preventDefault();
 		e.stopPropagation();
 		view.dispatch({
-			effects: setReplyComposerEffect.of(m.marker.start),
+			effects: setReplyComposerEffect.of(ref.current.marker.start),
 		});
 	});
 
@@ -972,7 +1156,7 @@ function buildCommentPopover(
 		resolveBtn.addEventListener('click', (e) => {
 			e.preventDefault();
 			e.stopPropagation();
-			ctx.toggleResolution(m);
+			ctx.toggleResolution(ref.current, sourcePath);
 		});
 
 		if (!m.resolution) {
@@ -983,7 +1167,7 @@ function buildCommentPopover(
 			resolveRemoveBtn.addEventListener('click', (e) => {
 				e.preventDefault();
 				e.stopPropagation();
-				ctx.resolveAndRemove(m);
+				ctx.resolveAndRemove(ref.current, sourcePath);
 			});
 		}
 	}
@@ -996,7 +1180,7 @@ function buildCommentPopover(
 		copyBtn.addEventListener('click', (e) => {
 			e.preventDefault();
 			e.stopPropagation();
-			ctx.copyPermalink(m);
+			ctx.copyPermalink(ref.current);
 		});
 	}
 
@@ -1007,7 +1191,7 @@ function buildCommentPopover(
 	// while a reply is being typed, so it cannot simply be narrowed.
 	dom.addEventListener('click', (e) => {
 		const target = e.target;
-		if (target instanceof HTMLElement && target.closest('a')) {
+		if (isElementAcrossRealms(target) && target.closest('a')) {
 			closeTapPopover(view);
 		}
 	});
@@ -1081,7 +1265,9 @@ function hoverTooltipExtension(
 				// markdown render lifetime. A hover tooltip is created and
 				// destroyed on every dwell, so leaking one per hover would be the
 				// fastest leak in the plugin.
-				create: () => buildCommentPopover(ctx, view, m),
+				// The hover tooltip is rebuilt from scratch on every dwell, so
+				// its comment cannot go stale and a constant ref is right.
+				create: () => buildCommentPopover(ctx, view, { current: m }),
 			};
 		},
 		{ hoverTime: HOVER_DELAY_MS[ctx.getSettings().hoverDelay] },
@@ -1089,56 +1275,200 @@ function hoverTooltipExtension(
 }
 
 // --------------------------------------------------------------------------
+// Pinned tooltips (the reply composer and the tap popover)
+// --------------------------------------------------------------------------
+//
+// Both fields hold the marker offset they are pinned to AND the Tooltip object
+// itself. Storing the tooltip is what keeps the live DOM alive, and it fixes
+// two separate bugs that used to make either surface vanish mid-use.
+//
+// The first was `showTooltip.compute([field, markersField], ...)`: markersField
+// changes identity on every docChanged, so the tooltip object was rebuilt with
+// a FRESH `create` closure on every document change. CodeMirror matches tooltip
+// views by `create` identity, so a new closure means tear down the DOM and
+// build a new one. Any edit anywhere in the note destroyed a composer the user
+// was typing into, and the refill came from a 300ms-debounced draft that
+// id-less comments never get: the typed reply was simply gone.
+//
+// The second was keeping a RAW offset and clearing the field unless a marker
+// still started at exactly that number. Text inserted above the marker moves
+// it, so an edit ABOVE closed the composer, dismissed the pinned popover, and
+// dropped the active highlight, while an edit below did nothing. It read as
+// random. Both now map the offset through the transaction's changes.
+// A live handle on "the comment this surface is about". The builders below read
+// through it instead of closing over a `Comment` value, and it is repointed on
+// every remap.
+//
+// The indirection is what makes preserving the DOM safe. A preserved surface
+// keeps the same `create` closure by design, so anything that closure captured
+// is frozen at the moment the surface opened, including the comment's start and
+// end offsets. `CommentService` resolves a comment WITHOUT an id by matching
+// those offsets (an id-less marker has nothing else to match on), so after an
+// edit above it, a frozen capture no longer matches anything: Send and every
+// lifecycle action would report the comment as vanished, for as long as the
+// surface stayed open. Closing the composer to escape that would take the typed
+// reply with it, because id-less comments get no draft either.
+interface CommentRef {
+	current: Comment;
+}
+
+interface PinnedTooltip {
+	// Where the marker starts and ends in the CURRENT document. `end` is kept
+	// alongside `offset` so a change can be tested against the marker's whole
+	// span without going back through the tooltip object for it.
+	offset: number;
+	end: number;
+	// Shared with the tooltip's `create` closure, and repointed on every remap.
+	ref: CommentRef;
+	tooltip: Tooltip;
+}
+
+// Where a marker that started at `offset` starts after this transaction.
+//
+// `assoc: 1` is load-bearing. CodeMirror's mapPos defaults to -1, which keeps a
+// position BEFORE text inserted exactly at it, but a marker is not a cursor: if
+// you type at the end of the prose immediately preceding a marker, the inserted
+// characters go in front of the `<!--`, so the marker now starts AFTER them.
+// With the default association the lookup would miss by exactly the length of
+// what was typed, read as "the marker is gone", and close the surface.
+function mapMarkerStart(tr: Transaction, offset: number): number {
+	return tr.changes.mapPos(offset, 1);
+}
+
+// Open (or refuse to open) a pinned tooltip at `offset`. `null` covers both the
+// explicit close effect and a marker that is not there to pin to.
+function openPinnedTooltip(
+	state: EditorState,
+	markersField: StateField<Comment[]>,
+	offset: number | null,
+	build: (ref: CommentRef) => Tooltip,
+): PinnedTooltip | null {
+	if (offset === null) return null;
+	const m = state.field(markersField).find((c) => c.marker.start === offset);
+	if (!m) return null;
+	const ref: CommentRef = { current: m };
+	return { offset, end: m.marker.end, ref, tooltip: build(ref) };
+}
+
+// Follow the marker through a document change. Returning null closes the
+// surface, which is correct only when the marker is genuinely gone: deleted, or
+// rewritten such that nothing starts where it used to.
+//
+// `rebuildWhenMarkerChanges` decides what happens when the change landed inside
+// the marker's OWN span, which is what every lifecycle write does. The two
+// surfaces want opposite things there, so neither default would be right for
+// both:
+//
+//   - The popover renders the comment (replies, resolution, addressed note,
+//     and which action buttons apply), and the usual way a comment changes is
+//     the user pressing one of those buttons. It has to rebuild or it sits
+//     there showing "Resolve" on an already-resolved comment.
+//   - The composer holds text the user typed and has not sent. Nothing
+//     happening to the comment justifies destroying that, so it never
+//     rebuilds.
+//
+// Everything else (an edit anywhere else in the note, which is the case that
+// used to destroy both surfaces on every keystroke) keeps the existing DOM.
+function remapPinnedTooltip(
+	value: PinnedTooltip,
+	tr: Transaction,
+	markersField: StateField<Comment[]>,
+	build: (ref: CommentRef) => Tooltip,
+	rebuildWhenMarkerChanges: boolean,
+): PinnedTooltip | null {
+	const mapped = mapMarkerStart(tr, value.offset);
+	const m = tr.state
+		.field(markersField)
+		.find((c) => c.marker.start === mapped);
+	if (!m) return null;
+	// Point the ref at the comment as it stands NOW, before deciding whether to
+	// rebuild. This is what keeps a preserved surface from acting on a stale
+	// comment: see CommentRef.
+	value.ref.current = m;
+	if (
+		rebuildWhenMarkerChanges &&
+		tr.changes.touchesRange(value.offset, value.end)
+	) {
+		return {
+			offset: mapped,
+			end: m.marker.end,
+			ref: value.ref,
+			tooltip: build(value.ref),
+		};
+	}
+	// Spreading the existing tooltip is load-bearing, not a style choice: it
+	// carries the SAME `create` reference across, and CodeMirror matches
+	// tooltip views by `create` identity, so this is the only reason it
+	// repositions the existing DOM instead of tearing it down and building a
+	// new one. Do not construct a fresh tooltip object here.
+	return {
+		offset: mapped,
+		end: m.marker.end,
+		// The same ref, already repointed above, so the preserved DOM's
+		// callbacks act on the comment as it stands rather than on the copy
+		// they closed over when the surface opened.
+		ref: value.ref,
+		tooltip: { ...value.tooltip, pos: mapped, end: m.marker.end },
+	};
+}
+
 // Pinned reply composer: opened by the popup's Reply button. Uses showTooltip
 // so it persists across mouse moves; dismissed only by Send or Cancel.
-// --------------------------------------------------------------------------
-
 function replyComposerField(
 	ctx: DecorationContext,
 	markersField: StateField<Comment[]>,
-): StateField<number | null> {
-	return StateField.define<number | null>({
+): StateField<PinnedTooltip | null> {
+	const build = (ref: CommentRef): Tooltip => ({
+		pos: ref.current.marker.start,
+		end: ref.current.marker.end,
+		above: true,
+		strictSide: false,
+		create: (view) => buildReplyComposerDom(view, ctx, ref),
+	});
+	return StateField.define<PinnedTooltip | null>({
 		create: () => null,
 		update(value, tr) {
 			for (const e of tr.effects) {
-				if (e.is(setReplyComposerEffect)) return e.value;
+				if (e.is(setReplyComposerEffect)) {
+					return openPinnedTooltip(
+						tr.state,
+						markersField,
+						e.value,
+						build,
+					);
+				}
 			}
-			// Clear the composer if the underlying marker no longer exists
-			// (deleted, rewritten by another action, etc).
 			if (tr.docChanged && value !== null) {
-				const markers = tr.state.field(markersField);
-				if (!markers.some((m) => m.marker.start === value)) return null;
+				// false: never rebuild. The textarea holds unsent text.
+				return remapPinnedTooltip(
+					value,
+					tr,
+					markersField,
+					build,
+					false,
+				);
 			}
 			return value;
 		},
-		provide: (f) =>
-			showTooltip.compute([f, markersField], (state) => {
-				const markerStart = state.field(f);
-				if (markerStart === null) return null;
-				const markers = state.field(markersField);
-				const m = markers.find((c) => c.marker.start === markerStart);
-				if (!m) return null;
-				return {
-					pos: m.marker.start,
-					end: m.marker.end,
-					above: true,
-					strictSide: false,
-					create: (view) => buildReplyComposerDom(view, ctx, m),
-				};
-			}),
+		provide: (f) => showTooltip.from(f, (v) => v?.tooltip ?? null),
 	});
 }
 
 function buildReplyComposerDom(
 	view: EditorView,
 	ctx: DecorationContext,
-	m: Comment,
+	ref: CommentRef,
 ): { dom: HTMLElement } {
+	// The comment as it stood when the composer opened, for everything drawn
+	// once. Anything that runs LATER (Send, draft saves) must read `ref.current`
+	// instead, because this DOM is deliberately preserved across document
+	// changes and `m` goes stale the moment the marker moves.
+	const m = ref.current;
 	const dom = view.dom.ownerDocument.win.createDiv();
 	dom.addClass('annoteca-reply-composer');
 	queueMicrotask(() => {
 		const tip = dom.closest('.cm-tooltip');
-		if (tip instanceof HTMLElement)
+		if (isElementAcrossRealms(tip))
 			tip.addClass('annoteca-reply-composer-tooltip');
 	});
 
@@ -1277,7 +1607,16 @@ function buildReplyComposerDom(
 			return true;
 		};
 		void ctx
-			.submitReply(m, body, authorSelect.value, sourcePathFor(ctx, view))
+			// ref.current, not the captured `m`: this composer survives edits
+			// to the note, and an id-less comment is resolved by its offsets,
+			// so sending against the open-time copy would be refused as
+			// "vanished" after any edit above the marker.
+			.submitReply(
+				ref.current,
+				body,
+				authorSelect.value,
+				sourcePathFor(ctx, view),
+			)
 			.then((wrote) => {
 				if (!wrote) {
 					// Leave the composer open with the text still in it. The
@@ -1352,7 +1691,7 @@ function dismissReplyOnOutsideClick(): Extension {
 // Tiny ref so dismissReplyOnOutsideClick can read the state field without a
 // circular import between the field constructor and the handler. Assigned
 // inside buildAnnotecaExtension once replyField has been constructed.
-const replyComposerStateRef: { field?: StateField<number | null> } = {};
+const replyComposerStateRef: { field?: StateField<PinnedTooltip | null> } = {};
 
 // --------------------------------------------------------------------------
 // Tap-anchored popover: the click/tap counterpart to the hover preview.
@@ -1379,55 +1718,56 @@ function activateMarker(
 function tapPopoverField(
 	ctx: DecorationContext,
 	markersField: StateField<Comment[]>,
-): StateField<number | null> {
-	return StateField.define<number | null>({
+): StateField<PinnedTooltip | null> {
+	const build = (ref: CommentRef): Tooltip => ({
+		pos: ref.current.marker.start,
+		end: ref.current.marker.end,
+		above: true,
+		strictSide: false,
+		// The same builder the hover tooltip uses, so the two surfaces cannot
+		// drift apart. Returned whole, so its destroy hook reaches CodeMirror
+		// too.
+		create: (view) => buildCommentPopover(ctx, view, ref),
+	});
+	return StateField.define<PinnedTooltip | null>({
 		create: () => null,
 		update(value, tr) {
 			for (const e of tr.effects) {
-				if (e.is(setTapPopoverEffect)) return e.value;
+				if (e.is(setTapPopoverEffect)) {
+					return openPinnedTooltip(
+						tr.state,
+						markersField,
+						e.value,
+						build,
+					);
+				}
 				// Opening the reply composer supersedes the popover. The
 				// composer is launched FROM the popover's Reply button, and
 				// leaving both pinned stacks two tooltips on the same marker.
 				if (e.is(setReplyComposerEffect) && e.value !== null)
 					return null;
 			}
-			// Drop the popover if its marker no longer exists, matching the
-			// reply composer. Without this, resolving or deleting from inside
-			// the popover leaves it pinned to a range that has gone.
+			// Follow the marker, and drop the popover only when it is really
+			// gone. Without the drop, deleting from inside the popover leaves
+			// it pinned to a range that no longer exists.
 			if (tr.docChanged && value !== null) {
-				const markers = tr.state.field(markersField);
-				if (!markers.some((m) => m.marker.start === value)) return null;
+				// true: a lifecycle write changes what this surface is drawing,
+				// and pressing its own buttons is the usual way that happens.
+				return remapPinnedTooltip(value, tr, markersField, build, true);
 			}
 			return value;
 		},
-		provide: (f) =>
-			showTooltip.compute([f, markersField], (state) => {
-				const markerStart = state.field(f);
-				if (markerStart === null) return null;
-				const markers = state.field(markersField);
-				const m = markers.find((c) => c.marker.start === markerStart);
-				if (!m) return null;
-				return {
-					pos: m.marker.start,
-					end: m.marker.end,
-					above: true,
-					strictSide: false,
-					// The same builder the hover tooltip uses, so the two
-					// surfaces cannot drift apart. Returned whole, so its
-					// destroy hook reaches CodeMirror too.
-					create: (view) => buildCommentPopover(ctx, view, m),
-				};
-			}),
+		provide: (f) => showTooltip.from(f, (v) => v?.tooltip ?? null),
 	});
 }
 
-const tapPopoverStateRef: { field?: StateField<number | null> } = {};
+const tapPopoverStateRef: { field?: StateField<PinnedTooltip | null> } = {};
 
 // Whether a click at `target` should leave THIS view's pinned popover alone.
 function clickKeepsTapPopover(view: EditorView, target: HTMLElement): boolean {
-	// The popover and the reply composer render into document.body rather than
-	// into any editor, so containment cannot scope them; they are exempt
-	// wherever they sit.
+	// The popover and the reply composer render into their window's body rather
+	// than into any editor (see `perWindowTooltipHost`), so containment cannot
+	// scope them; they are exempt wherever they sit.
 	if (target.closest('.annoteca-hover-preview')) return true;
 	if (target.closest('.annoteca-reply-composer')) return true;
 	// A marker click is handled by activateMarker, which re-points this view's
@@ -1446,8 +1786,10 @@ function clickKeepsTapPopover(view: EditorView, target: HTMLElement): boolean {
 // EditorView.domEventHandlers. An editor-scoped handler only sees events that
 // originate inside that editor, so clicking the sidebar, the ribbon, or another
 // pane would leave the popover pinned indefinitely while looking like an
-// outside click to the user. The tooltip is also rendered into document.body
-// (see the `tooltips` override), so it is genuinely outside the editor's DOM.
+// outside click to the user. The tooltip is also rendered into the body of the
+// editor's own window (see `perWindowTooltipHost`), so it is genuinely outside
+// the editor's DOM. The listener goes on `view.dom.ownerDocument`, which is
+// that same window, so a popout's clicks reach a popout's popover.
 //
 // Capture phase, so a handler that stops propagation cannot strand the popover.
 // The listener is torn down in destroy(); a per-editor global listener that
@@ -1496,11 +1838,16 @@ function activeCommentField(
 			for (const e of tr.effects) {
 				if (e.is(setActiveCommentEffect)) return e.value;
 			}
-			// Drop the highlight if the underlying marker no longer exists
-			// (deleted, rewritten, or shifted by an edit that changed its start).
+			// Follow the marker through the edit, then drop the highlight only
+			// if it is genuinely gone (deleted, or its own span rewritten).
+			// Without the mapping an edit ABOVE the comment moved the marker
+			// and cleared the highlight, while an edit below left it alone.
 			if (tr.docChanged && value !== null) {
+				const mapped = mapMarkerStart(tr, value);
 				const markers = tr.state.field(markersField);
-				if (!markers.some((m) => m.marker.start === value)) return null;
+				if (!markers.some((m) => m.marker.start === mapped))
+					return null;
+				return mapped;
 			}
 			return value;
 		},
@@ -1582,7 +1929,12 @@ function clickHandlerExtension(
 // the user drags, and disappears when the selection collapses. Gives a one-
 // click path to the composer without the right-click menu.
 function selectionPopupExtension(ctx: DecorationContext): Extension {
-	return showTooltip.compute(['selection'], (state) => {
+	// settingsEpochField is a dependency because the body below reads
+	// `selectionPopup` off the live settings object. A facet only recomputes
+	// when a declared dependency changes, and mutating the settings object
+	// changes nothing CodeMirror tracks, so with 'selection' alone toggling the
+	// setting did nothing until the user happened to move the selection.
+	return showTooltip.compute(['selection', settingsEpochField], (state) => {
 		if (!ctx.getSettings().selectionPopup) return null;
 		const sel = state.selection.main;
 		if (sel.empty) return null;
@@ -1603,7 +1955,7 @@ function buildSelectionPopupDom(ctx: DecorationContext): { dom: HTMLElement } {
 		// parent, so closest() targets it reliably; parentElement missed it and
 		// left the default white tooltip box showing.
 		const tip = dom.closest('.cm-tooltip');
-		if (tip instanceof HTMLElement)
+		if (isElementAcrossRealms(tip))
 			tip.addClass('annoteca-selection-popup-tooltip');
 	});
 
@@ -1630,7 +1982,7 @@ function buildSelectionPopupDom(ctx: DecorationContext): { dom: HTMLElement } {
 // The document-driven half of the extension: parsed markers, hide-all
 // visibility, and the decorations computed from them. Deliberately free of
 // tooltip and pointer wiring, because that half needs Obsidian's
-// `activeDocument` and a live DOM. Keeping the split lets the decoration
+// `activeWindow` and a live DOM. Keeping the split lets the decoration
 // behaviour be exercised headlessly (see `__tests__/decorations.test.ts`),
 // which is the only way to catch a visibility change that fails to repaint.
 // Returns the fields as well, since the DOM half attaches to the same
@@ -1669,12 +2021,8 @@ export function buildAnnotecaExtension(ctx: DecorationContext): Extension {
 		trackLiveView,
 		replyField,
 		tapField,
-		// Render tooltips into document.body instead of the editor's DOM so
-		// they can escape the sidebar leaf bounds. Without this override,
-		// markers near the right edge of a narrow sidebar leaf produce a
-		// vertically tall, horizontally squeezed popup because CodeMirror
-		// shrinks the tooltip to fit available leaf width.
-		tooltips({ parent: activeDocument.body }),
+		tooltipParentCompartment.of([]),
+		perWindowTooltipHost(),
 		selectionPopupExtension(ctx),
 		hoverTooltipExtension(ctx, field),
 		clickHandlerExtension(ctx, field),

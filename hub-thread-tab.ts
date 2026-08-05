@@ -407,6 +407,22 @@ export class ThreadTabRenderer {
 		const scopeSelect = toolbar.createEl('select', {
 			cls: 'annoteca-scope-select dropdown',
 		});
+		// The options above are all derived from the ACTIVE file, but a pinned
+		// scope survives the active file changing, so the real scope is often
+		// not among them: a folder pinned in one folder while a note in another
+		// is open, a property scope after the active note lost that property.
+		// With nothing matching, no option was selected and the browser fell
+		// back to showing the first one, so the dropdown said "This file" while
+		// the list below showed a whole pinned folder. Describe the real scope
+		// instead, disabled because selecting it is not a scope change.
+		if (!opts.some((o) => o.value === currentValue)) {
+			const actual = scopeSelect.createEl('option', {
+				value: currentValue,
+				text: this.describeScope(state),
+			});
+			actual.disabled = true;
+			actual.selected = true;
+		}
 		for (const o of opts) {
 			const opt = scopeSelect.createEl('option', {
 				value: o.value,
@@ -451,6 +467,28 @@ export class ThreadTabRenderer {
 		pinBtn.addEventListener('click', () => {
 			void this.plugin.togglePinScope();
 		});
+	}
+
+	// Human-readable name for a scope that no dropdown option covers. Prefixed
+	// "Pinned" when it is, because pinning is the reason a scope outlives the
+	// active file and therefore the usual reason this label is needed at all.
+	private describeScope(state: ScopeState): string {
+		const prefix = state.pinned ? 'Pinned: ' : '';
+		const folder = state.anchorPath || 'vault root';
+		switch (state.shape.kind) {
+			case 'file':
+				return `${prefix}${state.anchorPath || 'This file'}`;
+			case 'folder':
+				return state.shape.subfolders
+					? `${prefix}${folder} + subfolders`
+					: `${prefix}${folder}`;
+			case 'vault':
+				return `${prefix}Vault`;
+			case 'property':
+				return `${prefix}Property: ${state.shape.key} = ${state.shape.value}`;
+			case 'tag':
+				return `${prefix}Tag: ${state.shape.tag}`;
+		}
 	}
 
 	private currentScopeOptionValue(state: ScopeState): string {

@@ -1,13 +1,24 @@
 import { EditorState } from '@codemirror/state';
-import { Decoration, EditorView, WidgetType } from '@codemirror/view';
+import {
+	Decoration,
+	EditorView,
+	WidgetType,
+	showTooltip,
+	type Tooltip,
+} from '@codemirror/view';
 
 import {
+	buildAnnotecaExtension,
 	buildMarkerDecorations,
+	findMarkersInDoc,
+	setActiveCommentEffect,
 	setHideAllCommentsEffect,
 	setHideAllCommentsEverywhere,
 	isHideAllComments,
+	setReplyComposerEffect,
 	setShowCommentBodiesEffect,
 	setShowCommentBodiesEverywhere,
+	setTapPopoverEffect,
 	isShowingCommentBodies,
 	bumpSettingsEpochEffect,
 	inlineBodiesBlockedBy,
@@ -412,5 +423,288 @@ describe('what blocks inline comment bodies', () => {
 			],
 		}).state;
 		expect(decoCount(shown)).toBe(0);
+	});
+});
+
+// Pinned surfaces: the reply composer, the tap popover, and the active-comment
+// highlight -------------------------------------------------------------------
+//
+// All three used to keep a RAW marker offset and null themselves out unless a
+// marker still started at exactly that number, so an edit ABOVE the comment
+// closed the composer (losing text the user had typed but not sent), dismissed
+// the pinned popover, and dropped the highlight, while an edit below did
+// nothing. The two tooltip fields additionally rebuilt their Tooltip object with
+// a fresh `create` closure on every recompute, and CodeMirror matches tooltip
+// views by `create` identity, so the live DOM was destroyed and rebuilt on ANY
+// document change.
+//
+// These drive real EditorStates through `buildAnnotecaExtension`, which is the
+// assembly the app installs, so the wiring between the effects, the fields and
+// the showTooltip facet is under test rather than the field in isolation.
+
+// The tooltips this state currently wants shown. The facet holds nulls for
+// sources that decline (the selection popup does so whenever the selection is
+// empty), so they are filtered out rather than asserted on.
+function tooltipsOf(state: EditorState): Tooltip[] {
+	return state
+		.facet(showTooltip)
+		.filter((t): t is Tooltip => t != null && typeof t !== 'function');
+}
+
+function stateWithExtension(
+	overrides: Partial<AnnotecaSettings> = {},
+	doc: string = DOC,
+): EditorState {
+	return EditorState.create({
+		doc,
+		extensions: [buildAnnotecaExtension(stubCtx(overrides))],
+	});
+}
+
+// Offset of the only marker in DOC, taken from the parser rather than hardcoded
+// so the tests do not silently drift if the fixture changes.
+const MARKER_START = findMarkersInDoc(DOC)[0]!.marker.start;
+
+// An insertion point INSIDE the marker's body. Aimed at the body text rather
+// than at a byte offset from the marker start, because landing in the category
+// token instead produces a marker that no longer parses, which would make these
+// tests pass or fail for the wrong reason.
+const BODY_INSERT_AT = DOC.indexOf('a source');
+
+// Identity of a tooltip's `create`, which is what CodeMirror matches tooltip
+// views by, so it decides whether the live DOM is repositioned or rebuilt.
+// Read through a cast because the typings declare `create` in method shorthand,
+// and referencing a method without calling it trips @typescript-eslint's
+// unbound-method rule; the cast keeps that honest without a disable comment.
+function createRef(t: Tooltip): unknown {
+	return (t as unknown as { create: unknown }).create;
+}
+
+describe('pinned reply composer', () => {
+	it('follows its marker through an edit above and keeps the same DOM', () => {
+		const open = stateWithExtension().update({
+			effects: setReplyComposerEffect.of(MARKER_START),
+		}).state;
+		const before = tooltipsOf(open);
+		expect(before).toHaveLength(1);
+
+		const edited = open.update({
+			changes: { from: 0, insert: 'XXXX' },
+		}).state;
+		const after = tooltipsOf(edited);
+
+		// Still open, now anchored four characters further along...
+		expect(after).toHaveLength(1);
+		expect(after[0]!.pos).toBe(MARKER_START + 4);
+		// ...and the SAME create closure, which is what makes CodeMirror
+		// reposition the existing textarea instead of building a new one. This
+		// is the assertion that fails if the tooltip is ever rebuilt here.
+		expect(createRef(after[0]!)).toBe(createRef(before[0]!));
+	});
+
+	it('keeps the typed-into DOM even when the marker itself is rewritten', () => {
+		// A lifecycle write from another surface (resolve, accept) rewrites the
+		// marker's own span. The popover wants to redraw for that; the composer
+		// must not, because the textarea holds text the user has not sent.
+		const open = stateWithExtension().update({
+			effects: setReplyComposerEffect.of(MARKER_START),
+		}).state;
+		const before = tooltipsOf(open);
+
+		const rewritten = open.update({
+			changes: { from: BODY_INSERT_AT, insert: 'better ' },
+		}).state;
+		const after = tooltipsOf(rewritten);
+
+		expect(after).toHaveLength(1);
+		expect(createRef(after[0]!)).toBe(createRef(before[0]!));
+	});
+
+	it('closes when its marker is deleted outright', () => {
+		const open = stateWithExtension().update({
+			effects: setReplyComposerEffect.of(MARKER_START),
+		}).state;
+		const gone = open.update({
+			changes: { from: MARKER_START, to: DOC.indexOf('--> after.') + 3 },
+		}).state;
+		expect(tooltipsOf(gone)).toHaveLength(0);
+	});
+
+	it('does not open on an offset with no marker', () => {
+		const state = stateWithExtension().update({
+			effects: setReplyComposerEffect.of(3),
+		}).state;
+		expect(tooltipsOf(state)).toHaveLength(0);
+	});
+});
+
+describe('pinned tap popover', () => {
+	it('follows its marker through an edit above and keeps the same DOM', () => {
+		const open = stateWithExtension().update({
+			effects: setTapPopoverEffect.of(MARKER_START),
+		}).state;
+		const before = tooltipsOf(open);
+		expect(before).toHaveLength(1);
+
+		const edited = open.update({
+			changes: { from: 0, insert: 'XXXX' },
+		}).state;
+		const after = tooltipsOf(edited);
+
+		expect(after).toHaveLength(1);
+		expect(after[0]!.pos).toBe(MARKER_START + 4);
+		expect(createRef(after[0]!)).toBe(createRef(before[0]!));
+	});
+
+	it('redraws when the comment it is showing changes', () => {
+		// The popover renders the comment: its replies, its resolution state,
+		// and which action buttons apply. Pressing one of its own buttons is
+		// the usual way that changes, so unlike the composer it has to rebuild
+		// or it sits there offering "Resolve" on a resolved comment.
+		const open = stateWithExtension().update({
+			effects: setTapPopoverEffect.of(MARKER_START),
+		}).state;
+		const before = tooltipsOf(open);
+
+		const rewritten = open.update({
+			changes: { from: BODY_INSERT_AT, insert: 'better ' },
+		}).state;
+		const after = tooltipsOf(rewritten);
+
+		expect(after).toHaveLength(1);
+		expect(createRef(after[0]!)).not.toBe(createRef(before[0]!));
+	});
+
+	it('is superseded by opening the reply composer on the same marker', () => {
+		const open = stateWithExtension().update({
+			effects: setTapPopoverEffect.of(MARKER_START),
+		}).state;
+		const replying = open.update({
+			effects: setReplyComposerEffect.of(MARKER_START),
+		}).state;
+		// Exactly one surface, never both stacked on one marker.
+		expect(tooltipsOf(replying)).toHaveLength(1);
+	});
+});
+
+describe('active-comment highlight', () => {
+	function activeStartOf(
+		state: EditorState,
+		field: ReturnType<typeof buildMarkerDecorations>['activeField'],
+	): number | null {
+		return state.field(field);
+	}
+
+	it('follows its marker through an edit above', () => {
+		const built = buildMarkerDecorations(stubCtx());
+		const state = EditorState.create({
+			doc: DOC,
+			extensions: [built.extension],
+		});
+		const open = state.update({
+			effects: setActiveCommentEffect.of(MARKER_START),
+		}).state;
+		const edited = open.update({
+			changes: { from: 0, insert: 'XXXX' },
+		}).state;
+		expect(activeStartOf(edited, built.activeField)).toBe(MARKER_START + 4);
+	});
+
+	it('clears when its marker is deleted', () => {
+		const built = buildMarkerDecorations(stubCtx());
+		const state = EditorState.create({
+			doc: DOC,
+			extensions: [built.extension],
+		});
+		const open = state.update({
+			effects: setActiveCommentEffect.of(MARKER_START),
+		}).state;
+		const gone = open.update({
+			changes: { from: MARKER_START, to: DOC.indexOf('--> after.') + 3 },
+		}).state;
+		expect(activeStartOf(gone, built.activeField)).toBeNull();
+	});
+});
+
+describe('selection popup', () => {
+	it('reacts to the setting without waiting for the selection to move', () => {
+		// The compute reads `selectionPopup` off the live settings object, which
+		// CodeMirror cannot watch. Without settingsEpochField in its deps the
+		// facet never recomputed, so turning the setting on did nothing until
+		// the user happened to change the selection.
+		const settings: AnnotecaSettings = {
+			...DEFAULT_SETTINGS,
+			selectionPopup: false,
+		};
+		const state = EditorState.create({
+			doc: DOC,
+			extensions: [
+				buildAnnotecaExtension(stubDecorationContext(() => settings)),
+			],
+			selection: { anchor: 0, head: 5 },
+		});
+		expect(tooltipsOf(state)).toHaveLength(0);
+
+		settings.selectionPopup = true;
+		const bumped = state.update({
+			effects: bumpSettingsEpochEffect.of(1),
+		}).state;
+		expect(tooltipsOf(bumped)).toHaveLength(1);
+	});
+});
+
+// Regressions found by review on this change, both pinned here because both
+// fail silently in the app rather than throwing.
+describe('pinned surfaces track the comment, not a copy of it', () => {
+	it('follows a marker when text is inserted exactly at its start', () => {
+		// mapPos defaults to association -1, which keeps a position BEFORE text
+		// inserted at it. A marker is not a cursor: typing at the end of the
+		// prose immediately in front of it puts those characters ahead of the
+		// `<!--`, so the marker now starts after them. With the default the
+		// lookup missed by the length of what was typed and closed the surface.
+		const open = stateWithExtension().update({
+			effects: setReplyComposerEffect.of(MARKER_START),
+		}).state;
+
+		const edited = open.update({
+			changes: { from: MARKER_START, insert: 'typed' },
+		}).state;
+
+		const after = tooltipsOf(edited);
+		expect(after).toHaveLength(1);
+		expect(after[0]!.pos).toBe(MARKER_START + 'typed'.length);
+	});
+
+	it('hands the CURRENT comment to a preserved surface, not the open-time one', () => {
+		// The preserved DOM keeps its `create` closure by design, so whatever
+		// that closure captured is frozen. A comment with no id is resolved by
+		// its OFFSETS, so a frozen capture stops matching after an edit and
+		// every action on that surface reports it as vanished.
+		//
+		// Asserted through the tap popover, and through an edit INSIDE the
+		// marker, because that is the one path where the tooltip is rebuilt by
+		// calling `build(ref)`: the resulting `pos`/`end` are then read off
+		// `ref.current` and nothing else. On the preserve path they come from
+		// the mapped offset instead, so asserting there would pass whether or
+		// not the ref was ever repointed, which is exactly the hole this test
+		// replaced.
+		const open = stateWithExtension().update({
+			effects: setTapPopoverEffect.of(MARKER_START),
+		}).state;
+		expect(tooltipsOf(open)[0]!.end).toBe(
+			findMarkersInDoc(DOC)[0]!.marker.end,
+		);
+
+		const grown = open.update({
+			changes: { from: BODY_INSERT_AT, insert: 'much longer body ' },
+		}).state;
+
+		const after = tooltipsOf(grown);
+		expect(after).toHaveLength(1);
+		// The marker is longer now. A stale ref would still report the end it
+		// had when the popover opened.
+		const freshEnd = findMarkersInDoc(grown.doc.toString())[0]!.marker.end;
+		expect(freshEnd).toBeGreaterThan(findMarkersInDoc(DOC)[0]!.marker.end);
+		expect(after[0]!.end).toBe(freshEnd);
 	});
 });

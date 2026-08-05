@@ -213,9 +213,15 @@ settings:
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
-	/* overflow: hidden moves an inline-block's baseline to its bottom edge,
-	   which would drop the body below the line it sits on. */
-	vertical-align: bottom;
+	/* Aligned to the top of the line box, not to a baseline (#20). Two things
+	   make baseline alignment wrong here. `overflow: hidden` moves an inline-
+	   block's baseline to its bottom margin edge, so `baseline` does not do what
+	   it reads like. And the body is 0.85em with an inherited unitless
+	   line-height, so its box is shorter than the line box the prose makes:
+	   aligning either baselines or bottoms settles the smaller text on the floor
+	   of the line, and it reads as sagging away from the prose it annotates.
+	   `top` is also what the reporter asked for. */
+	vertical-align: top;
 }
 
 /* Explicit rather than relying on source order: .annoteca-resolved sets the
@@ -266,6 +272,23 @@ settings:
 
 .annoteca-resolved-hidden {
 	display: none;
+}
+
+/* Per-editor tooltip mount point. decorations.ts hands CodeMirror one of these
+   per EditorView and keeps it parented to that editor's own window body, so
+   popovers open in the window the editor is actually showing in and still
+   escape the leaf, which is `contain: strict` and would otherwise clip them.
+
+   It is only a mount point. Out of flow and zero-sized so it cannot disturb
+   body layout, and deliberately free of transform, filter and contain, any of
+   which would make it a containing block for the fixed-position tooltips
+   CodeMirror puts inside it and re-create the clipping this exists to avoid. */
+.annoteca-tooltip-host {
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 0;
+	height: 0;
 }
 
 /* Neutralize CM6's default .cm-tooltip chrome so our inner popovers control
@@ -2134,9 +2157,36 @@ settings:
    unbroken URL, and with no bound on the container those widen the popover
    instead of scrolling inside it. Restated here at matching specificity, after
    the neutralizer, so the popover keeps its own sizing while still giving up
-   the theme chrome the neutralizer is there to strip. */
+   the theme chrome the neutralizer is there to strip.
+
+   Max-width was the only property restated at first, which left the rest of the
+   same collision unfixed: the neutralizer's `background: transparent`,
+   `border: none`, `box-shadow: none` and `padding: 0` also beat the one-class
+   rule, so the popover painted unpadded and see-through straight onto the note.
+   Every property the neutralizer strips and the surface actually wants is now
+   restated here, with the values copied verbatim from the one-class rules
+   above. The neutralizer keeps `.cm-tooltip` on purpose: dropping it would win
+   these back for free but give up beating theme `.cm-tooltip` rules, which is
+   the entire reason it exists. */
 .cm-tooltip.annoteca-hover-preview {
 	max-width: min(420px, 92vw);
+	padding: 10px 12px;
+	background-color: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m, 6px);
+	box-shadow: var(--shadow-s);
+}
+
+/* Same collision, same node, same fix. The composer additionally loses its
+   `max-width: 90vw` cap to the neutralizer's `max-width: none`, so on a narrow
+   window its fixed 360px width had nothing holding it inside the viewport. */
+.cm-tooltip.annoteca-reply-composer {
+	max-width: 90vw;
+	padding: 12px 14px;
+	background-color: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m, 6px);
+	box-shadow: var(--shadow-l);
 }
 
 /* Rendered markdown inside comment surfaces (#6) -----------------------------

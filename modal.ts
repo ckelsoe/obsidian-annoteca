@@ -21,6 +21,10 @@ export class AddCommentModal extends Modal {
 			},
 		});
 		form.render(this.contentEl);
+		// #21: the modal used to open with nothing focused, so writing a comment
+		// always cost a click or tap on the body field first. That hurt most on
+		// the keyboard path, which is the reason the command exists.
+		form.focusBody();
 	}
 
 	onClose(): void {

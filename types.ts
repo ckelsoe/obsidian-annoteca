@@ -204,6 +204,13 @@ export interface AnnotecaSettings {
 	// Marker clicks force the "thread" tab regardless.
 	lastHubTab: 'thread' | 'outline' | 'starred';
 
+	// Whether the hub's right-sidebar tab has ever been auto-created. Set once,
+	// on the first load that creates it, so closing the tab makes it stay
+	// closed: a closed leaf leaves no record in the workspace, so without this
+	// every load saw "no hub leaf" and put one back. Not shown in the settings
+	// UI; the ribbon icon and "Open hub" are how you get it back.
+	hubTabAutoCreated: boolean;
+
 	// Scope state for the Thread tab. Persists across restarts so users keep
 	// their working context. Re-evaluated against the active file on load.
 	scopeState: ScopeState;

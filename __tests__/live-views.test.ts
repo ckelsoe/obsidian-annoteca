@@ -70,11 +70,15 @@ function anchorCount(view: EditorView): number {
 }
 
 beforeAll(() => {
-	// `buildAnnotecaExtension` renders tooltips into `activeDocument.body`.
-	// Obsidian sets that on every window at runtime; jsdom does not, so the
-	// test supplies it. The type already exists on Window via obsidian.d.ts,
-	// so this needs no assertion and no addition to globals.d.ts.
+	// The selection popup builds its DOM through `activeWindow`. Obsidian sets
+	// that on every window at runtime; jsdom does not, so the test supplies it.
+	// The type already exists on Window via obsidian.d.ts, so this needs no
+	// assertion and no addition to globals.d.ts.
+	//
+	// Tooltips themselves no longer go anywhere near `activeDocument`: each
+	// editor mounts them in its own window through `perWindowTooltipHost`.
 	window.activeDocument = document;
+	window.activeWindow = window;
 });
 
 beforeEach(() => {

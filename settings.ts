@@ -74,6 +74,7 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 
 	starredComments: [],
 	lastHubTab: 'thread',
+	hubTabAutoCreated: false,
 	scopeState: {
 		shape: { kind: 'file' },
 		anchorPath: '',
