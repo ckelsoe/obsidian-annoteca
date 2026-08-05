@@ -792,6 +792,11 @@ function isElementAcrossRealms(t: unknown): t is Element {
 // appended, so it also wins over any stale appended value from an older build.
 const tooltipParentCompartment = new Compartment();
 
+// How many times one view will try to hand CodeMirror its tooltip host before
+// giving up. Reset once the host is attached, so a reconfiguration that drops
+// the parent later gets a fresh budget rather than inheriting a spent one.
+const MAX_TOOLTIP_HOST_CLAIMS = 3;
+
 function perWindowTooltipHost(): Extension {
 	return ViewPlugin.fromClass(
 		class {
@@ -799,6 +804,7 @@ function perWindowTooltipHost(): Extension {
 			private readonly host: HTMLElement;
 			private destroyed = false;
 			private pending = false;
+			private claimAttempts = 0;
 
 			constructor(view: EditorView) {
 				this.view = view;
@@ -839,8 +845,23 @@ function perWindowTooltipHost(): Extension {
 			// on every update costs one property read and makes the repair
 			// automatic whenever a reconfiguration drops it.
 			private claimHost(): void {
-				if (this.destroyed || this.pending || this.host.firstChild)
+				if (this.destroyed || this.pending) return;
+				if (this.host.firstChild) {
+					// Attached. Clearing the budget here rather than never
+					// touching it again is what lets a LATER reconfiguration
+					// that drops the parent be repaired too.
+					this.claimAttempts = 0;
 					return;
+				}
+				// Bounded, because the repair is self-feeding: the dispatch
+				// below produces an update, the update calls this again, and if
+				// attaching ever stopped working the pair would spin on a 0 ms
+				// timer for as long as the editor stayed open. A handful of
+				// attempts covers a transient miss; past that, popovers mount
+				// unparented, which is a visual bug, where a permanent dispatch
+				// loop would burn the CPU.
+				if (this.claimAttempts >= MAX_TOOLTIP_HOST_CLAIMS) return;
+				this.claimAttempts += 1;
 				this.pending = true;
 				// A dispatch cannot happen inside a view update, and this runs
 				// from both the constructor and update(). A timeout puts it
