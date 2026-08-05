@@ -21,10 +21,9 @@ import type {
 } from './types';
 import { CommentIndex } from './index';
 import {
-	DEFAULT_SETTINGS,
 	AnnotecaSettingTab,
 	resolveSettingsCategories,
-	normalizeRenderMarkdownBodies,
+	normalizeSettings,
 	mergeRestoredSettings,
 } from './settings';
 import { getCategoryOrFallback } from './categories';
@@ -322,63 +321,44 @@ export default class AnnotecaPlugin extends Plugin {
 	}
 
 	async loadSettings(): Promise<void> {
-		const loaded =
-			(await this.loadData()) as Partial<AnnotecaSettings> | null;
-		this.settings = {
-			...DEFAULT_SETTINGS,
-			...(loaded ?? {}),
-			indicatorStyle: DEFAULT_SETTINGS.indicatorStyle,
-			// Resolved from the RAW loaded value, not from the spread above, so
-			// that "absent" is distinguishable from "explicitly set to panel".
-			// The spread has already filled in the DEFAULT_SETTINGS placeholder
-			// by this point, which would make every existing desktop install
-			// look like a deliberate choice and every new mobile install too.
-			markerClickAction: resolveMarkerClickAction(
-				loaded?.markerClickAction,
-				isMobile(),
-			),
-			renderMarkdownBodies: normalizeRenderMarkdownBodies(
-				loaded?.renderMarkdownBodies,
-				DEFAULT_SETTINGS.renderMarkdownBodies,
-			),
-		};
+		const loaded = (await this.loadData()) as Record<
+			string,
+			unknown
+		> | null;
 
-		// Migrate legacy indicatorStyle values. Prior to the underline rewrite,
-		// "gutter" meant the (misplaced) left-margin dot and "inline" meant the
-		// in-prose ◆ widget. New names are "icon" and "underline" respectively.
-		// Use unknown-string compares so TypeScript doesn't narrow the union.
-		const legacy = loaded?.indicatorStyle as string | undefined;
-		if (legacy === 'gutter') this.settings.indicatorStyle = 'icon';
-		else if (legacy === 'inline')
+		// Every value in data.json is validated in exactly one place. Nothing
+		// below re-checks a type; what is left here is migration, which needs the
+		// RAW stored value because each case turns on telling "absent" apart from
+		// "explicitly chosen", a distinction the normalized settings have already
+		// collapsed by filling in defaults.
+		this.settings = normalizeSettings(loaded);
+
+		// Legacy indicatorStyle names. Before the underline rewrite, "gutter"
+		// meant the (misplaced) left-margin dot and "inline" meant the in-prose
+		// ◆ widget; they are "icon" and "underline" now. Both are rejected by the
+		// validator, so the setting is sitting on its default at this point.
+		const legacyStyle = loaded?.indicatorStyle;
+		if (legacyStyle === 'gutter') this.settings.indicatorStyle = 'icon';
+		else if (legacyStyle === 'inline')
 			this.settings.indicatorStyle = 'underline';
-		else if (
-			legacy === 'icon' ||
-			legacy === 'underline' ||
-			legacy === 'both' ||
-			legacy === 'none'
-		) {
-			this.settings.indicatorStyle = legacy;
-		}
 
-		if (
-			!this.settings.categories ||
-			this.settings.categories.length === 0
-		) {
-			this.settings.categories = [...DEFAULT_SETTINGS.categories];
-		}
+		// First-run platform default. Anything already stored wins; the platform
+		// only decides when nothing is stored, which is what makes this a
+		// resolve-once decision rather than a live read of Platform.
+		this.settings.markerClickAction = resolveMarkerClickAction(
+			loaded?.markerClickAction,
+			isMobile(),
+		);
 
 		// Migrate the legacy centerCommentOnNavigate boolean to markerScrollAlign
 		// (F-289). Only an explicit opt-in to centering (true) carries over as
 		// "center"; everyone else adopts the new "top" default, which is the
 		// improved reading anchor. "Minimal" (the old don't-yank behavior) stays
 		// available in the dropdown for anyone who wants it back.
-		const legacyCenter = (
-			loaded as { centerCommentOnNavigate?: unknown } | null
-		)?.centerCommentOnNavigate;
 		if (
 			loaded &&
 			!('markerScrollAlign' in loaded) &&
-			legacyCenter === true
+			loaded.centerCommentOnNavigate === true
 		) {
 			this.settings.markerScrollAlign = 'center';
 		}

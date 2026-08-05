@@ -6,11 +6,17 @@ import {
 	Notice,
 	ButtonComponent,
 	setIcon,
-	requireApiVersion,
 } from 'obsidian';
 
 import type AnnotecaPlugin from './main';
-import type { AnnotecaSettings, CategoryDefinition, UserPreset } from './types';
+import type {
+	AnnotecaSettings,
+	AuthorStyle,
+	CategoryDefinition,
+	ScopeShape,
+	ScopeState,
+	UserPreset,
+} from './types';
 import {
 	DEFAULT_CATEGORIES,
 	DEFAULT_PRESETS,
@@ -19,6 +25,7 @@ import {
 	reorderCategories,
 	moveCategory,
 } from './categories';
+import { isSerializableCategory, sanitizeAuthorToken } from './parser';
 import {
 	createStackedRow,
 	createColorPicker,
@@ -89,25 +96,316 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 };
 
 // data.json is user-editable, and it also arrives over sync and out of a
-// restored backup, so a stored value is not guaranteed to be the type it was
-// written as. Every read of this setting is a truthiness test, so a stored
-// string "false" would silently turn a disabled setting back on.
+// restored backup, so nothing in it is guaranteed to be the type it was written
+// as. Reads all over this plugin are truthiness tests, `for...of` loops and
+// `.filter` calls, so a stored string "false" silently turns a disabled setting
+// back on, and a stored `{}` where an array belongs throws on the first
+// iteration and takes the whole load down with it.
 //
-// Both entry points go through here on purpose. Normalizing only on load left
-// the restore path spreading parsed JSON straight into the live settings, so a
-// backup file could reintroduce exactly the value the load path exists to
-// reject.
+// One choke point rather than a check per read. The per-field validations that
+// used to sit in loadSettings and mergeRestoredSettings only ever covered the
+// fields somebody had already been burned by, so every setting added since
+// arrived unchecked. Everything now goes through normalizeSettings, and the
+// table below is a mapped type over every key of the settings interface, so a
+// new setting with no validator fails the BUILD instead of shipping
+// unvalidated.
+
+type SettingKey = keyof Required<AnnotecaSettings>;
+
+// A validator answers exactly one question: is this stored value usable as it
+// stands? It returns the value when yes and `undefined` when no.
 //
-// The fallback is a parameter because ABSENT and WRONG TYPE are different
-// questions. Absent means the stored blob simply does not carry the key, and
-// the answer is whatever the surrounding spread already settled on: the default
-// on load, the current live value on restore. Only a present-but-non-boolean
-// value is a rejection.
-export function normalizeRenderMarkdownBodies(
-	stored: unknown,
-	fallback: boolean,
-): boolean {
-	return typeof stored === 'boolean' ? stored : fallback;
+// `undefined` always means "fall back", never "store undefined". Absent and
+// rejected are deliberately indistinguishable to the caller, because the answer
+// to both is the same: whatever the fallback chain settles on, which is the
+// live value on the restore path and the shipped default on load.
+type SettingValidator<K extends SettingKey> = (
+	raw: unknown,
+) => Required<AnnotecaSettings>[K] | undefined;
+
+function isRecord(raw: unknown): raw is Record<string, unknown> {
+	return typeof raw === 'object' && raw !== null && !Array.isArray(raw);
+}
+
+function bool(raw: unknown): boolean | undefined {
+	return typeof raw === 'boolean' ? raw : undefined;
+}
+
+function str(raw: unknown): string | undefined {
+	return typeof raw === 'string' ? raw : undefined;
+}
+
+function num(raw: unknown): number | undefined {
+	return typeof raw === 'number' && Number.isFinite(raw) ? raw : undefined;
+}
+
+// Literal-set gate for the enum-valued settings. The allowed values are passed
+// as a rest parameter so TypeScript infers the literal union and the table
+// below fails to compile if a listed value is not in that setting's type.
+function oneOf<T extends string>(
+	...allowed: readonly T[]
+): (raw: unknown) => T | undefined {
+	return (raw) =>
+		typeof raw === 'string' && (allowed as readonly string[]).includes(raw)
+			? (raw as T)
+			: undefined;
+}
+
+// Elementwise filter for the structural arrays. A single bad element drops
+// itself rather than the whole list: a synced data.json with one malformed
+// category should not cost the user the other six.
+function arrayOf<T>(
+	validate: (raw: unknown) => T | undefined,
+): (raw: unknown) => T[] | undefined {
+	return (raw) => {
+		if (!Array.isArray(raw)) return undefined;
+		const kept: T[] = [];
+		for (const item of raw) {
+			const value = validate(item);
+			if (value !== undefined) kept.push(value);
+		}
+		return kept;
+	};
+}
+
+function titleCaseId(id: string): string {
+	return id.charAt(0).toUpperCase() + id.slice(1).replace(/-/g, ' ');
+}
+
+function validCategory(raw: unknown): CategoryDefinition | undefined {
+	if (!isRecord(raw)) return undefined;
+	// The id is the one field that cannot be repaired: it is written into every
+	// marker and has to satisfy the parser's category grammar.
+	//
+	// The PARSER's grammar, not isValidCategoryName. That one is the house style
+	// for a name being created in the settings UI and is stricter on purpose,
+	// but a stored `my--topic` or `trailing-` round-trips through the marker
+	// perfectly well. Validating what is already on disk against the creation
+	// rule would delete a working category along with its icon, color and
+	// display name, and leave every comment filed under it unable to be
+	// re-selected. Reject what the format cannot hold; leave house style to the
+	// path where a name is being made up.
+	if (typeof raw.id !== 'string' || !isSerializableCategory(raw.id))
+		return undefined;
+	const cat: CategoryDefinition = {
+		id: raw.id,
+		// Derived rather than rejected. A category with an unusable display name
+		// is still a category comments in the vault are filed under, and dropping
+		// it would strand them; this is the derivation getCategoryOrFallback
+		// already applies when a category is missing entirely.
+		displayName:
+			typeof raw.displayName === 'string' && raw.displayName !== ''
+				? raw.displayName
+				: titleCaseId(raw.id),
+	};
+	if (typeof raw.icon === 'string') cat.icon = raw.icon;
+	if (typeof raw.color === 'string') cat.color = raw.color;
+	const tier = oneOf('subtle', 'normal', 'strong')(raw.tier);
+	if (tier !== undefined) cat.tier = tier;
+	return cat;
+}
+
+function validAuthorStyle(raw: unknown): AuthorStyle | undefined {
+	if (!isRecord(raw)) return undefined;
+	if (typeof raw.tag !== 'string' || raw.tag === '') return undefined;
+	const style: AuthorStyle = { tag: raw.tag };
+	if (typeof raw.color === 'string') style.color = raw.color;
+	return style;
+}
+
+function validPreset(raw: unknown): UserPreset | undefined {
+	if (!isRecord(raw)) return undefined;
+	if (typeof raw.id !== 'string' || raw.id === '') return undefined;
+	const categories = arrayOf(validCategory)(raw.categories);
+	// A preset with nothing left to cherry-pick is a dead row in the browser.
+	if (categories === undefined || categories.length === 0) return undefined;
+	return {
+		id: raw.id,
+		displayName:
+			typeof raw.displayName === 'string' && raw.displayName !== ''
+				? raw.displayName
+				: raw.id,
+		categories,
+	};
+}
+
+function validScopeShape(raw: unknown): ScopeShape | undefined {
+	if (!isRecord(raw)) return undefined;
+	switch (raw.kind) {
+		case 'file':
+			return { kind: 'file' };
+		case 'vault':
+			return { kind: 'vault' };
+		case 'folder':
+			return { kind: 'folder', subfolders: raw.subfolders === true };
+		case 'property':
+			return typeof raw.key === 'string' && typeof raw.value === 'string'
+				? { kind: 'property', key: raw.key, value: raw.value }
+				: undefined;
+		case 'tag':
+			return typeof raw.tag === 'string'
+				? { kind: 'tag', tag: raw.tag }
+				: undefined;
+		default:
+			return undefined;
+	}
+}
+
+function validScopeState(raw: unknown): ScopeState | undefined {
+	if (!isRecord(raw)) return undefined;
+	const shape = validScopeShape(raw.shape);
+	// The shape drives a discriminated switch in scope.ts. An unknown kind there
+	// resolves to no files at all, which reads as "the panel is broken".
+	if (shape === undefined) return undefined;
+	return {
+		shape,
+		anchorPath: typeof raw.anchorPath === 'string' ? raw.anchorPath : '',
+		pinned: raw.pinned === true,
+	};
+}
+
+function validDriftSnapshots(
+	raw: unknown,
+): Record<string, { before: string; after: string }> | undefined {
+	if (!isRecord(raw)) return undefined;
+	const out: Record<string, { before: string; after: string }> = {};
+	for (const [id, snap] of Object.entries(raw)) {
+		if (!isRecord(snap)) continue;
+		if (typeof snap.before !== 'string' || typeof snap.after !== 'string')
+			continue;
+		out[id] = { before: snap.before, after: snap.after };
+	}
+	return out;
+}
+
+// Same grammar as AUTHOR_LINE_RE in parser.ts, and the same one the author-tag
+// and collaborator rows validate against in the UI.
+const AUTHOR_TAG_RE = /^[^\s\]<>]{1,32}$/;
+
+const validAuthorTag: SettingValidator<'authorTag'> = (raw) => {
+	if (typeof raw !== 'string') return undefined;
+	// Empty is a legitimate stored value: it is what "no tag set" looks like,
+	// and sanitizing it would invent the token "user" for someone who never
+	// asked for one.
+	if (raw === '' || AUTHOR_TAG_RE.test(raw)) return raw;
+	// A display name with a space is the common shape here and is not a reason
+	// to throw the tag away. sanitizeAuthorToken is the same repair serialize()
+	// applies at the write funnel, imported rather than restated so the token
+	// grammar has one implementation.
+	return sanitizeAuthorToken(raw);
+};
+
+const validCategories: SettingValidator<'categories'> = (raw) => {
+	const list = arrayOf(validCategory)(raw);
+	// An empty list is not a usable state: the composer dropdown, the sidebar
+	// grouping and every category lookup read this. Falling back restores the
+	// shipped set, which is what loadSettings has always done for an absent or
+	// empty list.
+	return list === undefined || list.length === 0 ? undefined : list;
+};
+
+// One entry per key of the settings interface, over `Required<...>` so the
+// optional keys need one too. Adding a setting without adding its validator is
+// a type error.
+const SETTING_VALIDATORS: {
+	readonly [K in SettingKey]: SettingValidator<K>;
+} = {
+	categories: validCategories,
+	defaultCategory: str,
+	enableScholarlyPreset: bool,
+	enableIndexEntryPreset: bool,
+	indicatorStyle: oneOf('icon', 'underline', 'both', 'none'),
+	defaultVisibility: oneOf('show', 'hide', 'last'),
+	hoverPreview: bool,
+	hoverDelay: oneOf('instant', 'short', 'default', 'relaxed'),
+	markerClickAction: oneOf('panel', 'popover'),
+	markerReplyCount: bool,
+	renderMarkdownBodies: bool,
+	anchorStyle: oneOf('solid', 'wavy', 'dotted', 'dashed'),
+	anchorThickness: oneOf('thin', 'medium', 'thick'),
+	resolvedBrightness: oneOf('normal', 'bright'),
+	resolvedDisplay: oneOf('dim', 'hide'),
+	deleteOnResolve: bool,
+	enableAuthorTag: bool,
+	authorTag: validAuthorTag,
+	authorStyles: arrayOf(validAuthorStyle),
+	composerLocation: oneOf('modal', 'panel'),
+	selectionPopup: bool,
+	submitCommentOnEnter: bool,
+	markerScrollAlign: oneOf('top', 'center', 'minimal'),
+	debugMode: bool,
+	debugLogTarget: oneOf('console', 'vault'),
+	settingsBackupPath: str,
+	driftSnapshots: validDriftSnapshots,
+	starredComments: arrayOf(str),
+	lastHubTab: oneOf('thread', 'outline', 'starred'),
+	hubTabAutoCreated: bool,
+	scopeState: validScopeState,
+	statusFilter: oneOf('open', 'resolved', 'all'),
+	autoCollapseInactiveFiles: bool,
+	customPresets: arrayOf(validPreset),
+	indicatorSize: oneOf('small', 'medium', 'large'),
+	skillExportTarget: oneOf('claude', 'agent', 'both'),
+	exportedSkillVersion: num,
+	skillStaleNoticeShownFor: num,
+	readingViewIndicator: oneOf('off', 'banner', 'per-section', 'both'),
+};
+
+// The single ingress for anything read out of data.json or a backup file.
+//
+// Precedence per key: the stored value if it validates, else the caller's
+// fallback if THAT validates, else the shipped default. All three legs run
+// through the validator, including the default. That is not paranoia about
+// DEFAULT_SETTINGS being wrong; it is what guarantees the value handed back was
+// BUILT by a validator, and every structural validator builds fresh objects.
+//
+// So nothing here returns a reference into `raw`, `fallback` or
+// DEFAULT_SETTINGS, which matters because the settings UI edits categories and
+// author styles in place. Taking the default leg raw is the version of this
+// that shipped broken for one call shape: `normalizeSettings(raw, {})` skipped
+// the fallback leg for every key and aliased the module-level default arrays
+// straight into live settings.
+export function normalizeSettings(
+	raw: unknown,
+	fallback: unknown = DEFAULT_SETTINGS,
+): AnnotecaSettings {
+	const stored = isRecord(raw) ? raw : {};
+	const prior = isRecord(fallback) ? fallback : {};
+	const out: Record<string, unknown> = {};
+
+	for (const key of Object.keys(SETTING_VALIDATORS) as SettingKey[]) {
+		const validate = SETTING_VALIDATORS[key] as (r: unknown) => unknown;
+		// `??` and not `||`: `false` is a valid value for twelve of these keys
+		// and must not fall through to the default.
+		const value =
+			(key in stored ? validate(stored[key]) : undefined) ??
+			(key in prior ? validate(prior[key]) : undefined) ??
+			validate(DEFAULT_SETTINGS[key]);
+		// An optional key with no default stays absent rather than becoming an
+		// explicit `undefined`, so `in` checks elsewhere keep working.
+		if (value !== undefined) out[key] = value;
+	}
+
+	const settings = out as unknown as AnnotecaSettings;
+	reconcileDefaultCategory(settings);
+	return settings;
+}
+
+// The default category has to be one of the categories actually on offer.
+// Turning a preset off, or removing the category a preset supplied, otherwise
+// strands `defaultCategory` on an id that is no longer in the dropdown, and the
+// composer opens with nothing selected.
+//
+// Mutates in place and reports whether it changed anything, because the two
+// callers want different things from it: normalizeSettings just wants the
+// invariant, the settings tab wants to know whether to tell the user.
+export function reconcileDefaultCategory(s: AnnotecaSettings): boolean {
+	const enabled = resolveSettingsCategories(s);
+	const first = enabled[0];
+	if (!first) return false;
+	if (enabled.some((c) => c.id === s.defaultCategory)) return false;
+	s.defaultCategory = first.id;
+	return true;
 }
 
 // The whole "restore settings from a backup file" merge, in one pure function.
@@ -117,22 +415,18 @@ export function normalizeRenderMarkdownBodies(
 // suite green, because no test reaches main.ts at runtime. A normalizer nothing
 // can test is a normalizer that quietly stops running.
 //
-// Precedence is the same as the inline spread it replaces. Defaults fill gaps,
-// the live settings win over those, and the backup wins over both, because
-// restoring is an explicit request to take the file's values.
+// Precedence is unchanged. Defaults fill gaps, the live settings win over
+// those, and the backup wins over both, because restoring is an explicit
+// request to take the file's values. Normalizing `current` first is what makes
+// the fallback meaningful: a key the backup gets WRONG falls back to the live
+// value rather than to the shipped default, so one bad line in a backup cannot
+// quietly reset a setting the user never touched.
 export function mergeRestoredSettings(
 	current: AnnotecaSettings,
 	parsed: Partial<AnnotecaSettings>,
 ): AnnotecaSettings {
-	return {
-		...DEFAULT_SETTINGS,
-		...current,
-		...parsed,
-		renderMarkdownBodies: normalizeRenderMarkdownBodies(
-			parsed.renderMarkdownBodies,
-			current.renderMarkdownBodies,
-		),
-	};
+	const live = normalizeSettings(current);
+	return normalizeSettings({ ...live, ...parsed }, live);
 }
 
 // Resolve the active category list given current settings. Centralized so the
@@ -511,399 +805,12 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		];
 	}
 
-	// Imperative settings tab for Obsidian < 1.13.0 (dual-support Path B from the
-	// Obsidian "Migrate to declarative settings" guide). On 1.13.0+ Obsidian
-	// renders from getSettingDefinitions() and skips display() entirely; older
-	// builds have no knowledge of getSettingDefinitions() and call display().
-	//
-	// This method and its row helpers use ONLY pre-1.13 Obsidian APIs and never
-	// reference the declarative SettingDefinition* types (which are imported
-	// type-only, so they leave no runtime trace in main.js): the marketplace
-	// no-unsupported-api scan rejects any 1.13.0 API reference while
-	// minAppVersion is below 1.13.0. The one 1.13 method, update(), is reached
-	// only through rerender(), guarded by requireApiVersion so it never runs on
-	// older builds. This path mirrors getSettingDefinitions() above; any change
-	// to one must be mirrored in the other or users on different Obsidian
-	// versions will see different settings.
-	//
-	// display() is marked deprecated in the 1.13 types because the declarative
-	// API supersedes it, but Obsidian still calls it on < 1.13 builds. It only
-	// delegates to renderImperativeSettings(), so our own code never calls the
-	// deprecated method (rerender() calls renderImperativeSettings() directly).
-	// That keeps the build free of any @typescript-eslint/no-deprecated use, so
-	// there is nothing to suppress.
-	display(): void {
-		this.renderImperativeSettings();
-	}
-
-	private renderImperativeSettings(): void {
-		const { containerEl } = this;
-		containerEl.empty();
-
-		const categoryOptions: Record<string, string> = {};
-		for (const c of resolveSettingsCategories(this.plugin.settings)) {
-			categoryOptions[c.id] = c.displayName;
-		}
-
-		// Categories
-		this.heading(containerEl, 'Categories');
-		this.renderCustomBlock(containerEl, (host) =>
-			this.renderPresetSection(host),
-		);
-		this.addToggleRow(
-			containerEl,
-			'Index-entry preset',
-			'Add an index-entry category for tagging concepts that should appear in a printed index. Pairs with the pandoc filter shipped under docs in the plugin repository.',
-			'enableIndexEntryPreset',
-		);
-		this.addDropdownRow(
-			containerEl,
-			'Default category',
-			'Selected in the add-comment modal by default.',
-			'defaultCategory',
-			categoryOptions,
-		);
-		this.renderCustomBlock(containerEl, (host) =>
-			this.renderCategoryList(host),
-		);
-		this.renderCustomBlock(containerEl, (host) =>
-			this.renderAddCategory(host),
-		);
-
-		// Editor indicators
-		this.heading(containerEl, 'Editor indicators');
-		this.addDropdownRow(
-			containerEl,
-			'Indicator style',
-			"How comments are surfaced in the editor. The underline marks the text the comment was made against. The icon marks the comment's location when no text was selected at create time.",
-			'indicatorStyle',
-			{
-				icon: 'Inline icon only',
-				underline: 'Anchor underline only',
-				both: 'Icon and underline',
-				none: 'Hidden',
-			},
-		);
-		this.addDropdownRow(
-			containerEl,
-			'Indicator size',
-			'Visual size of the marker icon in the editor.',
-			'indicatorSize',
-			{ small: 'Small', medium: 'Medium', large: 'Large' },
-		);
-		this.addToggleRow(
-			containerEl,
-			'Marker hover preview',
-			'Show a preview of the comment and its thread when you hover a marker or its underline in the editor. Turn off to rely on clicking the marker to open the side panel.',
-			'hoverPreview',
-		);
-		this.addDropdownRow(
-			containerEl,
-			'Hover preview delay',
-			'How long to hover before the preview appears. Takes effect after reloading the plugin.',
-			'hoverDelay',
-			{
-				instant: 'Instant',
-				short: 'Short',
-				default: 'Default',
-				relaxed: 'Relaxed',
-			},
-		);
-		this.addDropdownRow(
-			containerEl,
-			'Clicking a marker',
-			'What happens when you click or tap a marker in the editor. Open in side panel shows the full thread; Show popover keeps the document in view. Defaults to the popover on phones and tablets, where there is no hover preview.',
-			'markerClickAction',
-			{
-				panel: 'Open in side panel',
-				popover: 'Show popover',
-			},
-		);
-		this.addToggleRow(
-			containerEl,
-			'Render Markdown in comments',
-			'Show comment bodies, replies and notes as formatted Markdown in the marker popover and the Hub panel, instead of their raw source. Links, emphasis, code and lists render. The one-line body shown beside a marker in the editor stays plain text either way, so it cannot reflow the document.',
-			'renderMarkdownBodies',
-		);
-		this.addToggleRow(
-			containerEl,
-			'Reply count on markers',
-			'Show how many replies a thread has next to its marker icon in the editor. Markers with no replies are unchanged.',
-			'markerReplyCount',
-		);
-		this.addDropdownRow(
-			containerEl,
-			'Anchor underline style',
-			'Visual character of the underline drawn over commented text. Applies to every category.',
-			'anchorStyle',
-			{
-				wavy: 'Wavy',
-				solid: 'Solid',
-				dotted: 'Dotted',
-				dashed: 'Dashed',
-			},
-		);
-		this.addDropdownRow(
-			containerEl,
-			'Anchor underline thickness',
-			'Baseline thickness for categories on the normal tier. Subtle always renders thin, strong always renders thick, regardless of this setting.',
-			'anchorThickness',
-			{ thin: 'Thin', medium: 'Medium', thick: 'Thick' },
-		);
-		this.addDropdownRow(
-			containerEl,
-			'Default visibility on file open',
-			'Whether comments are visible when a file opens.',
-			'defaultVisibility',
-			{ show: 'Show', hide: 'Hide', last: 'Last state' },
-		);
-
-		this.heading(containerEl, 'Resolved comments');
-		this.addDropdownRow(
-			containerEl,
-			'Resolved comment display',
-			'How resolved comments appear in the editor.',
-			'resolvedDisplay',
-			{ dim: 'Dim', hide: 'Hide' },
-		);
-		this.addToggleRow(
-			containerEl,
-			'Delete on resolve',
-			'Resolving a comment permanently removes it from the file instead of keeping it as a dimmed [resolved] marker. The thread and its replies are gone; rely on git or backups for history. The separate "Resolve and remove" action always asks first; with this on, plain Resolve removes without asking.',
-			'deleteOnResolve',
-		);
-		this.addDropdownRow(
-			containerEl,
-			'Resolved brightness',
-			'How aggressively resolved comments are dimmed. Normal works well in light themes; bright keeps resolved content legible against dark backgrounds where the base text is already muted.',
-			'resolvedBrightness',
-			{ normal: 'Normal', bright: 'Bright' },
-		);
-
-		this.heading(containerEl, 'Composer');
-		this.addDropdownRow(
-			containerEl,
-			'Composer location',
-			'Where the add-comment form appears. The side panel keeps the document visible while you draft.',
-			'composerLocation',
-			{ modal: 'Modal dialog', panel: 'Right side panel' },
-		);
-		this.addToggleRow(
-			containerEl,
-			'Send comment on Enter',
-			'When on, Enter sends the comment and Shift+Enter starts a new line. When off, send with Cmd or Ctrl plus Enter, and Enter starts a new line. Applies to the comment box and the reply box.',
-			'submitCommentOnEnter',
-		);
-		this.addToggleRow(
-			containerEl,
-			'Selection comment button',
-			'Show a floating Comment button next to text you select in the editor, so you can start a comment with one click instead of the right-click menu. The Add comment here and Add comment for selection commands can also be bound to a hotkey.',
-			'selectionPopup',
-		);
-
-		this.heading(containerEl, 'Reading view');
-		this.addDropdownRow(
-			containerEl,
-			'Reading view indicator',
-			'Comments are invisible in reading view (markers are HTML comments). Show a note-level banner with totals, a badge on each section that has comments, or both. Click an indicator to open the comment panel. Counts are threads; replies are not counted.',
-			'readingViewIndicator',
-			{
-				off: 'Off',
-				banner: 'Note banner',
-				'per-section': 'Per-section badges',
-				both: 'Banner and badges',
-			},
-		);
-
-		this.heading(containerEl, 'Panel and navigation');
-		this.addToggleRow(
-			containerEl,
-			'Auto-collapse other files in scope',
-			'When the thread panel shows comments from multiple files, collapse files other than the one you are editing. Click a file header to expand it manually.',
-			'autoCollapseInactiveFiles',
-		);
-		this.addDropdownRow(
-			containerEl,
-			'Marker position when navigating',
-			"Where a comment's marker lands in the editor when you jump to it. Top anchors it near the top of the pane for a predictable reading spot. Center puts it in the middle. Minimal scrolls the least needed and stays put if the marker is already visible, so opening the panel does not move your place.",
-			'markerScrollAlign',
-			{
-				top: 'Top of pane',
-				center: 'Center',
-				minimal: "Minimal (don't move if visible)",
-			},
-		);
-
-		// Authors
-		this.heading(containerEl, 'Authors');
-		this.addToggleRow(
-			containerEl,
-			'Author tag',
-			'When enabled, new comments include an [author=...] line. Useful when collaborating with an AI agent or multiple reviewers.',
-			'enableAuthorTag',
-		);
-		if (this.plugin.settings.enableAuthorTag) {
-			this.addTextRow(
-				containerEl,
-				'Author identifier',
-				'Short tag with no spaces; maximum 32 characters.',
-				'authorTag',
-				'reviewer',
-				(value: string) => {
-					const v = value.trim();
-					return v === '' || /^[^\s\]<>]{1,32}$/.test(v)
-						? undefined
-						: 'Use a single tag with no spaces (max 32 characters).';
-				},
-			);
-		}
-		this.renderCustomBlock(containerEl, (host) =>
-			this.renderAuthorStyles(host),
-		);
-
-		// AI integration
-		this.heading(containerEl, 'AI integration');
-		this.addDropdownRow(
-			containerEl,
-			'Skill export destination',
-			'Vault folder the exported skill file is written to. Claude Code reads .claude/skills; some other assistants read a .agent folder.',
-			'skillExportTarget',
-			{
-				claude: '.claude/skills (Claude Code)',
-				agent: '.agent/skills (other assistants)',
-				both: 'Both folders',
-			},
-		);
-		this.renderCustomBlock(containerEl, (host) =>
-			this.renderSkillExport(host),
-		);
-
-		// Diagnostics
-		this.heading(containerEl, 'Diagnostics');
-		this.addToggleRow(
-			containerEl,
-			'Debug mode',
-			'Log additional information for troubleshooting. Off by default to avoid log spam.',
-			'debugMode',
-		);
-		if (this.plugin.settings.debugMode) {
-			this.addDropdownRow(
-				containerEl,
-				'Debug log destination',
-				'Where diagnostic output is written.',
-				'debugLogTarget',
-				{ console: 'Browser console', vault: 'Log file in the vault' },
-			);
-		}
-		this.renderCustomBlock(containerEl, (host) => this.renderFooter(host));
-	}
-
-	// Re-render after a data change. On 1.13.0+ Obsidian owns the declarative
-	// tree, so call update(); on older builds re-run the imperative display().
-	// update() is the only 1.13 method touched anywhere in this tab and is
-	// reached solely through this guard.
+	// Re-render after a data change. Obsidian owns the declarative tree, so
+	// update() reconciles it from fresh definitions. Kept as a named method
+	// because a dozen call sites mean it, not update(), is the thing this tab
+	// does after a mutation.
 	private rerender(): void {
-		if (requireApiVersion('1.13.0')) {
-			// 1.13+ owns the declarative tree; update() is the new (non-deprecated)
-			// re-render entry point.
-			this.update();
-		} else {
-			// < 1.13: re-render the imperative tree directly. Calling the shared
-			// renderer (not the deprecated display()) avoids any no-deprecated use.
-			this.renderImperativeSettings();
-		}
-	}
-
-	private heading(container: HTMLElement, text: string): void {
-		new Setting(container).setName(text).setHeading();
-	}
-
-	// Read a control value as a display string for dropdown/text rows. Mirrors
-	// getControlValue()'s coercion and avoids stringifying a non-primitive.
-	private controlString(key: string): string {
-		const value = this.getControlValue(key);
-		if (typeof value === 'string') return value;
-		if (typeof value === 'number' || typeof value === 'boolean')
-			return String(value);
-		return '';
-	}
-
-	// Imperative row helpers used only by display(). Each binds through the same
-	// getControlValue() / setControlValue() the declarative path uses, so
-	// coercion and side effects stay in one place.
-	private addToggleRow(
-		container: HTMLElement,
-		name: string,
-		desc: string,
-		key: string,
-	): void {
-		new Setting(container)
-			.setName(name)
-			.setDesc(desc)
-			.addToggle((toggle) =>
-				toggle
-					.setValue(Boolean(this.getControlValue(key)))
-					.onChange((value) => {
-						void this.setControlValue(key, value);
-					}),
-			);
-	}
-
-	private addDropdownRow(
-		container: HTMLElement,
-		name: string,
-		desc: string,
-		key: string,
-		options: Record<string, string>,
-	): void {
-		new Setting(container)
-			.setName(name)
-			.setDesc(desc)
-			.addDropdown((dropdown) => {
-				for (const [value, label] of Object.entries(options)) {
-					dropdown.addOption(value, label);
-				}
-				dropdown.setValue(this.controlString(key)).onChange((value) => {
-					void this.setControlValue(key, value);
-				});
-			});
-	}
-
-	private addTextRow(
-		container: HTMLElement,
-		name: string,
-		desc: string,
-		key: string,
-		placeholder: string,
-		validate?: (value: string) => string | undefined,
-	): void {
-		new Setting(container)
-			.setName(name)
-			.setDesc(desc)
-			.addText((text) =>
-				text
-					.setPlaceholder(placeholder)
-					.setValue(this.controlString(key))
-					.onChange((value) => {
-						if (validate) {
-							const error = validate(value);
-							if (error) {
-								new Notice(error);
-								return;
-							}
-						}
-						void this.setControlValue(key, value);
-					}),
-			);
-	}
-
-	// Wraps a custom block in a full-width row, reusing the same builder the
-	// declarative path runs via customBlock().render().
-	private renderCustomBlock(
-		container: HTMLElement,
-		build: (host: HTMLElement) => void,
-	): void {
-		this.customBlock(build).render(new Setting(container));
+		this.update();
 	}
 
 	// Version + links footer, the same trailing row the workspace's reference
@@ -942,11 +849,11 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		);
 	}
 
-	// Routes declarative controls to the plugin's own settings store and runs the
-	// side effects the imperative onChange handlers used to run inline. authorTag
-	// is trimmed but keeps its casing (the parser accepts mixed-case authors).
-	// Toggles that show or hide dependent rows, or that change the default-category
-	// options, trigger a full re-render via update().
+	// Routes declarative controls to the plugin's own settings store and runs
+	// each control's side effects in one place. authorTag is trimmed but keeps
+	// its casing (the parser accepts mixed-case authors). Toggles that show or
+	// hide dependent rows, or that change the default-category options, trigger
+	// a full re-render via update().
 	getControlValue(key: string): unknown {
 		return (this.plugin.settings as unknown as Record<string, unknown>)[
 			key
@@ -962,8 +869,26 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			(this.plugin.settings as unknown as Record<string, unknown>)[key] =
 				value;
 		}
+
+		// Turning a preset off removes categories from the offered set, and the
+		// default may have been one of them. The remove-category button refuses
+		// the delete in that situation, but refusing a toggle would be a strange
+		// thing to do to someone switching a preset off, so this repoints the
+		// default instead and says so. Running it for every key rather than for
+		// the index-entry toggle alone means a future preset switch cannot
+		// reintroduce the strand.
+		//
+		// Before the save, not after: the repointed value has to be part of what
+		// gets written, or the strand comes straight back on the next load.
+		const defaultMoved = reconcileDefaultCategory(this.plugin.settings);
+
 		await this.plugin.saveSettings();
 
+		// One re-render at the end rather than one per reason. Two of these can
+		// fire for the same change (switching the index-entry preset off both
+		// hides a row and moves the default), and the Hub already paid for a
+		// double repaint once.
+		let repaint = defaultMoved;
 		switch (key) {
 			case 'indicatorSize':
 				this.plugin.applyIndicatorSize();
@@ -976,9 +901,18 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			case 'enableIndexEntryPreset':
 			case 'enableAuthorTag':
 			case 'debugMode':
-				this.rerender();
+				repaint = true;
 				break;
 		}
+
+		if (defaultMoved) {
+			new Notice(
+				`Default category is now "${this.plugin.settings.defaultCategory}".`,
+			);
+		}
+		// The bound dropdown still shows the old id until the definitions are
+		// rebuilt, and its option list has to lose the removed category too.
+		if (repaint) this.rerender();
 	}
 
 	// Wraps a block of custom DOM (preset browser, category accordion, add-category
@@ -1344,13 +1278,12 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		// button just used is now disabled, so hand focus to the opposite one
 		// rather than to something inert.
 		//
-		// Which element is live depends on the Obsidian version, because the two
-		// rerender() paths differ. On 1.13+ update() leaves this custom block
-		// alone, so `list` is still the real element. On older builds rerender()
-		// empties containerEl and rebuilds the whole tree, so `list` is detached
-		// and the live row is a different node. Checking isConnected picks the
-		// right one either way; focus() on a detached node is a silent no-op, so
-		// getting this wrong would look like the feature simply not working.
+		// update() leaves a custom block's DOM alone, so `list` is normally still
+		// the live element and the first root hits. The containerEl fallback and
+		// the isConnected test stay because this code cannot prove that: whether a
+		// re-render replaces the block is Obsidian's decision, not ours, and
+		// focus() on a detached node is a silent no-op, so getting it wrong looks
+		// like the feature simply not working rather than like an error.
 		const refocusAfterMove = (direction: 'up' | 'down'): void => {
 			let moved: HTMLElement | undefined;
 			for (const root of [list, this.containerEl]) {

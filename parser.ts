@@ -12,7 +12,34 @@ import type {
 // Canonical regex from data-format.md "greppable regex" section. Matches the
 // entire marker, opening through closing. The category is captured; the rest of
 // the inner content is captured for line-level parsing.
-const MARKER_RE = /<!--\s*annoteca\/([a-z][a-z0-9-]*)\s*:([\s\S]*?)-->/g;
+//
+// The category group is factored out because two other places have to reject
+// anything this cannot read back, and all three have to be the SAME rule.
+// Written out separately they drift, and a drift here is invisible: the marker
+// is written, and nothing notices until the next parse silently fails to find
+// the comment.
+const CATEGORY_SRC = '[a-z][a-z0-9-]*';
+const MARKER_RE = new RegExp(
+	`<!--\\s*annoteca/(${CATEGORY_SRC})\\s*:([\\s\\S]*?)-->`,
+	'g',
+);
+const SERIALIZABLE_CATEGORY_RE = new RegExp(`^${CATEGORY_SRC}$`);
+
+// Can a category id survive a write and be found again? This is the grammar
+// question, and it is NOT the same question as isValidCategoryName in
+// categories.ts, which is the house style for a name the user is CREATING and
+// is deliberately stricter (no double dashes, no trailing dash, no format
+// keywords).
+//
+// The distinction matters at every ingress. `my--topic` breaks the house style
+// but round-trips through the marker perfectly, so a stored category shaped
+// like that is a working category, and validating stored data against the
+// creation rule would delete a category that does its job. Enforce the house
+// style where a name is being made up; enforce this where one is being read
+// back or written out.
+export function isSerializableCategory(category: string): boolean {
+	return SERIALIZABLE_CATEGORY_RE.test(category);
+}
 
 // Permissive trailing-line patterns. The strict category-name rules live in
 // categories.ts. An author is any single token up to 32 chars: the class
@@ -709,7 +736,29 @@ export interface SerializeInput {
 	resolution?: Resolution;
 }
 
+// A category that MARKER_RE cannot match makes the whole marker invisible: it
+// stays in the file as text the parser never finds, so the comment is gone from
+// the panel, from the editor and from every count, while its words sit in the
+// document. `data.json` is the way in, since the settings UI enforces the
+// stricter isValidCategoryName; a hand edit or a synced file is not obliged to.
+//
+// The test is MARKER_RE's own category group and NOT isValidCategoryName, which
+// is stricter than the grammar (it also forbids double dashes, trailing dashes
+// and the five reserved keywords). A hand-authored `annoteca/my--topic` marker
+// parses today, so validating against the stricter rule would rewrite it to
+// `uncategorized` the first time someone replied to it: destroying a working
+// category to prevent a problem it does not have.
+//
+// `uncategorized` and not the raw value, because serialize()'s return is
+// spliced into the document. Returning the bare category, as one review round
+// proposed, replaces the entire marker with that string and deletes the comment
+// outright.
+function serializableCategory(category: string): string {
+	return isSerializableCategory(category) ? category : 'uncategorized';
+}
+
 export function serialize(c: SerializeInput): string {
+	const category = serializableCategory(c.category);
 	// Every free-text field is escaped on the way out and unescaped on the way
 	// back in, so a body, note, anchor or reply holding `-->` round-trips
 	// instead of closing the marker early. See escapeTerminator.
@@ -731,11 +780,11 @@ export function serialize(c: SerializeInput): string {
 		!hasResolution &&
 		!bodyMultiline
 	) {
-		return `<!-- annoteca/${c.category}: ${body} -->`;
+		return `<!-- annoteca/${category}: ${body} -->`;
 	}
 
 	const lines: string[] = [];
-	lines.push(`<!-- annoteca/${c.category}: ${body}`);
+	lines.push(`<!-- annoteca/${category}: ${body}`);
 	if (c.id !== undefined) lines.push(`[id=${c.id}]`);
 	if (c.date !== undefined) lines.push(`[date=${c.date}]`);
 	if (c.author !== undefined)

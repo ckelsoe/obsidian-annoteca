@@ -497,14 +497,20 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 
 		const content = container.createDiv({ cls: 'annoteca-hub-content' });
 		switch (this.activeTab) {
-			case 'thread':
-				this.threadRenderer.render(content);
-				break;
 			case 'outline':
 				this.outlineRenderer.render(content);
 				break;
 			case 'starred':
 				this.starredRenderer.render(content);
+				break;
+			// Thread is the default arm, not a case of its own. lastHubTab comes
+			// out of data.json and is validated on the way in, but a switch with
+			// no default renders an EMPTY panel for anything unexpected, and an
+			// empty panel reads as "the plugin is broken" rather than as a bad
+			// stored value. One line to make the failure mode a wrong tab.
+			case 'thread':
+			default:
+				this.threadRenderer.render(content);
 				break;
 		}
 	}

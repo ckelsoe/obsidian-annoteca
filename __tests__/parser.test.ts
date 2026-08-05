@@ -1884,3 +1884,80 @@ describe('parser: findMalformedMarkers sees unclosed openers', () => {
 		expect(findMalformedMarkers(text)).toEqual([]);
 	});
 });
+
+describe('parser: serialize refuses a category it cannot re-parse', () => {
+	// data.json is the way a category like this gets in. The settings UI enforces
+	// the stricter isValidCategoryName, but a hand edit or a synced file is not
+	// obliged to, and serialize()'s output is spliced straight into the document.
+	const roundTrip = (category: string) => {
+		const text = serialize({ category, body: 'the body survives' });
+		return { text, comments: parseAll(text) };
+	};
+
+	it('emits uncategorized for a category holding a bracket and a newline', () => {
+		const { comments } = roundTrip('bad]cat\nname');
+		// The original finding: without the guard the marker is written but
+		// MARKER_RE never matches it, so the comment is invisible everywhere
+		// while its words sit in the document as prose.
+		expect(comments).toHaveLength(1);
+		expect(comments[0]?.category).toBe('uncategorized');
+		expect(comments[0]?.body).toBe('the body survives');
+	});
+
+	it('emits uncategorized rather than the bare category string', () => {
+		// One review round proposed `if (!valid) return c.category`. serialize()'s
+		// return value replaces the whole marker, so that deletes the comment.
+		const { text } = roundTrip('bad]cat\nname');
+		expect(text.startsWith('<!-- annoteca/uncategorized:')).toBe(true);
+		expect(text).toContain('the body survives');
+	});
+
+	it('rejects every shape that breaks the marker grammar', () => {
+		for (const category of [
+			'bad]cat\nname',
+			'has space',
+			'Uppercase',
+			'9leading-digit',
+			'holds-->terminator',
+			'',
+			'trailing:colon',
+		]) {
+			const { comments } = roundTrip(category);
+			expect(comments).toHaveLength(1);
+			expect(comments[0]?.category).toBe('uncategorized');
+		}
+	});
+
+	it('leaves alone every category the grammar can actually read back', () => {
+		// Deliberately wider than isValidCategoryName, which also forbids double
+		// dashes, trailing dashes and the reserved keywords. Those all parse, so
+		// rewriting them would destroy a working category to fix nothing.
+		for (const category of [
+			'clarify',
+			'source-needed',
+			'my--topic',
+			'trailing-',
+			'reply',
+			'a',
+			'a1',
+		]) {
+			const { comments } = roundTrip(category);
+			expect(comments).toHaveLength(1);
+			expect(comments[0]?.category).toBe(category);
+		}
+	});
+
+	it('holds on the multi-line branch too', () => {
+		const text = serialize({
+			category: 'bad]cat\nname',
+			body: 'the body survives',
+			id: 'abcd1234',
+			replies: [{ author: 'bob', date: '2026-08-05', body: 'a reply' }],
+		});
+		const comments = parseAll(text);
+		expect(comments).toHaveLength(1);
+		expect(comments[0]?.category).toBe('uncategorized');
+		expect(comments[0]?.id).toBe('abcd1234');
+		expect(comments[0]?.replies).toHaveLength(1);
+	});
+});
