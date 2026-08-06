@@ -1315,11 +1315,56 @@ export function findMalformedMarkers(content: string): MalformedMarker[] {
 		});
 	}
 
+	// Every unescaped opener in document order, so each one can be asked whether
+	// its OWN terminator arrives before the next opener does.
+	//
+	// That question has to be asked, and asking it is what keeps this loop from
+	// reporting a closed marker as an unclosed one. OPENER_ANYWHERE_RE is
+	// case-insensitive by design, so a near-miss is still reported; the first
+	// scan above is case-SENSITIVE, so it never sees `<!-- Annoteca/Todo: x -->`
+	// and that marker fell through to here and was called "no closing `-->`"
+	// while its terminator sat two words away.
+	//
+	// The wrong word used to be the whole cost. It is not any more: an
+	// 'unclosed-opener' finding blocks every write that would REMOVE a marker
+	// below it and marks the span to the next terminator off-limits to bulk
+	// convert, so one miscategorized near-miss disables both for the rest of the
+	// note. 'malformed' says the same thing about the document and blocks
+	// nothing, which is right for a marker that closes itself and merely cannot
+	// be read.
+	const openers: number[] = [];
 	OPENER_ANYWHERE_RE.lastIndex = 0;
 	while ((match = OPENER_ANYWHERE_RE.exec(content)) !== null) {
-		const at = match.index;
-		if (valid.has(at) || reported.has(at)) continue;
-		if (backslashRunBefore(content, at) > 0) continue;
+		if (backslashRunBefore(content, match.index) === 0)
+			openers.push(match.index);
+	}
+
+	for (let i = 0; i < openers.length; i++) {
+		const at = openers[i];
+		if (at === undefined || valid.has(at) || reported.has(at)) continue;
+		// The next opener bounds the search: a terminator BEYOND it belongs to
+		// that opener, not to this one. This is the same rule scanMarkers pairs
+		// by, asked here without re-parsing.
+		//
+		// Searching the INTERVAL rather than the tail is what keeps this linear.
+		// `indexOf(TERMINATOR, at)` scans to end of document whenever there is no
+		// terminator after `at`, which is exactly the damaged note this loop
+		// exists for, so a file full of unclosed openers cost one full scan per
+		// opener. The intervals are disjoint, so the total work is one pass over
+		// the document however many openers it holds. A terminator cannot
+		// straddle the boundary: `-->` holds no `<`, and the next opener starts
+		// with one.
+		const nextOpener = openers[i + 1] ?? content.length;
+		const closes = content.slice(at, nextOpener).indexOf(TERMINATOR);
+		if (closes !== -1) {
+			out.push({
+				start: at,
+				excerpt: excerptAt(at),
+				reason: 'Marker did not match the canonical Annoteca format.',
+				kind: 'malformed',
+			});
+			continue;
+		}
 		out.push({
 			start: at,
 			excerpt: excerptAt(at),

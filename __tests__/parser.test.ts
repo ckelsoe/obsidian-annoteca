@@ -6,6 +6,8 @@ import {
 	todayISO,
 	nowISO,
 	findMalformedMarkers,
+	findRemovalBlocker,
+	unclosedOpenerRanges,
 	buildAnchorFromSelection,
 	ANCHOR_MAX_CHARS,
 	isAuthorToken,
@@ -2175,6 +2177,58 @@ describe('parser: findMalformedMarkers sees unclosed openers', () => {
 		// Specifically: the second scan's finding is the earlier one.
 		expect(found[0]?.kind).toBe('unclosed-opener');
 		expect(found[found.length - 1]?.kind).toBe('malformed');
+	});
+
+	it('calls a closed near-miss malformed, not unclosed', () => {
+		// The opener scan is case-insensitive so a near-miss is still reported,
+		// and the malformed scan is case-SENSITIVE, so a wrong-case namespace
+		// fell between them and was reported as "no closing `-->`" with its
+		// terminator two words away.
+		//
+		// The wrong word is no longer the whole cost. 'unclosed-opener' now
+		// blocks every write that would REMOVE a marker below it and marks the
+		// span to the next terminator off-limits to bulk convert, so one
+		// miscategorized near-miss would disable both for the rest of the note.
+		const text = 'Prose. <!-- Annoteca/Todo: text --> more prose.';
+		const found = findMalformedMarkers(text);
+		expect(found.map((f) => f.kind)).toEqual(['malformed']);
+	});
+
+	it('still calls a near-miss with no terminator unclosed', () => {
+		// The control for the rule above: same opener, no `-->` of its own.
+		const text = 'Prose. <!-- Annoteca/Todo: text and no terminator';
+		const found = findMalformedMarkers(text);
+		expect(found.map((f) => f.kind)).toEqual(['unclosed-opener']);
+	});
+
+	it('does not let a closed near-miss block a delete or a conversion', () => {
+		// The two consumers of the distinction, asserted directly.
+		const text = [
+			'Prose. <!-- Annoteca/Todo: a near miss that closes itself -->',
+			'',
+			'<!-- annoteca/tone: a real comment',
+			'[id=nearms01]',
+			'-->',
+		].join('\n');
+		const real = parseAll(text)[0];
+		expect(real?.id).toBe('nearms01');
+		expect(findRemovalBlocker(text, [real!.marker])).toBeUndefined();
+		expect(unclosedOpenerRanges(text)).toEqual([]);
+	});
+
+	it('takes the terminator beyond the next opener as belonging to that one', () => {
+		// A terminator past a second opener is not this opener's, so this one is
+		// genuinely unclosed. Same rule scanMarkers pairs by.
+		const text = [
+			'<!-- Annoteca/Todo: a near miss that never closes',
+			'',
+			'<!-- annoteca/tone: a real comment',
+			'[id=nearms02]',
+			'-->',
+		].join('\n');
+		const found = findMalformedMarkers(text);
+		expect(found.map((f) => f.kind)).toEqual(['unclosed-opener']);
+		expect(found[0]?.start).toBe(0);
 	});
 
 	it('reports a generic HTML comment inside a marker as a possible merge', () => {
