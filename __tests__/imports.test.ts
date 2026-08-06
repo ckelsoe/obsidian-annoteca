@@ -946,6 +946,51 @@ describe('protectedRanges: indented code and nested fences', () => {
 		expect(r.updated).toContain('annoteca/uncategorized: real');
 	});
 
+	// The fence indent is measured in COLUMNS, like the allowance it is compared
+	// against. Counting it in characters made a tab-indented ``` at the margin
+	// (one character, four columns) look like a fence opener. It never closed,
+	// so the rest of the file was protected and every real comment below it was
+	// skipped and reported as "converted 0". The reference CommonMark
+	// implementation agrees the comment here is prose.
+	it('does not read a tab-indented fence marker at the margin as a fence', () => {
+		const doc = 'Prose.\n\n\t```\n\nOrdinary %%real%% comment.';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(1);
+		expect(r.updated).toContain('annoteca/uncategorized: real');
+	});
+
+	it('does the same for a tilde fence marker', () => {
+		const doc = 'Prose.\n\n\t~~~\n\nOrdinary %%real%% comment.';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(1);
+		expect(r.updated).toContain('annoteca/uncategorized: real');
+	});
+
+	// Inside a block quote the indent stays character-counted. A quote marker
+	// swallows a space of what follows it, so a column count taken from the start
+	// of the line charges the fence for indentation the marker already consumed:
+	// `> \t~~~` measured that way is four columns instead of two, stops being a
+	// fence, and bulk convert rewrites the sample inside a quoted code block.
+	it.each([
+		['a space then a tab', '> \t'],
+		['a bare tab', '>\t'],
+		['a nested quote', '> > \t'],
+	])('keeps a quoted fence indented with %s', (_label, prefix) => {
+		const doc = `${prefix}~~~\n${prefix}%%sample%%\n${prefix}~~~\n`;
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
+	});
+
+	it('still recognises a tab-indented fence inside a list item', () => {
+		// One tab is four columns, and this item's content starts at two, so the
+		// fence is two columns past it and inside the allowance.
+		const doc = '- Step:\n\n\t~~~\n\t%%sample%%\n\t~~~\n';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
+	});
+
 	it('goes back to the absolute rule once the list is over', () => {
 		const doc =
 			'- item\n\nParagraph.\n\n    %%sample in real indented code%%\n';

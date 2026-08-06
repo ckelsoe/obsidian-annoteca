@@ -183,10 +183,22 @@ function leadingIndent(line: string): number {
 function indentColumns(line: string): number {
 	let col = 0;
 	for (const ch of line) {
-		if (ch === ' ') col += 1;
-		else if (ch === '\t') col += 4 - (col % 4);
+		if (ch === ' ' || ch === '\t') col = advanceColumns(ch, col);
 		else break;
 	}
+	return col;
+}
+
+// Advance a column counter across `text`, a tab landing on the next multiple of
+// four. Every column measurement in this file goes through it, so a tab cannot
+// be worth four columns in one rule and one column in another: measuring a
+// fence's indent in CHARACTERS while measuring the allowance it is compared
+// against in columns read a tab-indented ``` at the margin as a fence opener,
+// which never closed and protected the rest of the file, so every real comment
+// below it was skipped and reported as "converted 0".
+function advanceColumns(text: string, from: number): number {
+	let col = from;
+	for (const ch of text) col += ch === '\t' ? 4 - (col % 4) : 1;
 	return col;
 }
 
@@ -209,9 +221,7 @@ function listContentColumns(line: string): number {
 	const m = LIST_MARKER_RE.exec(line);
 	if (!m) return 0;
 	const markerEnd = indentColumns(line) + (m[2]?.length ?? 0);
-	const spaces = m[3] ?? '';
-	let col = markerEnd;
-	for (const ch of spaces) col += ch === '\t' ? 4 - (col % 4) : 1;
+	const col = advanceColumns(m[3] ?? '', markerEnd);
 	// A marker with no padding still opens content one column along.
 	if (col - markerEnd === 0 || col - markerEnd >= 5) return markerEnd + 1;
 	return col;
@@ -486,8 +496,27 @@ function protectedRanges(content: string): ProtectedRange[] {
 		// Three columns past the containing block's content, per CommonMark. A
 		// fence run further in than that is not a fence; outside a list that is
 		// the absolute three columns this used to hard-code.
+		//
+		// In COLUMNS, like the allowance it is compared against, but only OUTSIDE
+		// a block quote.
+		//
+		// Inside one the indent is still counted in characters, which is what
+		// this rule did before columns arrived. A quote marker swallows a space
+		// of what follows it, and a nested quote swallows one per level, so a
+		// column count taken from the start of the line charges the fence for
+		// indentation the markers already consumed. Measuring `> \t~~~` that way
+		// made it four columns instead of two and stopped it being a fence at
+		// all, and bulk convert then rewrote the `%%samples%%` inside a quoted
+		// code block. Executed against the reference CommonMark implementation:
+		// three quoted shapes regressed that way, and counting characters here
+		// leaves quoted fences reading exactly as they did before this PR.
+		const quoted = (fence?.[1] ?? '') !== '';
+		const rawIndent = fence?.[2] ?? '';
+		const fenceIndent = quoted
+			? rawIndent.length
+			: advanceColumns(rawIndent, 0);
 		const fenceRun =
-			fence !== null && (fence[2]?.length ?? 0) <= (innerItem() ?? 0) + 3
+			fence !== null && fenceIndent <= (innerItem() ?? 0) + 3
 				? fence[3]
 				: undefined;
 		if (openFence !== undefined) {

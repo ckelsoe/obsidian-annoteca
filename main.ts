@@ -939,7 +939,11 @@ export default class AnnotecaPlugin extends Plugin {
 		let added = false;
 		for (const f of this.app.vault.getMarkdownFiles()) {
 			if (this.commentIndex.get(f.path)) continue;
-			const content = await this.app.vault.cachedRead(f);
+			// The same source a write would use, not the cache alone. This runs
+			// only in front of operations that DELETE persisted state on the
+			// strength of what the index holds, so an open note's unsaved buffer
+			// is the reading that must win if the two ever disagree.
+			const content = await this.comments.currentContentFor(f.path, f);
 			this.commentIndex.rebuild(f.path, content);
 			added = true;
 		}

@@ -62,6 +62,11 @@ function makeHarness(initial: Record<string, string>) {
 		vaultScanned: false,
 		settings: { starredComments: [] as string[] },
 		events: { trigger: () => undefined },
+		// No note is open in these, so the service's answer is the vault's.
+		comments: {
+			currentContentFor: (path: string) =>
+				Promise.resolve(files.get(path) ?? ''),
+		},
 		app: {
 			vault: {
 				getMarkdownFiles: () => [...files.keys()].map(tfile),
@@ -212,6 +217,7 @@ describe('runDriftCheck against a stale index', () => {
 
 	it('keeps the snapshot of a comment in a note that arrived after the scan', async () => {
 		const files = new Map<string, string>([['welcome.md', 'nothing here']]);
+		const reads: string[] = [];
 		const tfile = (path: string): TFile => {
 			const f = new TFile();
 			Object.assign(f, { path, extension: 'md' });
@@ -229,11 +235,19 @@ describe('runDriftCheck against a stale index', () => {
 				},
 			},
 			events: { trigger: () => undefined },
+			comments: {
+				currentContentFor: (path: string) => {
+					reads.push(`service:${path}`);
+					return Promise.resolve(files.get(path) ?? '');
+				},
+			},
 			app: {
 				vault: {
 					getMarkdownFiles: () => [...files.keys()].map(tfile),
-					cachedRead: (f: TFile) =>
-						Promise.resolve(files.get(f.path) ?? ''),
+					cachedRead: (f: TFile) => {
+						reads.push(`cache:${f.path}`);
+						return Promise.resolve(files.get(f.path) ?? '');
+					},
 					// A drift finding makes the service write its report; these
 					// are here only so it can, not because they are under test.
 					getAbstractFileByPath: () => null,
@@ -258,6 +272,63 @@ describe('runDriftCheck against a stale index', () => {
 
 		expect(Object.keys(plugin.settings.driftSnapshots)).toContain(
 			'live0001',
+		);
+		// detectDrift slices this content with offsets that came from the index,
+		// so both must come from the same source. Reading the cache here while
+		// the index was built from an editor buffer invents drift findings and
+		// persists the bad baseline computed from them.
+		expect(reads).toContain('service:a.md');
+		expect(reads).not.toContain('cache:a.md');
+	});
+});
+
+// indexUnseenFiles feeds only operations that DELETE persisted state, so the
+// content it indexes must be the same content a write would see: an open note's
+// unsaved buffer, not the cache it lags behind.
+describe('indexUnseenFiles content source', () => {
+	it('indexes an unseen note from the editor buffer when one holds it', async () => {
+		const files = new Map<string, string>([['welcome.md', 'nothing here']]);
+		const tfile = (path: string): TFile => {
+			const f = new TFile();
+			Object.assign(f, { path, extension: 'md' });
+			return f;
+		};
+		const editorText = noteWith('typed001');
+		const plugin = Object.create(
+			AnnotecaPlugin.prototype,
+		) as unknown as PluginUnderTest;
+		Object.assign(plugin, {
+			commentIndex: new CommentIndex(),
+			vaultScanned: false,
+			settings: { starredComments: [] as string[] },
+			events: { trigger: () => undefined },
+			// The service reaches the open note; the vault still holds the old
+			// bytes, which is what "unsaved" means.
+			comments: {
+				currentContentFor: (path: string) =>
+					Promise.resolve(
+						path === 'unsaved.md'
+							? editorText
+							: (files.get(path) ?? ''),
+					),
+			},
+			app: {
+				vault: {
+					getMarkdownFiles: () => [...files.keys()].map(tfile),
+					cachedRead: (f: TFile) =>
+						Promise.resolve(files.get(f.path) ?? ''),
+				},
+			},
+			saveSettings: () => Promise.resolve(),
+		});
+
+		await plugin.scanVaultIfNeeded();
+		// The note appears, and its comment exists only in the editor so far.
+		files.set('unsaved.md', 'saved bytes with no comment');
+		await plugin.indexUnseenFiles();
+
+		expect(plugin.commentIndex.get('unsaved.md')?.comments[0]?.id).toBe(
+			'typed001',
 		);
 	});
 });

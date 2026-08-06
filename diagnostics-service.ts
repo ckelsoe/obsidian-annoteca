@@ -117,7 +117,16 @@ export class DiagnosticsService {
 		const files = this.plugin.app.vault.getMarkdownFiles();
 		const liveIds = new Set<string>();
 		for (const f of files) {
-			const content = await this.plugin.app.vault.cachedRead(f);
+			// The SAME source the index was built from, not the cache. detectDrift
+			// slices this text using offsets that came from those comments, so
+			// content and index disagreeing is not a stale reading, it is a wrong
+			// one: an open note with unsaved typing would have its markers sliced
+			// at buffer offsets out of cached text, inventing a drift finding and
+			// persisting the bad baseline it computed from it.
+			const content = await this.plugin.comments.currentContentFor(
+				f.path,
+				f,
+			);
 			const idx = this.plugin.commentIndex.get(f.path);
 			const comments = idx?.comments ?? [];
 			for (const c of comments) if (c.id) liveIds.add(c.id);
