@@ -19,6 +19,7 @@
 import { MarkdownView, Notice, TFile } from 'obsidian';
 
 import type AnnotecaPlugin from './main';
+import type { ImportResult } from './imports';
 import type { Addressed, Comment, Reply } from './types';
 import { parseAll, serialize, nowISO } from './parser';
 
@@ -624,6 +625,96 @@ export class CommentService {
 		return wrote ? 'written' : 'missing';
 	}
 
+	// Bulk import's per-file write, which is a write this plugin CONTROLS and so
+	// belongs in the queue with every other verb.
+	//
+	// It used to live in main.ts as `vault.read` -> convert -> `vault.modify`,
+	// the one mutating path neither the queue nor the staleness check covered,
+	// and the doc comment on `enqueue` below claimed exactly that gap was closed.
+	// Two failures came out of it, both executed against a real filesystem:
+	//
+	//   1. LOST WRITE. A Resolve clicked while the sweep runs lands through
+	//      `vault.process`, then bulk convert's blind `modify` of a document it
+	//      read BEFORE that puts the old text back. The note comes back with no
+	//      `[resolved ...]` line while the only notice the user saw was
+	//      "Resolved." Reproduced at 2 of 72 trials on real I/O, and
+	//      deterministically under a strict per-file FIFO vault, because the
+	//      staleness lives in the sweep's own read and the writer had no guard.
+	//   2. CLOBBERED BY AUTOSAVE. `vault.modify` on a file open in an editor is
+	//      what the header of this file says must never happen: the editor
+	//      flushes its now-stale buffer back over the write.
+	//
+	// The conversion runs INSIDE the write rather than before it, which is what
+	// makes the count honest. `convert` is pure and synchronous, so it can run
+	// inside `vault.process`'s callback, and the number returned is the number
+	// that was computed from the bytes actually written.
+	// The content a write to this path would be computed from: the editor's
+	// buffer when the note is open in one, the vault's cache otherwise.
+	//
+	// Exists so a caller deciding whether to bother writing asks the same source
+	// the write itself will. `cachedRead` alone is not that source: it lags an
+	// open editor by everything the user has typed since the last save, so a
+	// sweep that pre-filtered on it skipped the note a comment had just been
+	// typed into and reported that there had been nothing to convert. Bulk
+	// convert visits each file once, so there is no later pass to catch it.
+	async currentContentFor(path: string, file: TFile): Promise<string> {
+		return this.contentFor(path, file, (f) =>
+			this.plugin.app.vault.cachedRead(f),
+		);
+	}
+
+	async convertFileComments(
+		path: string,
+		file: TFile,
+		convert: (content: string) => ImportResult,
+	): Promise<number> {
+		return this.enqueue(path, () =>
+			this.convertFileCommentsUnqueued(path, file, convert),
+		);
+	}
+
+	private async convertFileCommentsUnqueued(
+		path: string,
+		file: TFile,
+		convert: (content: string) => ImportResult,
+	): Promise<number> {
+		const view = this.getOpenMarkdownView(path);
+		if (view) {
+			// The editor's document is the truth for an open file, and writing
+			// back through it is what keeps the buffer and the disk in step.
+			// Replaced whole rather than spliced: "Convert all" is two passes and
+			// the second pass's offsets index the FIRST pass's output, so splices
+			// composed across them would be applied to the wrong string. The
+			// operation is a confirmed vault-wide rewrite, so collapsing it to one
+			// undo step is the honest shape for it anyway.
+			const current = view.editor.getValue();
+			const result = convert(current);
+			if (result.converted === 0) return 0;
+			view.editor.replaceRange(
+				result.updated,
+				view.editor.offsetToPos(0),
+				view.editor.offsetToPos(current.length),
+			);
+			this.plugin.commentIndex.rebuild(path, result.updated);
+			this.plugin.events.trigger('index-changed', { path });
+			return result.converted;
+		}
+		let converted = 0;
+		// Read, convert and write under one lock. Returning `current` unchanged
+		// when there is nothing to convert matters: the caller pre-filters off the
+		// cache, but the cache can be stale, and rewriting identical bytes would
+		// touch mtime on the file and hand every sync client a spurious change.
+		const updated = await this.plugin.app.vault.process(file, (current) => {
+			const result = convert(current);
+			converted = result.converted;
+			return result.converted === 0 ? current : result.updated;
+		});
+		if (converted === 0) return 0;
+		this.plugin.commentIndex.rebuild(path, updated);
+		this.plugin.events.trigger('index-changed', { path });
+		return converted;
+	}
+
 	// Reads the tag; it does not repair it. `normalizeSettings` is the single
 	// ingress for data.json and already runs `authorTag` through the token
 	// grammar, so anything reaching here is a string that is either empty or a
@@ -652,16 +743,27 @@ export class CommentService {
 		return undefined;
 	}
 
-	// Read the truth that a subsequent write must reconcile with. If the file
-	// is open in an editor, the editor's value is the truth (it may have
-	// unsaved typing the user expects to keep). Otherwise read from vault.
-	private async readCurrentContent(
-		file: TFile,
+	// Where this service's idea of a note's current text comes from. If the file
+	// is open in an editor, the editor's value is the truth (it may have unsaved
+	// typing the user expects to keep). Otherwise it comes from the vault, and
+	// WHICH vault read is the only thing the two callers below disagree about.
+	private async contentFor(
 		path: string,
+		file: TFile,
+		read: (f: TFile) => Promise<string>,
 	): Promise<string> {
 		const view = this.getOpenMarkdownView(path);
 		if (view) return view.editor.getValue();
-		return this.plugin.app.vault.read(file);
+		return read(file);
+	}
+
+	// Read the truth that a subsequent write must reconcile with, which is worth
+	// a fresh read: applySplices compares against it and refuses on a mismatch,
+	// so a cached copy would turn an ordinary write into a spurious refusal.
+	private readCurrentContent(file: TFile, path: string): Promise<string> {
+		return this.contentFor(path, file, (f) =>
+			this.plugin.app.vault.read(f),
+		);
 	}
 
 	// Re-resolve a comment against the current file content, returning the LIVE

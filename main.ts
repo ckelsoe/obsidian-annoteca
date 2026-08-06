@@ -73,7 +73,11 @@ import {
 } from './views';
 import type { ComposerRequest } from './composer';
 import { nowISO } from './parser';
-import { convertAllComments, type ImportFormat } from './imports';
+import {
+	convertAllComments,
+	type ImportFormat,
+	type ImportResult,
+} from './imports';
 import {
 	ConfirmBackupModal,
 	ConfirmDeleteCommentModal,
@@ -379,6 +383,25 @@ export default class AnnotecaPlugin extends Plugin {
 	}
 
 	private registerFileEvents(): void {
+		// 'create' is registered inside onLayoutReady, not here. Obsidian fires it
+		// for every existing file while the vault loads, so registering it in
+		// onload would read the whole vault on startup for no benefit; after
+		// layout-ready it only fires for files that genuinely arrive.
+		//
+		// Without it the index had no path at all for a note that appears while
+		// the plugin is running: 'modify' does not fire for a new file, and
+		// 'file-open' only fires if the user opens it. A synced note was therefore
+		// invisible to the index all session, and its comments looked deleted to
+		// anything that asked.
+		this.app.workspace.onLayoutReady(() => {
+			this.registerEvent(
+				this.app.vault.on('create', (file) => {
+					if (file instanceof TFile && file.extension === 'md') {
+						void this.rebuildIndexForFile(file);
+					}
+				}),
+			);
+		});
 		this.registerEvent(
 			this.app.vault.on('modify', (file) => {
 				if (file instanceof TFile && file.extension === 'md') {
@@ -892,6 +915,41 @@ export default class AnnotecaPlugin extends Plugin {
 		this.events.trigger('index-changed');
 	}
 
+	// Index every markdown file the index has never seen, whatever the latch
+	// says. `scanVaultIfNeeded` is one-shot on `vaultScanned`, which nothing ever
+	// resets and the hub's onOpen trips in essentially every session, so it is
+	// not a guarantee that the index knows about the vault as it is NOW.
+	//
+	// A note that arrives after that latch (a sync, another device, an assistant
+	// writing a file) and is never opened is absent from the index for the rest
+	// of the session, and any caller that reads "absent from the index" as "not
+	// in the vault" is then wrong about user data. Executed: with the latch set
+	// and two notes synced in afterwards, clearOrphanedStars deleted both of
+	// their live stars and reported "Cleared 2 orphaned stars."
+	//
+	// Files already indexed are left alone: `rebuild` costs a read, and staleness
+	// of a file the index HAS is the file-event handlers' job, not this one's.
+	//
+	// Public because the callers that NEED it are the ones that delete persisted
+	// state when an id is absent from the index, and one of those lives in
+	// diagnostics-service. Read-only consumers do not call it: a stale hub tab
+	// redraws on the next event, so being briefly behind costs a repaint, while
+	// being briefly behind here costs user data.
+	async indexUnseenFiles(): Promise<void> {
+		let added = false;
+		for (const f of this.app.vault.getMarkdownFiles()) {
+			if (this.commentIndex.get(f.path)) continue;
+			// The same source a write would use, not the cache alone. This runs
+			// only in front of operations that DELETE persisted state on the
+			// strength of what the index holds, so an open note's unsaved buffer
+			// is the reading that must win if the two ever disagree.
+			const content = await this.comments.currentContentFor(f.path, f);
+			this.commentIndex.rebuild(f.path, content);
+			added = true;
+		}
+		if (added) this.events.trigger('index-changed');
+	}
+
 	private refreshActiveFileIndex(): void {
 		const active = this.app.workspace.getActiveFile();
 		if (active && active.extension === 'md') {
@@ -1287,6 +1345,10 @@ export default class AnnotecaPlugin extends Plugin {
 		// delete stars that are perfectly live. Stars are user data; erring
 		// costs more than the scan does.
 		await this.scanVaultIfNeeded();
+		// And the scan above is one-shot, so on its own it is a guarantee about
+		// the vault as it was the FIRST time anything asked, not as it is now.
+		// This closes that gap before a single id is treated as an orphan.
+		await this.indexUnseenFiles();
 		const live = new Set<string>();
 		for (const idx of this.commentIndex.all()) {
 			for (const c of idx.comments) if (c.id) live.add(c.id);
@@ -1936,15 +1998,29 @@ export default class AnnotecaPlugin extends Plugin {
 
 	private async runBulkConvert(format: ImportFormat): Promise<void> {
 		const files = this.app.vault.getMarkdownFiles();
+		const convert = (content: string): ImportResult =>
+			convertAllComments(content, format, 'uncategorized');
 		let totalConverted = 0;
 		let filesTouched = 0;
 		for (const f of files) {
-			const content = await this.app.vault.read(f);
-			const result = convertAllComments(content, format, 'uncategorized');
-			if (result.converted === 0) continue;
-			await this.app.vault.modify(f, result.updated);
-			this.commentIndex.rebuild(f.path, result.updated);
-			totalConverted += result.converted;
+			// Pre-filter so the write below is only attempted for files that have
+			// something to convert, which keeps a vault-wide sweep from touching
+			// the mtime of every note that has nothing in it.
+			//
+			// Asked of the SAME source the write will use, not of the cache: an
+			// open note's unsaved buffer is the truth for that note, and filtering
+			// on the cache skipped a comment the user had just typed. This is
+			// still only a filter; the count that reaches the notice is recomputed
+			// inside the write, from the bytes actually written.
+			const source = await this.comments.currentContentFor(f.path, f);
+			if (convert(source).converted === 0) continue;
+			const converted = await this.comments.convertFileComments(
+				f.path,
+				f,
+				convert,
+			);
+			if (converted === 0) continue;
+			totalConverted += converted;
 			filesTouched += 1;
 		}
 		this.events.trigger('index-changed');
