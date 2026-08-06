@@ -15,6 +15,8 @@
 
 import { Component, MarkdownRenderer, type App } from 'obsidian';
 
+import { escapeOpener } from './parser';
+
 export interface MarkdownRenderHost {
 	app: App;
 	// Owns the lifecycle of whatever the render creates: embeds, code-block
@@ -54,10 +56,17 @@ export function renderCommentMarkdown(
 		el.textContent = markdown;
 		return el;
 	}
+	// `<!--` opens an HTML comment in rendered markdown, so an unescaped one
+	// here hides the rest of the body, and an unmatched one hides everything
+	// after it in the surface. The format stores it escaped for the marker's
+	// sake and the parser hands back the user's literal text, so the escape has
+	// to be reapplied at this boundary or the text the format now preserves is
+	// invisible in the plugin's own UI. Only the rendered path needs it; the
+	// plain-text fallback above sets textContent, which cannot be interpreted.
 	el.classList.add('annoteca-md');
 	void MarkdownRenderer.render(
 		host.app,
-		markdown,
+		escapeOpener(markdown),
 		el,
 		host.sourcePath,
 		host.component,

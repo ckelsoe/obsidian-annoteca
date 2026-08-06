@@ -1348,3 +1348,68 @@ describe('protectedRanges: quoted containers, relative frames', () => {
 		expect(r.updated).toContain('annoteca/uncategorized: real');
 	});
 });
+
+// ---------------------------------------------------------------------------
+// The span an unclosed opener hides is protected even though it is no longer a
+// marker.
+//
+// It used to be one, by accident: an opener with no terminator paired with the
+// next marker's, so scanMarkers reported the whole region and this pass skipped
+// it for free. Refusing that pairing takes the span off scanMarkers' list, and
+// nothing else was watching it.
+// ---------------------------------------------------------------------------
+
+describe('bulk convert leaves an unclosed-opener region alone', () => {
+	const damaged = [
+		'Intro %%convert me%% prose.',
+		'',
+		'<!-- annoteca/todo: this one never closed',
+		'',
+		'A paragraph with %%a native comment%% inside the hidden region.',
+		'',
+		'<!-- annoteca/question: second comment',
+		'[id=bbbbbbbb]',
+		'-->',
+		'',
+		'Outro %%convert me too%% prose.',
+	].join('\n');
+
+	it('converts outside the region and nothing inside it', () => {
+		const r = convertNativeComments(damaged, 'uncategorized');
+		expect(r.converted).toBe(2);
+		expect(r.updated).toContain(
+			'A paragraph with %%a native comment%% inside',
+		);
+		expect(r.updated).toContain('annoteca/uncategorized: convert me ');
+		expect(r.updated).toContain('annoteca/uncategorized: convert me too');
+	});
+
+	it('protects the region through the generic-HTML pass too', () => {
+		const html = [
+			'<!-- annoteca/todo: never closed',
+			'',
+			'<!-- an ordinary comment that would normally convert -->',
+			'',
+			'Tail.',
+		].join('\n');
+		const r = convertGenericHtmlComments(html, 'uncategorized');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(html);
+	});
+
+	it('still converts everything in a note whose markers all close', () => {
+		// The control. Over-protection that swallowed a healthy note would be
+		// the same "converted 0" failure this file has hit before.
+		const clean = [
+			'Intro %%convert me%% prose.',
+			'',
+			'<!-- annoteca/todo: a closed marker',
+			'[id=aaaaaaaa]',
+			'-->',
+			'',
+			'Outro %%convert me too%% prose.',
+		].join('\n');
+		const r = convertNativeComments(clean, 'uncategorized');
+		expect(r.converted).toBe(2);
+	});
+});

@@ -285,6 +285,7 @@ describe('parser: round-trip property', () => {
 			replies: [],
 			addressed: undefined,
 			resolution: undefined,
+			unknownLines: [],
 			marker: { start: 0, end: 0 },
 		},
 		{
@@ -300,6 +301,7 @@ describe('parser: round-trip property', () => {
 			],
 			addressed: undefined,
 			resolution: undefined,
+			unknownLines: [],
 			marker: { start: 0, end: 0 },
 		},
 		{
@@ -316,6 +318,7 @@ describe('parser: round-trip property', () => {
 				date: '2026-05-25',
 				note: 'added in revision pass',
 			},
+			unknownLines: [],
 			marker: { start: 0, end: 0 },
 		},
 		{
@@ -328,6 +331,7 @@ describe('parser: round-trip property', () => {
 			replies: [],
 			addressed: undefined,
 			resolution: undefined,
+			unknownLines: [],
 			marker: { start: 0, end: 0 },
 		},
 		// F-270/F-271: addressed state with a single-line note and a multi-line
@@ -351,6 +355,7 @@ describe('parser: round-trip property', () => {
 					'So when I finally read it slowly,\nit landed as a shock.',
 			},
 			resolution: undefined,
+			unknownLines: [],
 			marker: { start: 0, end: 0 },
 		},
 	];
@@ -541,6 +546,26 @@ describe('parser: parseAt', () => {
 	it('returns undefined when no marker starts at the given offset', () => {
 		const text = `prefix <!-- annoteca/tone: body --> suffix`;
 		expect(parseAt(text, 0)).toBeUndefined();
+	});
+
+	it('refuses an opener that never closed, agreeing with parseAll', () => {
+		// The two must not disagree about the same document. parseAll reports
+		// the marker nested INSIDE this match; if parseAt reported the merged
+		// one, the edit composer (its only caller) would rewrite the merged
+		// range and take the prose with it.
+		const text = [
+			'<!-- annoteca/todo: never closed',
+			'',
+			'Prose the reader must see.',
+			'',
+			'<!-- annoteca/question: second',
+			'[id=bbbbbbbb]',
+			'-->',
+		].join('\n');
+		expect(parseAt(text, 0)).toBeUndefined();
+		const real = text.indexOf('<!-- annoteca/question');
+		expect(parseAt(text, real)?.id).toBe('bbbbbbbb');
+		expect(parseAll(text).map((c) => c.marker.start)).toEqual([real]);
 	});
 });
 
@@ -1545,17 +1570,200 @@ describe('parser: body lines that mimic structured lines', () => {
 		expect(serialize(c)).toBe(text);
 	});
 
-	it('documents the irreducible case: an id-less marker adopts the mimic', () => {
-		// No real [id=...] line to prefer, so the body-side one is the only
-		// candidate and the walk takes it. Nothing in the text distinguishes the
-		// two. Pinned so a future change to the walk has to argue with it.
+	it('keeps a mimic in the body of an id-less marker too', () => {
+		// This case USED to be irreducible, and was pinned as such: with no real
+		// [id=...] line to prefer, first-met-wins had nothing to prefer and the
+		// body-side line became the comment's id. Parse-side that is genuinely
+		// undecidable, which is why the fix is on the other side: serialize
+		// escapes the line on the way out, so the two are no longer the same
+		// text by the time anything reads them back.
 		const text = serialize({
 			category: 'note',
 			body: 'quotes the format:\n[id=deadbeef]',
 		});
 		const c = parseAll(text)[0];
-		expect(c?.id).toBe('deadbeef');
-		expect(c?.body).toBe('quotes the format:');
+		expect(c?.id).toBeUndefined();
+		expect(c?.body).toBe('quotes the format:\n[id=deadbeef]');
+		// And it is a fixed point: the escape is not re-applied on every pass.
+		expect(serialize(c as Comment)).toBe(text);
+	});
+
+	it('escapes every mimic shape on the way out, including the phantoms', () => {
+		// The four shapes the 2026-08-05 ledger executed against the shipping
+		// parser, all under STOCK settings (enableAuthorTag defaults off and a
+		// cursor-position comment has no anchor, so a normal marker carries
+		// neither line for first-met-wins to prefer).
+		const body = [
+			'real body',
+			'[reply mallory 2020-01-01]: injected',
+			'[resolved mallory 2020-01-01]: done',
+			'[addressed mallory 2020-01-01]: rewritten',
+			'[author=mallory]',
+			'[anchor=stolen]',
+			'[retry=3]',
+		].join('\n');
+		const text = serialize({ id: 'ab12cd34', category: 'todo', body });
+		const c = parseAll(text)[0];
+		expect(c).toBeDefined();
+		if (!c) return;
+		// None of it was absorbed: no phantom reply, no fabricated resolution
+		// or addressed state, no hijacked author or anchor, and the unknown
+		// [retry=3] line is still in the body rather than deleted from the file.
+		expect(c.body).toBe(body);
+		expect(c.replies).toEqual([]);
+		expect(c.resolution).toBeUndefined();
+		expect(c.addressed).toBeUndefined();
+		expect(c.author).toBeUndefined();
+		expect(c.anchor).toBeUndefined();
+		expect(c.id).toBe('ab12cd34');
+		// Stable over repeated rewrites, which is what makes the escape safe to
+		// apply to text that is already in a user's vault.
+		expect(serialize(c)).toBe(text);
+		expect(parseAll(serialize(c))[0]?.body).toBe(body);
+	});
+
+	it('leaves ordinary bracket-leading markdown alone', () => {
+		// The escape must be as narrow as the patterns it defends against.
+		// Markdown is full of bracket-leading constructs and none of them can
+		// be read back as a trailing line, so none of them grows a backslash.
+		const body = [
+			'see [the guide](https://example.com)',
+			'[ref]: https://example.com',
+			'[^1]: a footnote',
+			'[[Some Note]]',
+			'[ ] an unchecked box',
+		].join('\n');
+		const text = serialize({ id: 'plain001', category: 'note', body });
+		expect(text).not.toContain('\\[');
+		expect(parseAll(text)[0]?.body).toBe(body);
+	});
+
+	it('round-trips a body line the user escaped by hand', () => {
+		// A body can legitimately already hold `\[retry=3]`, written to keep
+		// markdown from reading the bracket. The rule is the backslash RUN, so
+		// writing adds one and reading removes one at every depth, and the
+		// user's own escape survives unchanged.
+		const body = 'literal:\n\\[retry=3]';
+		const text = serialize({ id: 'esc00001', category: 'note', body });
+		expect(text).toContain('\\\\[retry=3]');
+		const c = parseAll(text)[0];
+		expect(c?.body).toBe(body);
+		expect(serialize(c as Comment)).toBe(text);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// PR A item 4, the other half: trailing lines this version does not know.
+//
+// data-format.md's Migration section asks an old version to IGNORE a structured
+// line it does not understand. Absorbing it into the trailing block and then
+// dropping it on the next write is not ignoring it, and it is how a newer
+// version's fields would arrive here.
+// ---------------------------------------------------------------------------
+
+describe('parser: unknown trailing lines survive a rewrite', () => {
+	const withUnknown = [
+		'<!-- annoteca/tone: the body',
+		'[id=unk00001]',
+		'[date=2026-08-06]',
+		'[retry=3]',
+		'[seen bob 2026-08-06]: noticed',
+		'[reply ai 2026-08-06]: a real reply',
+		'-->',
+	].join('\n');
+
+	it('parses them out of the trailing block without touching the body', () => {
+		const c = parseAll(withUnknown)[0];
+		expect(c).toBeDefined();
+		if (!c) return;
+		expect(c.body).toBe('the body');
+		expect(c.id).toBe('unk00001');
+		expect(c.replies.map((r) => r.body)).toEqual(['a real reply']);
+		expect(c.unknownLines).toEqual([
+			'[retry=3]',
+			'[seen bob 2026-08-06]: noticed',
+		]);
+	});
+
+	it('re-emits them instead of deleting them', () => {
+		// The executed failure: `[retry=3]` was absorbed, ignored, and gone from
+		// the file on the next lifecycle write, with no Notice anywhere.
+		const c = parseAll(withUnknown)[0];
+		const rewritten = serialize(c as Comment);
+		expect(rewritten).toContain('[retry=3]');
+		expect(rewritten).toContain('[seen bob 2026-08-06]: noticed');
+		// And a second pass is a fixed point: they do not multiply, migrate into
+		// the body, or reorder among themselves.
+		const again = parseAll(rewritten)[0];
+		expect(again?.unknownLines).toEqual(c?.unknownLines);
+		expect(serialize(again as Comment)).toBe(rewritten);
+	});
+
+	it('forces the multi-line form for a marker that has nothing else', () => {
+		// Without this the one-line form would be chosen and the line dropped.
+		const text = serialize({
+			category: 'note',
+			body: 'short',
+			unknownLines: ['[retry=3]'],
+		});
+		expect(text).toBe(
+			['<!-- annoteca/note: short', '[retry=3]', '-->'].join('\n'),
+		);
+		expect(parseAll(text)[0]?.unknownLines).toEqual(['[retry=3]']);
+	});
+
+	it('keeps an annoteca-original fence holding an opener verbatim', () => {
+		// The fence is inside the marker, so an unescaped `<!--` in the prose it
+		// captured would now split the marker at that point and lose the
+		// original, the addressed state and the id with it. Reject's whole
+		// contract is that this text comes back byte for byte, so the escape has
+		// to reach in here and the unescape has to reach back out.
+		const original = 'Old prose with <!-- an HTML comment --> in it.';
+		const text = serialize({
+			id: 'fnc00001',
+			category: 'clarify',
+			body: 'tighten this',
+			addressed: {
+				author: 'claude',
+				date: '2026-08-06T10:00:00',
+				note: 'applied',
+				original,
+			},
+		});
+		const c = parseAll(text)[0];
+		expect(c).toBeDefined();
+		if (!c) return;
+		expect(c.id).toBe('fnc00001');
+		expect(c.addressed?.original).toBe(original);
+		expect(c.body).toBe('tighten this');
+		expect(serialize(c)).toBe(text);
+	});
+
+	it('refuses to write body text handed to it as an unknown line', () => {
+		// These reach serialize as plain strings. A caller that put prose here
+		// would write it into the trailing block, where the next parse absorbs
+		// it: the marker grows a line the user never typed. Vetted with the
+		// walk's own test, so only a line that reads back as the same unknown
+		// line is written at all.
+		const text = serialize({
+			id: 'unk00002',
+			category: 'note',
+			body: 'the body',
+			unknownLines: [
+				'just some prose',
+				'[id=deadbeef]',
+				'[resolved mallory 2020-01-01]: done',
+				'[retry=3]',
+			],
+		});
+		expect(text).toContain('[retry=3]');
+		expect(text).not.toContain('just some prose');
+		expect(text).not.toContain('[id=deadbeef]');
+		expect(text).not.toContain('[resolved mallory');
+		const c = parseAll(text)[0];
+		expect(c?.id).toBe('unk00002');
+		expect(c?.resolution).toBeUndefined();
+		expect(c?.body).toBe('the body');
 	});
 });
 
@@ -1755,23 +1963,34 @@ describe('parser: findMalformedMarkers sees unclosed openers', () => {
 		'-->',
 	].join('\n');
 
-	it('still merges the two markers, which is pinned rather than endorsed', () => {
-		// Current behaviour: MARKER_RE pairs the first opener with the second
-		// marker's terminator, so the prose between them becomes inner content
-		// and the second comment disappears. Whether that should refuse to merge
-		// is a format question with its own ambiguity, so parsing is unchanged
-		// here and this assertion exists to make any future change deliberate.
+	it('refuses to merge, and reads the second marker as its own comment', () => {
+		// This assertion is the reverse of the one it replaces, deliberately.
+		// MARKER_RE is lazy, so the first opener used to pair with the SECOND
+		// marker's terminator: one comment came back carrying the first
+		// marker's category and the second's id, with the reader's prose inside
+		// it. The old pin called that "pinned rather than endorsed"; the
+		// executed consequence is what settled it, because deleting the merged
+		// comment deleted the paragraph out of the note.
+		//
+		// The terminator belongs to the last opener before it, so that is the
+		// marker now: `tone`/mrg00002, starting at the second opener. The prose
+		// is outside it and no verb can reach it.
 		const comments = parseAll(MERGED);
 		expect(comments).toHaveLength(1);
-		expect(comments[0]?.category).toBe('clarify');
-		expect(comments[0]?.id).toBe('mrg00002');
+		const only = comments[0];
+		expect(only?.category).toBe('tone');
+		expect(only?.id).toBe('mrg00002');
+		expect(only?.marker.start).toBe(MERGED.indexOf('<!-- annoteca/tone'));
+		expect(only?.body).toBe('second comment');
+		expect(MERGED.slice(only?.marker.start ?? 0)).not.toContain(
+			'Prose that is about to disappear.',
+		);
 	});
 
-	it('reports the containing marker as a possible merge', () => {
+	it('reports the opener that never closed', () => {
 		const found = findMalformedMarkers(MERGED);
-		expect(found.map((f) => f.kind)).toContain('possible-merge');
-		const merge = found.find((f) => f.kind === 'possible-merge');
-		expect(merge?.start).toBe(0);
+		expect(found.map((f) => f.kind)).toEqual(['unclosed-opener']);
+		expect(found[0]?.start).toBe(0);
 	});
 
 	it('reports a lone unclosed opener', () => {
@@ -1805,7 +2024,7 @@ describe('parser: findMalformedMarkers sees unclosed openers', () => {
 		expect(found[0]?.kind).toBe('unclosed-opener');
 	});
 
-	it('reports a merge where both markers sit mid-line', () => {
+	it('refuses the merge where both markers sit mid-line', () => {
 		const text = [
 			'First. <!-- annoteca/clarify: first comment',
 			'[id=inl00002]',
@@ -1816,16 +2035,91 @@ describe('parser: findMalformedMarkers sees unclosed openers', () => {
 			'[id=inl00003]',
 			'-->',
 		].join('\n');
-		expect(parseAll(text)).toHaveLength(1);
+		const comments = parseAll(text);
+		expect(comments).toHaveLength(1);
+		expect(comments[0]?.id).toBe('inl00003');
 		const found = findMalformedMarkers(text);
-		expect(found.map((f) => f.kind)).toContain('possible-merge');
+		expect(found.map((f) => f.kind)).toEqual(['unclosed-opener']);
 	});
 
-	it('reports one finding per container and sorts every finding by position', () => {
-		// Two behaviours that had no test: several openers inside ONE container
-		// collapse to a single possible-merge finding rather than a wall of
-		// them, and the findings come back in document order whichever scan
-		// produced them.
+	it('walks down a stack of openers to the one the terminator belongs to', () => {
+		// Three openers and one `-->`. Rejecting the outer match and resuming
+		// at the nested opener has to repeat until the match is clean, or the
+		// scan settles on the wrong one; the terminator belongs to the LAST
+		// opener above it.
+		const text = [
+			'<!-- annoteca/clarify: first',
+			'',
+			'<!-- annoteca/tone: second',
+			'',
+			'<!-- annoteca/cut: third',
+			'[id=stk00001]',
+			'-->',
+		].join('\n');
+		const comments = parseAll(text);
+		expect(comments).toHaveLength(1);
+		expect(comments[0]?.category).toBe('cut');
+		expect(comments[0]?.id).toBe('stk00001');
+		expect(comments[0]?.marker.start).toBe(
+			text.indexOf('<!-- annoteca/cut'),
+		);
+	});
+
+	it('splits a marker written before the opener escape, which is the known cost', () => {
+		// The one case the pairing change makes WORSE rather than better, pinned
+		// so it is deliberate. The old serializer escaped `-->` and had no
+		// reason to escape `<!--`, so a body quoting the format produced exactly
+		// these bytes, and they are indistinguishable from an opener that never
+		// closed. This marker parses correctly on 1.13.0.
+		const legacy = [
+			'<!-- annoteca/note: write it as <!-- annoteca/todo: sample --\\> like that',
+			'[id=abc12345]',
+			'[date=2026-08-01]',
+			'-->',
+		].join('\n');
+
+		const comments = parseAll(legacy);
+		expect(comments).toHaveLength(1);
+		const only = comments[0];
+		// Under the QUOTED category, carrying the OUTER marker's id, body
+		// truncated to the text after the quote, range starting mid-body.
+		expect(only?.category).toBe('todo');
+		expect(only?.id).toBe('abc12345');
+		expect(only?.body).toBe('sample --> like that');
+		expect(only?.marker.start).toBeGreaterThan(0);
+
+		// What keeps it from becoming data loss: the dangling opener is
+		// reported, so the note announces itself and every removing verb
+		// refuses while it stands. Nothing rewrites the note on its own.
+		const found = findMalformedMarkers(legacy);
+		expect(found.map((f) => f.kind)).toEqual(['unclosed-opener']);
+		expect(found[0]?.start).toBe(0);
+	});
+
+	it('says nothing about a body that quotes an opener', () => {
+		// The reason parsing can be changed at all: serialize escapes `<!--`,
+		// so a comment whose text quotes the format is no longer the same
+		// bytes as a marker that forgot to close. Without the escape this body
+		// would split the marker in two.
+		const text = serialize({
+			id: 'quo00001',
+			category: 'note',
+			body: 'write it as <!-- annoteca/todo: like this -->',
+		});
+		const comments = parseAll(text);
+		expect(comments).toHaveLength(1);
+		expect(comments[0]?.id).toBe('quo00001');
+		expect(comments[0]?.body).toBe(
+			'write it as <!-- annoteca/todo: like this -->',
+		);
+		expect(findMalformedMarkers(text)).toEqual([]);
+	});
+
+	it('reports every opener that never closed, in document order', () => {
+		// Each unclosed opener is its own missing `-->`, so each is its own
+		// finding. The old shape of this test collapsed them into one
+		// "possible-merge" on the containing marker, which only made sense
+		// while a container existed to attribute them to.
 		const text = [
 			'<!-- annoteca/clarify: first',
 			'[id=dup00001]',
@@ -1844,12 +2138,19 @@ describe('parser: findMalformedMarkers sees unclosed openers', () => {
 		].join('\n');
 
 		const found = findMalformedMarkers(text);
-		const merges = found.filter((f) => f.kind === 'possible-merge');
-		expect(merges).toHaveLength(1);
-		expect(merges[0]?.start).toBe(0);
-		expect(found.filter((f) => f.kind === 'unclosed-opener')).toHaveLength(
-			1,
-		);
+		expect(found.map((f) => f.kind)).toEqual([
+			'unclosed-opener',
+			'unclosed-opener',
+			'unclosed-opener',
+		]);
+		expect(found.map((f) => f.start)).toEqual([
+			0,
+			text.indexOf('<!-- annoteca/tone'),
+			text.indexOf('<!-- annoteca/note'),
+		]);
+		// The one that DID close is not a finding, and it is the only comment
+		// the document has.
+		expect(parseAll(text).map((c) => c.id)).toEqual(['dup00002']);
 	});
 
 	it('returns findings in document order across both scans', () => {
@@ -1872,7 +2173,42 @@ describe('parser: findMalformedMarkers sees unclosed openers', () => {
 		const starts = found.map((f) => f.start);
 		expect(starts).toEqual([...starts].sort((a, b) => a - b));
 		// Specifically: the second scan's finding is the earlier one.
-		expect(found[0]?.kind).toBe('possible-merge');
+		expect(found[0]?.kind).toBe('unclosed-opener');
+		expect(found[found.length - 1]?.kind).toBe('malformed');
+	});
+
+	it('reports a generic HTML comment inside a marker as a possible merge', () => {
+		// The half parsing does NOT change. An unclosed annoteca opener can be
+		// closed by any ordinary HTML comment's `-->`, which swallows the prose
+		// between them exactly as two annoteca markers used to. Refusing to
+		// pair there would break every existing marker whose body merely
+		// mentions an HTML comment, so this is reported and the destructive
+		// verbs refuse on the strength of the report.
+		const text = [
+			'<!-- annoteca/clarify: never closed',
+			'[id=gen00001]',
+			'',
+			'Prose that is about to disappear.',
+			'',
+			'<!-- an ordinary HTML comment -->',
+		].join('\n');
+		// It still parses as one merged marker, which is why it needs saying.
+		expect(parseAll(text)).toHaveLength(1);
+		const found = findMalformedMarkers(text);
+		expect(found.map((f) => f.kind)).toEqual(['possible-merge']);
+		expect(found[0]?.start).toBe(0);
+	});
+
+	it('says nothing about a marker whose body mentions an HTML comment', () => {
+		const text = serialize({
+			id: 'gen00002',
+			category: 'note',
+			body: 'an HTML comment starts with <!-- and ends with -->',
+		});
+		expect(findMalformedMarkers(text)).toEqual([]);
+		expect(parseAll(text)[0]?.body).toBe(
+			'an HTML comment starts with <!-- and ends with -->',
+		);
 	});
 
 	it('says nothing about a well-formed document', () => {

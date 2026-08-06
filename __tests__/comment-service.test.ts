@@ -1405,3 +1405,179 @@ describe('currentContentFor', () => {
 		expect(seen).toBe('on disk %%comment%%');
 	});
 });
+
+// ---------------------------------------------------------------------------
+// PR A item 7, the write-path half: a note whose markers have merged.
+//
+// scanMarkers refuses to pair an opener with the NEXT marker's terminator now,
+// so the merged comment is gone. What is left is a document where one marker's
+// `-->` is doing double duty: it is the only thing ending the region the
+// unclosed opener above it hides. Removing that marker extends the region over
+// more of the user's prose, and nothing in the editor looks any different
+// afterwards.
+// ---------------------------------------------------------------------------
+
+describe('destructive verbs refuse a note with an unclosed opener', () => {
+	// The ledger's M1 document. The first opener never closes; the second
+	// marker is the only comment the note has, and its terminator is what stops
+	// the paragraph between them from vanishing entirely.
+	const DAMAGED = [
+		'Intro paragraph.',
+		'',
+		'<!-- annoteca/todo: first comment',
+		'[id=aaaaaaaa]',
+		'',
+		'This is real prose that the reader must see.',
+		'',
+		'<!-- annoteca/question: second comment',
+		'[id=bbbbbbbb]',
+		'-->',
+		'',
+		'Outro paragraph.',
+	].join('\n');
+
+	const target = (content: string) => {
+		const c = parseAll(content)[0];
+		if (!c) throw new Error('no comment parsed');
+		return c;
+	};
+
+	it('refuses to delete, and says why', async () => {
+		const h = makeHarnessWith(DAMAGED);
+		await h.service.deleteComment('note.md', target(h.content));
+		expect(h.content).toBe(DAMAGED);
+		expect(noticeLog.join(' ')).toContain('Validate marker format');
+	});
+
+	it('refuses to resolve-and-remove', async () => {
+		const h = makeHarnessWith(DAMAGED, true);
+		const outcome = await h.service.resolveAndRemoveComment(
+			'note.md',
+			target(h.content),
+		);
+		expect(outcome).toBe('blocked');
+		expect(h.content).toBe(DAMAGED);
+	});
+
+	it('refuses the bulk resolved-cleanup and reports it as not done', async () => {
+		// null, not 0. "Deleted 0 resolved comments" reads as "there were none".
+		const resolved = DAMAGED.replace(
+			'[id=bbbbbbbb]',
+			'[id=bbbbbbbb]\n[resolved charles 2026-08-06]: done',
+		);
+		const h = makeHarnessWith(resolved);
+		const n = await h.service.deleteAllResolvedInFile('note.md');
+		expect(n).toBeNull();
+		expect(h.content).toBe(resolved);
+	});
+
+	it('still lets a comment be resolved, because that write repairs nothing and destroys nothing', async () => {
+		// The asymmetry is deliberate. replaceMarker writes a marker back in
+		// place of a marker, so the terminator survives and the hidden region
+		// does not grow. Refusing here would leave the user unable to work in
+		// the note at all until they had gone marker-hunting.
+		const h = makeHarnessWith(DAMAGED);
+		await h.service.resolveComment('note.md', target(h.content));
+		expect(h.content).toContain('[resolved charles');
+		expect(parseAll(h.content)[0]?.resolution?.author).toBe('charles');
+	});
+
+	it('deletes normally when the unclosed opener sits BELOW the comment', async () => {
+		// An opener after the marker is terminated by something else, so
+		// removing a marker above it cannot make that region grow. Refusing
+		// there would be a false positive on an ordinary delete.
+		const below = [
+			'<!-- annoteca/todo: a normal comment',
+			'[id=cccccccc]',
+			'-->',
+			'',
+			'Prose.',
+			'',
+			'<!-- annoteca/question: never closed',
+		].join('\n');
+		const h = makeHarnessWith(below);
+		await h.service.deleteComment('note.md', target(h.content));
+		expect(h.content).not.toContain('[id=cccccccc]');
+	});
+
+	it('refuses to delete a marker that swallowed a generic HTML comment', async () => {
+		// The half the parser deliberately does NOT re-pair: an unclosed opener
+		// closed by an ordinary HTML comment's terminator. It still parses as
+		// one marker, so only the write path can refuse.
+		const generic = [
+			'<!-- annoteca/todo: never closed',
+			'[id=dddddddd]',
+			'',
+			'Prose that is about to disappear.',
+			'',
+			'<!-- an ordinary HTML comment -->',
+			'',
+			'Outro.',
+		].join('\n');
+		const h = makeHarnessWith(generic);
+		await h.service.deleteComment('note.md', target(h.content));
+		expect(h.content).toBe(generic);
+		expect(noticeLog.join(' ')).toContain('Validate marker format');
+	});
+
+	it('deletes normally in a clean note', async () => {
+		const h = makeHarnessWith(NOTE);
+		await h.service.deleteComment('note.md', target(h.content));
+		expect(h.content).not.toContain('annoteca/clarify');
+		expect(noticeLog.join(' ')).not.toContain('Validate marker format');
+	});
+});
+
+// A damage refusal must not be narrated as a stale transition. The delegating
+// callers turn 'declined' into "Already resolved." / "This edit is no longer
+// awaiting review.", and neither is true: the comment is still open, or still
+// addressed, and the write was stopped by damage elsewhere in the note.
+describe('a blocked write is not reported as a stale transition', () => {
+	const DAMAGED = [
+		'Intro paragraph.',
+		'',
+		'<!-- annoteca/todo: first comment',
+		'[id=aaaaaaaa]',
+		'',
+		'This is real prose that the reader must see.',
+		'',
+		'<!-- annoteca/question: second comment',
+		'[id=bbbbbbbb]',
+		'-->',
+	].join('\n');
+
+	const target = (content: string) => {
+		const c = parseAll(content)[0];
+		if (!c) throw new Error('no comment parsed');
+		return c;
+	};
+
+	it('resolve with delete-on-resolve says nothing about being already resolved', async () => {
+		const h = makeHarnessWith(DAMAGED, true);
+		await h.service.resolveComment('note.md', target(h.content));
+		expect(h.content).toBe(DAMAGED);
+		expect(noticeLog.join(' ')).toContain('Validate marker format');
+		expect(noticeLog.join(' ')).not.toContain('Already resolved.');
+	});
+
+	it('accept with delete-on-resolve says nothing about review being over', async () => {
+		const addressed = DAMAGED.replace(
+			'[id=bbbbbbbb]',
+			'[id=bbbbbbbb]\n[addressed claude 2026-08-06T10:00:00]: applied',
+		);
+		const h = makeHarnessWith(addressed, true);
+		await h.service.acceptAddressed('note.md', target(h.content));
+		expect(h.content).toBe(addressed);
+		expect(noticeLog.join(' ')).toContain('Validate marker format');
+		expect(noticeLog.join(' ')).not.toContain('no longer awaiting review');
+	});
+
+	it('reports the blocked outcome distinctly to its caller', async () => {
+		const h = makeHarnessWith(DAMAGED, true);
+		const outcome = await h.service.resolveAndRemoveComment(
+			'note.md',
+			target(h.content),
+		);
+		expect(outcome).toBe('blocked');
+	});
+});

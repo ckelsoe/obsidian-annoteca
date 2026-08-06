@@ -20,15 +20,27 @@ import { MarkdownView, Notice, TFile } from 'obsidian';
 
 import type AnnotecaPlugin from './main';
 import type { ImportResult } from './imports';
-import type { Addressed, Comment, Reply } from './types';
-import { parseAll, serialize, nowISO } from './parser';
+import type { Addressed, Comment, MarkerRange, Reply } from './types';
+import {
+	findRemovalBlocker,
+	parseAll,
+	serialize,
+	nowISO,
+	type MalformedMarker,
+} from './parser';
 
 // What a lifecycle write actually did. Three outcomes rather than a boolean,
 // because the caller's message differs: "declined" means the transition looked
 // at the CURRENT state and chose not to act (already resolved, no longer
 // addressed), while "missing" means the marker is gone and replaceMarker has
 // already said so. Collapsing them produced two notices for one action.
-export type WriteOutcome = 'written' | 'declined' | 'missing';
+// 'blocked' is separate from 'declined' for the same reason 'ambiguous' is
+// separate from 'missing': the delegating callers narrate 'declined' as a stale
+// transition ("Already resolved.", "This edit is no longer awaiting review."),
+// and neither is true here. The comment is still open, or still addressed; the
+// write was stopped by damage elsewhere in the note. Folding the two together
+// put a damage notice and a contradictory false-state notice on screen at once.
+export type WriteOutcome = 'written' | 'declined' | 'missing' | 'blocked';
 
 // What re-finding a comment in the current file text produced. 'ambiguous' is
 // its own case rather than folded into 'missing' because the user-facing
@@ -62,6 +74,21 @@ export function fileGoneMessage(path: string): string {
 
 export function ambiguousMessage(id: string): string {
 	return `More than one comment in this note has the identifier ${id}, so this action cannot tell which one you meant. Give one of them a different identifier, or delete the copy.`;
+}
+
+// "This note has a marker that never closed, and removing text now would hide
+// more of it."
+//
+// The refusal that decision 1 asks for. A marker's `-->` is a document-wide
+// token: while an opener above it has none of its own, that terminator is what
+// ends the hidden region, and taking it away extends the region over more of the
+// user's prose. Nothing about the note looks different afterwards in the editor,
+// which is why this has to say so rather than proceed.
+//
+// The finding's own reason is quoted rather than restated, so the words the
+// diagnostics report uses and the words this notice uses cannot drift.
+export function markerDamageMessage(finding: MalformedMarker): string {
+	return `Annoteca did not change this note. ${finding.reason} Removing a comment while that is unresolved would hide more of the note. Run "Validate marker format" to find it.`;
 }
 
 // Every public mutating verb is a thin `enqueue` wrapper around a private
@@ -158,6 +185,10 @@ export class CommentService {
 			return 'missing';
 		}
 		if (stillApplies && !stillApplies(current)) return 'declined';
+		// 'blocked', not 'declined'. refusesForDamage has already said what is
+		// wrong; a caller that read this as a stale transition would follow it
+		// with "Already resolved." about a comment that is still open.
+		if (this.refusesForDamage(content, [current.marker])) return 'blocked';
 		const { start, end } = current.marker;
 		const splice = this.buildDeleteSplice(content, start, end);
 		const wrote = await this.applySplices(path, file, [splice], content);
@@ -211,6 +242,7 @@ export class CommentService {
 		if (!current) {
 			return;
 		}
+		if (this.refusesForDamage(content, [current.marker])) return;
 		const { start, end } = current.marker;
 		const splice = this.buildDeleteSplice(content, start, end);
 		const wrote = await this.applySplices(path, file, [splice], content);
@@ -444,6 +476,11 @@ export class CommentService {
 			new Notice('This edit is no longer awaiting review.');
 			return;
 		}
+		// Reject rewrites a span of PROSE as well as the marker, which is the
+		// same hazard as removing one: the span it computes runs from the end of
+		// the marker to the end of that line, and in a note whose markers have
+		// merged those offsets are not the ones the user is looking at.
+		if (this.refusesForDamage(content, [current.marker])) return;
 
 		const { start: markerStart, end: markerEnd } = current.marker;
 		// Skip the single begin-placement space between the marker and the new
@@ -462,6 +499,7 @@ export class CommentService {
 			anchor: reopened.anchor,
 			replies: reopened.replies,
 			resolution: reopened.resolution,
+			unknownLines: reopened.unknownLines,
 		});
 
 		const wrote = await this.applySplices(
@@ -505,6 +543,10 @@ export class CommentService {
 	// confirmation and the write announced "Deleted 0 resolved comments", which
 	// reads as "there were none" rather than "the file is gone". This path is
 	// reachable, the modal sits between the check and the write.
+	//
+	// A refusal on marker damage returns null for the same reason. The sweep did
+	// not happen, the service has already said why, and "Deleted 0 resolved
+	// comments" would read as "there were none to delete".
 	async deleteAllResolvedInFile(path: string): Promise<number | null> {
 		return this.enqueue(path, () =>
 			this.deleteAllResolvedInFileUnqueued(path),
@@ -524,6 +566,17 @@ export class CommentService {
 			(c) => c.resolution !== undefined,
 		);
 		if (resolved.length === 0) return 0;
+		// One scan for the whole sweep, asking the same question of every marker
+		// it is about to remove. null rather than 0, matching the file-is-gone
+		// case: the service has already said what happened, and a count here
+		// would claim deletions that did not happen.
+		if (
+			this.refusesForDamage(
+				content,
+				resolved.map((c) => c.marker),
+			)
+		)
+			return null;
 
 		// Bulk cleanup intent is "tidy the file", not "remove this exact span",
 		// so when a marker occupies its own line we also strip the trailing
@@ -606,6 +659,7 @@ export class CommentService {
 			replies: next.replies,
 			addressed: next.addressed,
 			resolution: next.resolution,
+			unknownLines: next.unknownLines,
 		});
 		const wrote = await this.applySplices(
 			path,
@@ -849,6 +903,31 @@ export class CommentService {
 	// movement, because the id lookup cannot tell the two apart.
 	private noticeVanished(): void {
 		new Notice(VANISHED_MESSAGE);
+	}
+
+	// The guard the three removing verbs and the prose-rewriting one share.
+	//
+	// Every one of them re-resolves its target and then splices, and the splice
+	// is what makes a damaged note worse: an unclosed opener above the target
+	// has no terminator of its own, so the target's `-->` is what currently ends
+	// the hidden region. Refusing is the conservative answer because this cannot
+	// know which `-->` the user meant to write, and guessing edits their
+	// document. The action is repeatable once the marker is closed.
+	//
+	// Only these verbs. Resolve, reply and edit go through replaceMarker, which
+	// writes a marker back in place of a marker: the terminator survives, so the
+	// hidden region does not grow, and refusing there would leave a user unable
+	// to work in a note at all until they had gone marker-hunting. One of those
+	// writes also REPAIRS the note, because serialize escapes the `<!--` that a
+	// suspected merge is reported for.
+	private refusesForDamage(
+		content: string,
+		markers: readonly MarkerRange[],
+	): boolean {
+		const blocker = findRemovalBlocker(content, markers);
+		if (!blocker) return false;
+		new Notice(markerDamageMessage(blocker));
+		return true;
 	}
 
 	// One message for "this note has two comments with the same identifier".

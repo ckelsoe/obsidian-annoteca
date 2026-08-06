@@ -282,6 +282,7 @@ export class ComposerForm {
 			replies: [],
 			addressed: undefined,
 			resolution: undefined,
+			unknownLines: [],
 			marker: { start: 0, end: 0 },
 		};
 	}
@@ -398,6 +399,7 @@ export class ComposerForm {
 				replies: fresh.replies,
 				addressed: fresh.addressed,
 				resolution: fresh.resolution,
+				unknownLines: fresh.unknownLines,
 			});
 			editor.replaceRange(
 				serialized,

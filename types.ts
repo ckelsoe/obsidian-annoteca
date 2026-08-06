@@ -47,6 +47,11 @@ export interface Comment {
 	replies: Reply[]; // chronological, oldest first
 	addressed: Addressed | undefined; // F-270: pending accept/revise/reject; absent when not addressed
 	resolution: Resolution | undefined;
+	// Structured trailing lines this version does not understand, kept verbatim
+	// so a write re-emits them instead of deleting them. Empty for almost every
+	// comment; non-empty when a newer version (or a hand edit) put a field here
+	// that this build has no name for. See the walk in parser.ts.
+	unknownLines: readonly string[];
 	marker: MarkerRange;
 }
 

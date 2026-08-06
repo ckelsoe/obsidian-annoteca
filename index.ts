@@ -2,11 +2,23 @@
 // Owners call rebuild(path, content) on file events; queries are read-only.
 
 import type { Comment, LocatedComment } from './types';
-import { parseAll } from './parser';
+import { findMalformedMarkers, parseAll, type MalformedMarker } from './parser';
 
 export interface FileIndex {
 	path: string;
 	comments: Comment[];
+	// Marker damage found in the same pass that produced `comments`.
+	//
+	// Computed here rather than on demand because it is the answer to a question
+	// the index is uniquely placed to ask: parseAll has just told us which
+	// markers this file HAS, and the interesting problems are the ones that
+	// change that answer without changing anything a reader can see. The
+	// diagnostic existed before this and was reachable only from a command
+	// nobody runs before the damage has already cost them a paragraph.
+	//
+	// Empty for the overwhelming majority of files, so the cost is one regex
+	// sweep per rebuild over content that was just parsed anyway.
+	malformed: MalformedMarker[];
 	parsedAt: number;
 }
 
@@ -32,6 +44,7 @@ export class CommentIndex {
 		const idx: FileIndex = {
 			path,
 			comments: parseAll(content),
+			malformed: findMalformedMarkers(content),
 			parsedAt: Date.now(),
 		};
 		this.files.set(path, idx);

@@ -108,3 +108,63 @@ export function validateMarkers(
 ): ValidationFinding[] {
 	return findMalformedMarkers(content).map((m) => ({ ...m, path }));
 }
+
+// Decides when marker damage is worth interrupting the user for.
+//
+// The diagnostic itself is old; what was missing is anyone asking it. Its only
+// caller was a command, and a user who does not already suspect a problem has no
+// reason to run one, so the failure it detects had to cost them a paragraph
+// before anything mentioned it. Every index rebuild for a note the user is
+// actually in now asks.
+//
+// The rules exist because a Notice on every rebuild would be noise, and noise
+// gets dismissed unread:
+//
+//   1. ONCE PER NOTE PER SESSION. Rebuilds fire on open and on save, so a note
+//      being worked in rebuilds repeatedly and the finding is the same finding
+//      every time.
+//   2. FORGOTTEN WHEN THE NOTE COMES BACK CLEAN. Fixing the marker clears the
+//      path, so damage introduced later in the same session is announced again
+//      rather than silently swallowed by rule 1.
+//
+// Returns the text to show, or undefined for "say nothing". Kept as a value
+// rather than firing the Notice here so the decision is testable without
+// Obsidian, which is the part with rules in it.
+export class MarkerDamageReporter {
+	private readonly warned = new Set<string>();
+
+	report(
+		path: string,
+		displayName: string,
+		findings: readonly MalformedMarker[],
+	): string | undefined {
+		const first = findings[0];
+		if (first === undefined) {
+			this.warned.delete(path);
+			return undefined;
+		}
+		if (this.warned.has(path)) return undefined;
+		this.warned.add(path);
+		// The finding's own reason, not a second phrasing of it. The report note
+		// and this notice describe the same problem, and two copies drift.
+		const more =
+			findings.length > 1
+				? ` ${findings.length - 1} more like it in this note.`
+				: '';
+		return `Annoteca found a marker problem in ${displayName}. ${first.reason}${more} Run "Validate marker format" for the full list.`;
+	}
+
+	// A note that is gone cannot be warned about again, and holding its path
+	// would make a later note at the same path silent.
+	forget(path: string): void {
+		this.warned.delete(path);
+	}
+
+	// A renamed note is the same note. Without this the user is warned about it
+	// a second time under its new name, and the old path sits in the set for the
+	// rest of the session keeping a genuinely new note at that path quiet.
+	rename(oldPath: string, newPath: string): void {
+		if (!this.warned.delete(oldPath)) return;
+		this.warned.add(newPath);
+	}
+}

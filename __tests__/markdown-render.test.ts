@@ -226,3 +226,62 @@ describe('markdown render lifetimes', () => {
 		expect(new MarkdownLifetime()).toBeInstanceOf(Component);
 	});
 });
+
+// `<!--` opens an HTML comment in rendered markdown. The format stores it
+// escaped for the marker's sake, and the parser hands back the user's literal
+// text, so the escape has to be reapplied here or the text the format now
+// preserves is invisible in the plugin's own UI.
+//
+// Confirmed in a real vault before it was fixed: a body of
+// `AAA before <!-- annoteca/todo: x --> after AAA` rendered as "AAA before
+// after AAA", and an unmatched opener hid everything after it.
+describe('renderCommentMarkdown: HTML comment openers stay visible', () => {
+	// Asserted on the argument the renderer is handed, because that is where the
+	// escape has to be: the stored form is already escaped and the parser has
+	// already taken it off again by the time a surface asks for the body.
+	const expectRenderedSource = (markdown: string, expected: string): void => {
+		const el = div();
+		const host = makeHost();
+		renderCommentMarkdown(el, markdown, host);
+		expect(renderSpy).toHaveBeenCalledWith(
+			APP,
+			expected,
+			el,
+			'notes/chapter.md',
+			host.component,
+		);
+	};
+
+	it('escapes an opener before handing the text to the renderer', () => {
+		expectRenderedSource(
+			'before <!-- annoteca/todo: x --> after',
+			'before \\<!-- annoteca/todo: x --> after',
+		);
+	});
+
+	it('escapes an unmatched opener, which would hide the rest of the surface', () => {
+		expectRenderedSource('before <!-- after', 'before \\<!-- after');
+	});
+
+	it('keeps a backslash the user typed, by the same run rule', () => {
+		expectRenderedSource('literal \\<!-- here', 'literal \\\\<!-- here');
+	});
+
+	it('leaves text with no opener untouched', () => {
+		expectRenderedSource(
+			'**bold** and a [link](url)',
+			'**bold** and a [link](url)',
+		);
+	});
+
+	it('does not escape the plain-text fallback, which cannot interpret it', () => {
+		const el = div();
+		renderCommentMarkdown(
+			el,
+			'before <!-- after',
+			makeHost({ enabled: false }),
+		);
+		expect(el.textContent).toBe('before <!-- after');
+		expect(renderSpy).not.toHaveBeenCalled();
+	});
+});

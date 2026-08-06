@@ -23,7 +23,15 @@ export type SkillExportTarget = 'claude' | 'agent' | 'both';
 // whole line unmatchable, so an assistant signing as `Bob Smith` silently lost
 // the comment's author, or, in a trailing line, the entire thread. Same reason
 // as the bump above: an assistant reading a v4 skill does not know.
-export const SKILL_SCHEMA_VERSION = 5;
+// 6 = the two remaining encodings, for the same reason a third time. The format
+// now escapes `<!--` as well as `-->`, and escapes a body line that would read
+// back as a structured trailing line. Both are cases an assistant writing
+// markers by hand hits without trying: quoting the marker syntax inside a
+// comment, or writing a body whose last line looks like `[retry=3]`. Through v5
+// the skill said nothing about either, so an assistant following it wrote a
+// marker that splits in two, or a body line that the next read absorbs and the
+// next write deletes.
+export const SKILL_SCHEMA_VERSION = 6;
 
 const SKILL_VERSION_RE = /^annoteca-skill-version:\s*(\d+)\s*$/m;
 
@@ -152,6 +160,9 @@ Field rules (match these exactly; the plugin's parser enforces them):
 - **No line breaks in a trailing line**: \`[anchor=]\`, \`[reply ...]\`, \`[addressed ...]\` and \`[resolved ...]\` are each exactly ONE line, and the parser matches them line by line. A line break inside any of them produces a continuation line that matches nothing, which ends the structured section there: that line, the \`[id=]\`, and every other trailing line collapse into the body as visible text, and the thread is lost along with the comment's identity. So write a reply or a note as a single line, however long. If you want list-like structure, use separators inline (\`first point; second point\`) rather than a newline. The two places multi-line text IS safe are the comment body and the \`annoteca-original\` fence, because neither is parsed line by line.
 - **The \`annoteca-original\` fence must outlast its content**: the block holds verbatim prose lifted from the document, which can itself contain a fenced code block, and the first line that is just the fence delimiter closes it. Ending it early loses the original, the \`[addressed ...]\` line, and the comment's id. So count the longest run of backticks that starts a line inside the text you are storing and open and close with a run at least one longer: plain prose gets the usual three, text containing a \`\`\` block gets four, and so on. Do not escape the backticks; the whole point of the block is that the text comes back byte for byte.
 - **Escaping \`-->\`**: the marker is an HTML comment, so a literal \`-->\` anywhere inside one would end it early, truncating the comment and spilling the rest into the document as visible text. Write it as \`--\\>\` instead, in every free-text field: the body, \`[anchor=]\`, reply bodies, the \`[addressed ...]\` and \`[resolved ...]\` notes, and inside the \`annoteca-original\` fence. The plugin displays \`--\\>\` as \`-->\`. If the text you are storing already contains \`--\\>\`, add one more backslash (\`--\\\\>\`); the rule is that reading removes one backslash from the run, so writing adds one.
+- **Escaping \`<!--\`**: the other half of the same wrapper, and it costs more than the first. An unescaped \`<!--\` inside a marker means the marker's \`-->\` may belong to THAT comment rather than to this one, so the plugin reads the two as separate markers and everything between them, prose included, is left hidden inside an HTML comment. Write it as \`\\<!--\` in the same free-text fields, with the same run rule: reading removes one backslash, so writing adds one (\`\\<!--\` becomes \`\\\\<!--\` if your text already had the backslash). This applies to ANY \`<!--\`, not just an \`<!-- annoteca/...\` one. It matters most when you are quoting the marker syntax inside a comment body, which is exactly what you are likely to do when explaining this format to someone.
+- **Escaping a body line that looks like a trailing line**: the structured block is read bottom-up from the end of the marker, so a BODY line that has the shape of a trailing line is indistinguishable from a real one. A body ending \`[resolved bob 2026-01-01]: done\` silently marks the comment resolved; \`[author=mallory]\` silently changes its author; \`[retry=3]\` is absorbed as an unknown field and disappears from the body. In every case the line also leaves the body. Escape the leading bracket of any body line matching \`[key=value]\` or \`[key <author> <timestamp>]:\` by writing \`\\[\` instead of \`[\`, with the same run rule again. Only those two shapes need it: ordinary markdown like \`[text](url)\`, \`[ref]: url\`, \`[^1]: note\` and \`[[Wikilink]]\` is read as body text and must be left alone.
+- **A trailing line this version does not know is kept, not deleted**: if you write a structured line in a shape the plugin has no name for, it is preserved verbatim and re-emitted on the next write. It may move to the end of the block, since its position among the known lines is not recoverable. Do not rely on a field the plugin does not implement doing anything; do rely on it surviving.
 
 ## What to do
 

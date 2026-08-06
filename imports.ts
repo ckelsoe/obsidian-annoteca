@@ -1,7 +1,7 @@
 // Import helpers (F-221, F-222, F-230). Pure conversion utilities; commands
 // in main.ts wrap these with backup-confirmation modals and bulk vault writes.
 
-import { scanMarkers, serialize } from './parser';
+import { scanMarkers, serialize, unclosedOpenerRanges } from './parser';
 
 // Match `%%text%%` Obsidian native comments. Non-greedy, multiline.
 const NATIVE_COMMENT_RE = /%%([\s\S]*?)%%/g;
@@ -325,6 +325,19 @@ function protectedRanges(content: string): ProtectedRange[] {
 	const markers = scanMarkers(content);
 	const out: ProtectedRange[] = [];
 	for (const m of markers) out.push({ from: m.start, to: m.end });
+
+	// An opener that never closed hides everything down to the next `-->`, and
+	// scanMarkers deliberately no longer calls that span a marker. It used to,
+	// by merging, and this pass got the protection for free as a result. Adding
+	// it back explicitly keeps a conversion out of text the user cannot see: an
+	// edit inside an HTML comment is invisible in reading view, so a rewrite
+	// there is a change nobody can review.
+	//
+	// Costs over-protection on a damaged note, which is the direction this file
+	// already errs in everywhere else: a skipped conversion is recoverable by
+	// closing the marker and running the command again, and a rewrite is not.
+	for (const r of unclosedOpenerRanges(content))
+		out.push({ from: r.start, to: r.end });
 
 	// A marker's interior is OPAQUE to the fence and code-span scanners.
 	//

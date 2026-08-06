@@ -5,6 +5,7 @@ import type {
 	AnchorText,
 	Addressed,
 	Comment,
+	MarkerRange,
 	Reply,
 	Resolution,
 } from './types';
@@ -19,11 +20,27 @@ import type {
 // is written, and nothing notices until the next parse silently fails to find
 // the comment.
 const CATEGORY_SRC = '[a-z][a-z0-9-]*';
+// The opener, factored out for the same reason the category is: three places
+// have to agree on what one looks like. MARKER_RE pairs it with a terminator,
+// scanMarkers refuses to pair ACROSS one, and findMalformedMarkers reports the
+// ones that never closed. A drift between those three is invisible in exactly
+// the way this file's other shared sources are.
+const OPENER_SRC = '<!--\\s*annoteca/';
+const TERMINATOR = '-->';
 const MARKER_RE = new RegExp(
-	`<!--\\s*annoteca/(${CATEGORY_SRC})\\s*:([\\s\\S]*?)-->`,
+	`${OPENER_SRC}(${CATEGORY_SRC})\\s*:([\\s\\S]*?)${TERMINATOR}`,
 	'g',
 );
 const SERIALIZABLE_CATEGORY_RE = new RegExp(`^${CATEGORY_SRC}$`);
+// Any marker opener, used to detect one nested inside another marker's inner
+// content. Case-sensitive and category-exact, matching MARKER_RE: an opener
+// this cannot read is not one that could have consumed the terminator.
+const NESTED_OPENER_RE = new RegExp(`${OPENER_SRC}${CATEGORY_SRC}\\s*:`, 'g');
+// Any HTML comment opener at all. A generic one inside a marker means the
+// marker's `-->` may belong to it rather than to the marker, which is the same
+// swallowed-prose failure by a different route. Reported, never re-paired: see
+// findMalformedMarkers.
+const HTML_OPENER_RE = /<!--/g;
 
 // Can a category id survive a write and be found again? This is the grammar
 // question, and it is NOT the same question as isValidCategoryName in
@@ -113,6 +130,11 @@ const RESOLVED_LINE_RE = new RegExp(
 // The two shapes below mirror the ones the format actually defines: a
 // `[key=value]` line (id, date, author, anchor) and a `[key <author> <stamp>]:`
 // note line (reply, addressed, resolved). Anything else stays in the body.
+//
+// A line matching one of them with a key this version has no name for is KEPT
+// and re-emitted, not merely skipped. See the walk's unknown-line branch: the
+// format's promise is to ignore what it does not understand, and absorbing a
+// line and then dropping it on the next write is deleting it.
 //
 // The asymmetry is on purpose. Guessing "structured" on an ambiguous line
 // deletes prose and cannot be undone from the file; guessing "body" on a real
@@ -287,6 +309,98 @@ function unescapeTerminator(text: string): string {
 	);
 }
 
+// `-->` is only half of the marker's wrapper, and the other half was never
+// encoded at all. An opener inside a marker's inner content is indistinguishable
+// from a marker that forgot to close: MARKER_RE is lazy, so a `<!-- annoteca/x:`
+// with no terminator of its own pairs with the NEXT marker's `-->`, and every
+// line between them, prose included, becomes one merged comment's body. That is
+// the failure this encoding exists to make decidable.
+//
+// Escaped exactly like the terminator, and for the same reason: it is the run of
+// backslashes that carries the meaning, so writing adds one and reading removes
+// one at every depth. `<!--` <-> `\<!--`, `\<!--` <-> `\\<!--`. A run of zero is
+// therefore a REAL opener, which is what lets scanMarkers refuse to pair across
+// one without guessing.
+//
+// `\<` is markdown's own escape, so a body quoting the format renders as the
+// user typed it, and the escape doubles as protection in rendered output: an
+// unescaped `<!--` in a rendered comment body would open an HTML comment in the
+// rendered HTML and swallow whatever followed it there too.
+//
+// EVERY `<!--` is escaped, not just annoteca's own opener. A generic HTML
+// comment nested in a body is the same swallowed-prose failure through a
+// different terminator, and escaping both shapes costs one character in a body
+// that mentions HTML comments at all.
+//
+// The same KNOWN LIMITATION as the terminator escape applies, with the same
+// blast radius: a marker written before this encoding whose body legitimately
+// held `\<!--` reads back with one backslash fewer. Encode and decode are
+// inverses, so the FILE is a fixed point and nothing walks further on each pass.
+const OPENER_RUN_RE = /(\\*)<!--/g;
+const ESCAPED_OPENER_RUN_RE = /(\\+)<!--/g;
+
+// Exported because the same escape is needed at a SECOND boundary, for the same
+// reason in a different medium. Storage escapes `<!--` so the marker's own
+// terminator cannot be claimed by a nested comment; rendering has to escape it
+// so Obsidian's markdown renderer does not read the text as an HTML comment and
+// hide it. Executed in a real vault: a body of `before <!-- x --> after` renders
+// as "before  after", and an unmatched opener hides whatever follows it in the
+// popover.
+//
+// The parse side unescapes before anything sees the body, which is correct (the
+// body is the user's text, not the stored encoding), so the render boundary has
+// to put the escape back rather than rely on the stored form. `\<` is markdown's
+// own escape, so the run rule works unchanged here: text that already held
+// `\<!--` renders as `\<!--`.
+export function escapeOpener(text: string): string {
+	return text.replace(
+		OPENER_RUN_RE,
+		(_match, slashes: string) => `\\${slashes}<!--`,
+	);
+}
+
+function unescapeOpener(text: string): string {
+	return text.replace(
+		ESCAPED_OPENER_RUN_RE,
+		(_match, slashes: string) => `${slashes.slice(1)}<!--`,
+	);
+}
+
+// The two wrapper escapes, applied together. Neither can manufacture input for
+// the other: the terminator escape only ever inserts a backslash before `>` and
+// the opener escape only before `<`, so they commute, and unescaping in the
+// mirror order is exact.
+function escapeMarkerText(text: string): string {
+	return escapeOpener(escapeTerminator(text));
+}
+
+function unescapeMarkerText(text: string): string {
+	return unescapeTerminator(unescapeOpener(text));
+}
+
+// How many backslashes sit immediately before `index`.
+//
+// Written as a loop rather than a lookbehind on purpose. Lookbehind is a PARSE
+// error in JavaScriptCore before iOS 16.4, so one anywhere in the sources stops
+// the whole plugin loading on those devices; scripts/check-submission.mjs fails
+// the build on it. This is the same question asked in a form that ships.
+function backslashRunBefore(text: string, index: number): number {
+	let run = 0;
+	while (index - run - 1 >= 0 && text.charAt(index - run - 1) === '\\') run++;
+	return run;
+}
+
+// Offset of the first UNESCAPED match of `re` in `text`, or -1. `re` must be a
+// global regex; its lastIndex is reset here rather than trusted.
+function firstUnescaped(text: string, re: RegExp): number {
+	re.lastIndex = 0;
+	let match: RegExpExecArray | null;
+	while ((match = re.exec(text)) !== null) {
+		if (backslashRunBefore(text, match.index) === 0) return match.index;
+	}
+	return -1;
+}
+
 // `-->` is not the only sequence that can break a marker. Every bracketed
 // trailing line is a SINGLE-LINE grammar: parseInnerContent splits the inner
 // content on `\n` and matches each line against one pattern. A newline anywhere
@@ -310,7 +424,107 @@ function unescapeTerminator(text: string): string {
 const LINE_BREAK_RUN_RE = /[\r\n]+/g;
 
 function escapeInline(text: string): string {
-	return escapeTerminator(text).replace(LINE_BREAK_RUN_RE, ' ');
+	return escapeMarkerText(text).replace(LINE_BREAK_RUN_RE, ' ');
+}
+
+// The trailing-line grammar, as a set. serialize() asks "would this body line be
+// read back as one of these?" and the walk asks "is this line one this version
+// does not know?", and both questions are about the SAME list. Written out twice
+// they drift, and a drift here deletes a line of the user's prose.
+const KNOWN_LINE_RES = [
+	ID_LINE_RE,
+	DATE_LINE_RE,
+	AUTHOR_LINE_RE,
+	ANCHOR_LINE_RE,
+	REPLY_LINE_RE,
+	ADDRESSED_LINE_RE,
+	RESOLVED_LINE_RE,
+];
+
+function looksStructured(line: string): boolean {
+	return (
+		KNOWN_LINE_RES.some((re) => re.test(line)) ||
+		UNKNOWN_KV_LINE_RE.test(line) ||
+		UNKNOWN_STAMPED_LINE_RE.test(line)
+	);
+}
+
+// A trailing line in a shape the format defines but this version does not know.
+// Used to vet what serialize() re-emits: a line that is not one of these is body
+// text, and writing it into the trailing block would corrupt the marker.
+function isUnknownStructuredLine(line: string): boolean {
+	if (KNOWN_LINE_RES.some((re) => re.test(line))) return false;
+	return UNKNOWN_KV_LINE_RE.test(line) || UNKNOWN_STAMPED_LINE_RE.test(line);
+}
+
+// A body line that would be read back as a structured trailing line, and the
+// backslash run already in front of its bracket.
+const BRACKET_LEAD_RE = /^(\s*)(\\*)\[/;
+const ESCAPED_BRACKET_LEAD_RE = /^(\s*)(\\+)\[/;
+
+// Escape a body line that mimics a trailing line, so the walk cannot absorb it.
+//
+// The walk reads bottom-up and stops at the first line it cannot classify, so a
+// body whose LAST lines quote the format is indistinguishable from a real
+// trailing block. Executed, on a marker under stock settings: a body line
+// `[author=mallory]` became the comment's author AND was deleted from the body;
+// `[resolved mallory 2020-01-01]: done` silently flipped the comment to resolved
+// and persisted a fabricated resolution; `[retry=3]` was absorbed as an unknown
+// line and dropped with nothing to show the user.
+//
+// The comment this replaces declined the guard, on the grounds that escaping
+// "changes what every existing marker serializes to" while a phantom reply is
+// merely visible. Both halves turned out to be wrong. The blast radius is one
+// character on a body line that ALREADY reads back as something the user did not
+// write, and the failure is not cosmetic: the mimic wins the field AND the line
+// leaves the file. That trade runs the other way, so the guard is now here.
+//
+// The rule is the backslash run, exactly as for the two wrapper escapes: writing
+// adds one, reading removes one, and the test in both directions is whether the
+// line with NO backslashes would parse as structured. A body line the format has
+// no opinion about is left alone in both directions, so ordinary bracket-leading
+// markdown (`[ref]: url`, `[^1]: note`, `[[Some Note]]`) never grows a backslash.
+//
+// EVERY matching line is escaped, not only the ones currently at risk at the
+// bottom of the body. Escaping conditionally on position would mean that editing
+// the last line of a body silently re-encodes a line above it, so the same text
+// would store differently depending on what follows it.
+function escapeStructuredLine(line: string): string {
+	const match = BRACKET_LEAD_RE.exec(line);
+	if (!match) return line;
+	const indent = match[1] ?? '';
+	const slashes = match[2] ?? '';
+	const bracketed = line.slice(indent.length + slashes.length);
+	if (!looksStructured(indent + bracketed)) return line;
+	return `${indent}\\${slashes}${bracketed}`;
+}
+
+function unescapeStructuredLine(line: string): string {
+	const match = ESCAPED_BRACKET_LEAD_RE.exec(line);
+	if (!match) return line;
+	const indent = match[1] ?? '';
+	const slashes = match[2] ?? '';
+	const bracketed = line.slice(indent.length + slashes.length);
+	if (!looksStructured(indent + bracketed)) return line;
+	return `${indent}${slashes.slice(1)}${bracketed}`;
+}
+
+// The body is the one multi-line free-text field, so it is the only one whose
+// lines can be mistaken for the trailing block. Replies, notes and anchors are
+// single-line by construction (escapeInline folds their line breaks away), and
+// the annoteca-original fence is delimited rather than line-oriented and is
+// lifted out before the walk runs.
+function escapeBody(text: string): string {
+	return escapeMarkerText(text)
+		.split('\n')
+		.map(escapeStructuredLine)
+		.join('\n');
+}
+
+function unescapeBody(text: string): string {
+	return unescapeMarkerText(
+		text.split('\n').map(unescapeStructuredLine).join('\n'),
+	);
 }
 
 export interface RawMarker {
@@ -333,6 +547,55 @@ export function scanMarkers(content: string): RawMarker[] {
 		const category = match[1];
 		const inner = match[2];
 		if (category === undefined || inner === undefined) continue;
+		// AN OPENER INSIDE THE MATCH MEANS THIS ONE NEVER CLOSED.
+		//
+		// MARKER_RE is lazy, so it pairs an opener with the FIRST `-->` after it.
+		// Delete one terminator, or let an assistant hand-write a marker and
+		// forget the close, and the opener pairs with the NEXT marker's
+		// terminator instead: the prose between them becomes inner content, the
+		// second comment disappears from the Hub, and the merged comment carries
+		// the second marker's id under the first one's category.
+		//
+		// That is not a display problem. Executed on the merged comment: deleting
+		// it removes the reader's paragraph from the note, appending a reply
+		// cements the merge, and nothing on the write path ever consulted the
+		// diagnostic that could see it.
+		//
+		// The terminator belongs to the LAST opener before it, so resuming the
+		// scan at the nested opener is what finds the real marker. With three
+		// openers stacked up this walks down one at a time until the match is
+		// clean. lastIndex always advances past match.index (an opener cannot
+		// nest inside itself), so the loop cannot stall.
+		//
+		// A body that legitimately QUOTES an opener is why serialize() escapes
+		// `<!--` now: an unescaped one is evidence, an escaped one is prose.
+		//
+		// KNOWN COST, and it is not free. A marker written BEFORE that encoding
+		// whose body quotes an opener is byte-identical to this, because the old
+		// serializer escaped `-->` and had no reason to escape `<!--`. Such a
+		// marker parses correctly today and splits here: the comment comes back
+		// under the QUOTED category carrying the outer marker's id, its body
+		// truncated to the text after the quote, and its range starting
+		// mid-body. A later write then rewrites only that inner range and leaves
+		// the outer opener dangling in the note.
+		//
+		// Nothing is deleted, and the note is not touched until the user acts:
+		// the dangling opener is reported the moment the note is indexed, and
+		// every verb that REMOVES a marker refuses while it stands. Pinned in
+		// __tests__/parser.test.ts, "a marker written before the opener escape".
+		//
+		// There is no parse-side discriminator to be had. An unescaped opener in
+		// a body and an opener that never closed are the same bytes, which is
+		// what the comment on findMalformedMarkers used to mean by "its own
+		// irreducible ambiguity". The escape is what makes the question
+		// decidable, and it can only decide it going forward.
+		const innerStart =
+			match.index + full.length - inner.length - TERMINATOR.length;
+		const nested = firstUnescaped(inner, NESTED_OPENER_RE);
+		if (nested >= 0) {
+			MARKER_RE.lastIndex = innerStart + nested;
+			continue;
+		}
 		out.push({
 			start: match.index,
 			end: match.index + full.length,
@@ -352,6 +615,7 @@ interface ParsedTail {
 	replies: Reply[];
 	addressed: Addressed | undefined;
 	resolution: Resolution | undefined;
+	unknownLines: string[];
 }
 
 interface FenceBlock {
@@ -481,7 +745,7 @@ function stripOriginalFence(inner: string): StrippedFence | undefined {
 		// [resolved ...] line: the format carries one, so the first wins.
 		kept += inner.slice(cursor, fence.start).replace(/\r?\n$/, '');
 		cursor = fence.end;
-		originalText ??= unescapeTerminator(fence.content);
+		originalText ??= unescapeMarkerText(fence.content);
 	}
 	if (originalText === undefined) return undefined;
 	return { stripped: kept + inner.slice(cursor), originalText };
@@ -527,19 +791,28 @@ function parseInnerContent(inner: string): ParsedTail {
 //      value was ignored (rule 1) but `bodyEndExclusive` still moved past it, so
 //      the body lost its last line with nothing to show the user.
 //
-// THE CASE THAT STAYS AMBIGUOUS, and it is irreducible. A body whose last line
-// mimics a kind the marker does NOT already carry is indistinguishable from a
-// real trailing line: `[reply mallory 2020-01-01]: injected` at the end of a
-// body becomes a real reply, and an `[id=...]` on an id-less marker becomes its
-// id. Nothing in the text says otherwise. The rules above only fix the case
-// where the marker's own line is present to be preferred, which is every marker
-// this plugin writes. Replies are not singletons at all, so a mimic simply joins
-// the thread.
+// THE CASE THESE TWO RULES CANNOT REACH. A body whose last line mimics a kind
+// the marker does NOT already carry is indistinguishable from a real trailing
+// line: `[reply mallory 2020-01-01]: injected` at the end of a body becomes a
+// real reply, and an `[id=...]` on an id-less marker becomes its id. The rules
+// above only fix the case where the marker's own line is present to be
+// preferred, and under stock settings a normal marker carries neither
+// `[author=...]` nor `[anchor=...]`. Replies are not singletons at all, so a
+// mimic simply joins the thread.
 //
-// Do not "fix" the ambiguous case by escaping bracket-leading body lines on
-// write. That changes what every existing marker serializes to, and the failure
-// it prevents (a phantom reply, visible in the thread) is recoverable, while the
-// failure it would introduce (rewriting the user's prose) is not.
+// That is irreducible HERE, and it is decided on the write side instead: see
+// escapeStructuredLine, which escapes any body line that would read back as a
+// structured one. The comment this replaces argued against exactly that, on the
+// grounds that escaping "changes what every existing marker serializes to" while
+// the failure it prevented was "recoverable". Both halves were wrong. The reach
+// is one character on a line that already comes back as something the user did
+// not write, and the mimic does not merely appear in the thread: it wins the
+// field AND the line leaves the file, which is the unrecoverable direction.
+//
+// A marker that arrives WITHOUT having gone through serialize (hand-written, or
+// written by an assistant) still hits this, which is why the exported skill now
+// teaches the escape. The walk stays as it is: parse-side, the ambiguity is
+// real, and guessing "structured" on an ambiguous line deletes prose.
 function walkTrailingLines(
 	lines: string[],
 	originalText: string | undefined,
@@ -551,6 +824,7 @@ function walkTrailingLines(
 	const replies: Reply[] = [];
 	let addressed: Addressed | undefined;
 	let resolution: Resolution | undefined;
+	const unknownLines: string[] = [];
 
 	// Tracked separately from the values because a line can be well-formed and
 	// still yield no value: `[anchor=]` is a real structured line carrying
@@ -604,7 +878,7 @@ function walkTrailingLines(
 		if (anchorMatch && anchorMatch[1] !== undefined) {
 			if (seenAnchor) break;
 			seenAnchor = true;
-			const raw = unescapeTerminator(anchorMatch[1]);
+			const raw = unescapeMarkerText(anchorMatch[1]);
 			// An empty value is a structured line with nothing in it, not an
 			// anchor of "". serialize() never writes one, but a hand edit can,
 			// and inventing an empty anchor would make the marker claim it is
@@ -628,7 +902,7 @@ function walkTrailingLines(
 			replies.push({
 				author: replyMatch[1],
 				date: replyMatch[2],
-				body: unescapeTerminator(replyMatch[3] ?? ''),
+				body: unescapeMarkerText(replyMatch[3] ?? ''),
 			});
 			bodyEndExclusive = i;
 			continue;
@@ -645,7 +919,7 @@ function walkTrailingLines(
 			addressed = {
 				author: addressedMatch[1],
 				date: addressedMatch[2],
-				note: unescapeTerminator(addressedMatch[3] ?? ''),
+				note: unescapeMarkerText(addressedMatch[3] ?? ''),
 				original: originalText,
 			};
 			bodyEndExclusive = i;
@@ -663,7 +937,7 @@ function walkTrailingLines(
 			resolution = {
 				author: resolvedMatch[1],
 				date: resolvedMatch[2],
-				note: unescapeTerminator(resolvedMatch[3] ?? ''),
+				note: unescapeMarkerText(resolvedMatch[3] ?? ''),
 			};
 			bodyEndExclusive = i;
 			continue;
@@ -671,13 +945,19 @@ function walkTrailingLines(
 
 		// Forward-compatibility: trailing lines in a shape the format defines
 		// but this version does not recognize are still treated as structured.
-		// They never re-emerge in serialize() because the Comment shape does
-		// not carry them. See UNKNOWN_KV_LINE_RE / UNKNOWN_STAMPED_LINE_RE for
-		// why these two shapes and not "any bracket-leading line".
-		if (
-			UNKNOWN_KV_LINE_RE.test(line) ||
-			UNKNOWN_STAMPED_LINE_RE.test(line)
-		) {
+		// See UNKNOWN_KV_LINE_RE / UNKNOWN_STAMPED_LINE_RE for why these two
+		// shapes and not "any bracket-leading line".
+		//
+		// CARRIED, not just skipped. data-format.md's Migration section asks
+		// this version to "ignore" a line it does not understand, and absorbing
+		// it into the trailing block then dropping it on the next write is not
+		// ignoring it, it is deleting it. Executed: a body ending `[retry=3]`
+		// came back without that line and the next lifecycle write removed it
+		// from the file, with no Notice anywhere. The same shape is how a NEWER
+		// version's fields arrive here, so the version that does not understand
+		// them is exactly the one that must not throw them away.
+		if (isUnknownStructuredLine(line)) {
+			unknownLines.push(unescapeMarkerText(line));
 			bodyEndExclusive = i;
 			continue;
 		}
@@ -687,7 +967,9 @@ function walkTrailingLines(
 
 	const bodyLines = lines.slice(0, bodyEndExclusive);
 	const bodyRaw = bodyLines.join('\n');
-	const body = unescapeTerminator(bodyRaw.trim());
+	const body = unescapeBody(bodyRaw.trim());
+	// The walk ran bottom-up, so these came off the file in reverse.
+	unknownLines.reverse();
 
 	replies.reverse();
 	// Stable-sort by timestamp so a thread reads oldest-first even if its
@@ -698,7 +980,17 @@ function walkTrailingLines(
 	// start of its day relative to same-day timestamped replies.
 	replies.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 
-	return { body, id, date, author, anchor, replies, addressed, resolution };
+	return {
+		body,
+		id,
+		date,
+		author,
+		anchor,
+		replies,
+		addressed,
+		resolution,
+		unknownLines,
+	};
 }
 
 export function parseAll(content: string): Comment[] {
@@ -715,6 +1007,7 @@ export function parseAll(content: string): Comment[] {
 			replies: tail.replies,
 			addressed: tail.addressed,
 			resolution: tail.resolution,
+			unknownLines: tail.unknownLines,
 			marker: { start: raw.start, end: raw.end },
 		});
 	}
@@ -728,6 +1021,11 @@ export function parseAt(content: string, start: number): Comment | undefined {
 	const category = match[1];
 	const inner = match[2];
 	if (category === undefined || inner === undefined) return undefined;
+	// The same refusal scanMarkers makes, for the same reason. Without it the
+	// two disagree about the same document: parseAll would report the marker
+	// nested INSIDE this match while parseAt reported the merged one, and the
+	// edit composer (its only caller) would rewrite the merged range.
+	if (firstUnescaped(inner, NESTED_OPENER_RE) >= 0) return undefined;
 	const tail = parseInnerContent(inner);
 	return {
 		id: tail.id,
@@ -739,6 +1037,7 @@ export function parseAt(content: string, start: number): Comment | undefined {
 		replies: tail.replies,
 		addressed: tail.addressed,
 		resolution: tail.resolution,
+		unknownLines: tail.unknownLines,
 		marker: { start: match.index, end: match.index + match[0].length },
 	};
 }
@@ -753,6 +1052,9 @@ export interface SerializeInput {
 	replies?: readonly Reply[];
 	addressed?: Addressed;
 	resolution?: Resolution;
+	// Trailing lines this version does not understand, carried through from the
+	// parse so a write does not delete them. See the walk's unknown-line branch.
+	unknownLines?: readonly string[];
 }
 
 // A category that MARKER_RE cannot match makes the whole marker invisible: it
@@ -781,7 +1083,15 @@ export function serialize(c: SerializeInput): string {
 	// Every free-text field is escaped on the way out and unescaped on the way
 	// back in, so a body, note, anchor or reply holding `-->` round-trips
 	// instead of closing the marker early. See escapeTerminator.
-	const body = escapeTerminator(c.body);
+	const body = escapeBody(c.body);
+	// Vetted, not trusted. These reach serialize as plain strings, and a caller
+	// that put body text in here would write it into the trailing block, where
+	// the next parse absorbs it: the marker would grow a line the user never
+	// typed and lose one they did. The test is the walk's own, so a line only
+	// survives the round trip if it comes back out as the same unknown line.
+	const unknown = (c.unknownLines ?? [])
+		.map((line) => escapeInline(line))
+		.filter(isUnknownStructuredLine);
 	const hasMetadata =
 		c.id !== undefined ||
 		c.date !== undefined ||
@@ -797,6 +1107,7 @@ export function serialize(c: SerializeInput): string {
 		!hasReplies &&
 		!hasAddressed &&
 		!hasResolution &&
+		unknown.length === 0 &&
 		!bodyMultiline
 	) {
 		return `<!-- annoteca/${category}: ${body} -->`;
@@ -841,7 +1152,7 @@ export function serialize(c: SerializeInput): string {
 		// in the content, since escaping backticks would change the text the
 		// fence exists to preserve verbatim.
 		if (c.addressed.original !== undefined) {
-			const original = escapeTerminator(c.addressed.original);
+			const original = escapeMarkerText(c.addressed.original);
 			const fence = fenceFor(original);
 			lines.push(`${fence}annoteca-original`);
 			lines.push(original);
@@ -855,7 +1166,14 @@ export function serialize(c: SerializeInput): string {
 			`[resolved ${sanitizeAuthorToken(c.resolution.author)} ${c.resolution.date}]:${note}`,
 		);
 	}
-	lines.push(`-->`);
+	// Last in the block, and their position among themselves is all that is
+	// preserved. Where a line sat relative to the lines this version DOES
+	// understand is not recoverable: the walk classifies by shape, not by
+	// position, so it cannot say whether `[retry=3]` belonged above or below the
+	// replies. Keeping the line is the point; keeping its neighbours is not
+	// something the format ever promised.
+	for (const line of unknown) lines.push(line);
+	lines.push(TERMINATOR);
 	return lines.join('\n');
 }
 
@@ -911,8 +1229,15 @@ export function nowISO(now: Date = new Date()): string {
 }
 
 // What kind of problem was found. Split out because the three need different
-// words and different fixes, and because the two new ones describe a document
-// that still PARSES, which the original reason line does not cover.
+// words and different fixes, and because two of them describe a document that
+// still parses, which the original reason line does not cover.
+//
+// They are also acted on differently, which is the reason the distinction has
+// to survive: 'unclosed-opener' blocks a write that would REMOVE a marker below
+// it, 'possible-merge' blocks one that would remove the marker it names, and
+// 'malformed' blocks nothing, because a marker whose category cannot be read
+// closes itself and removing something else cannot make it worse. See
+// findRemovalBlocker.
 export type MalformedMarkerKind =
 	'malformed' | 'unclosed-opener' | 'possible-merge';
 
@@ -934,32 +1259,38 @@ const OPENING_TOKEN_RE =
 // a real vault sit mid-line after prose, and anchoring here missed exactly the
 // shape this diagnostic exists to catch.
 //
-// The cost is a false positive on a note that quotes an opener inside a comment
-// body, since serialize escapes `-->` but has no reason to escape `<!--`. That
-// trade runs the right way: this reports, it never rewrites, so a false positive
-// costs a line in a report the user can dismiss, while a false negative costs a
-// paragraph that has silently vanished from reading view. The reason text says
-// "probably" for the same reason.
+// The false positive this used to have (a body quoting an opener) is gone:
+// serialize escapes `<!--` now, so an unescaped one really is an opener and an
+// escaped one really is prose. The escape run is checked rather than the raw
+// match for exactly that reason.
 const OPENER_ANYWHERE_RE = /<!--\s*annoteca\/[a-z0-9-]+:/gi;
 
-// Reported when an opener has no `-->` of its own.
+// Reported when an opener has no `-->` of its own, and when a marker's `-->`
+// may not be its own.
 //
-// This is the diagnostic half of the merge failure. Delete one `-->`, or let an
-// assistant hand-write a marker and forget the close, and MARKER_RE pairs that
-// opener with the NEXT marker's terminator: everything between them, prose and
-// all, becomes inner content of one merged comment. The prose disappears from
-// reading view, the second comment disappears from the Hub, and the merged
-// comment carries the second marker's id under the first one's category. A
-// lifecycle write then cements it.
+// This used to be the whole answer to the merge failure, because parsing was
+// deliberately left alone: an unclosed opener paired with the next marker's
+// terminator, and the merged comment was perfectly well-formed, so nothing but
+// counting openers against markers could see it. scanMarkers refuses that
+// pairing now, which changes what is left to report.
 //
-// Nothing flagged it, because OPENING_TOKEN_RE only ever matched candidates that
-// themselves end in `-->`, and the merged result is a perfectly well-formed
-// marker. Only the count of openers against the count of markers gives it away.
+//   1. An unclosed ANNOTECA opener is no longer inside anything. scanMarkers
+//      resumes at the nested opener, so the marker below it parses on its own
+//      and the stray opener stands alone: it is reported as 'unclosed-opener'
+//      wherever it sits. The old "opener inside a valid marker" branch is gone
+//      with the behaviour that produced it.
+//   2. A GENERIC `<!--` inside a marker is still a suspected merge, and this is
+//      the half parsing does NOT change. `<!-- annoteca/todo: text` followed by
+//      any ordinary HTML comment pairs with THAT comment's `-->`, swallowing the
+//      prose between them exactly as two annoteca markers used to. Refusing to
+//      pair there would break every existing marker whose body merely mentions
+//      an HTML comment, which is a far commoner shape than a stray opener, so
+//      this reports instead and comment-service refuses the destructive verbs
+//      on the strength of the report.
 //
-// PARSING IS NOT CHANGED HERE. Whether an unclosed opener should refuse to merge
-// is a format question with its own irreducible ambiguity (the opener may be
-// quoted prose), and changing it silently would rewrite how existing documents
-// read. The merge behaviour is pinned by test; this only makes it visible.
+// Reporting stays the conservative half: this never rewrites, so a false
+// positive costs a line in a report, while a false negative costs a paragraph
+// that has silently vanished from reading view.
 export function findMalformedMarkers(content: string): MalformedMarker[] {
 	const markers = scanMarkers(content);
 	const valid = new Set<number>();
@@ -974,6 +1305,7 @@ export function findMalformedMarkers(content: string): MalformedMarker[] {
 	let match: RegExpExecArray | null;
 	while ((match = OPENING_TOKEN_RE.exec(content)) !== null) {
 		if (valid.has(match.index)) continue;
+		if (backslashRunBefore(content, match.index) > 0) continue;
 		reported.add(match.index);
 		out.push({
 			start: match.index,
@@ -983,33 +1315,94 @@ export function findMalformedMarkers(content: string): MalformedMarker[] {
 		});
 	}
 
-	// One finding per containing marker, not per opener inside it, so a document
-	// with several merged markers reads as several problems rather than a wall.
-	const merged = new Set<number>();
 	OPENER_ANYWHERE_RE.lastIndex = 0;
 	while ((match = OPENER_ANYWHERE_RE.exec(content)) !== null) {
 		const at = match.index;
 		if (valid.has(at) || reported.has(at)) continue;
-		const container = markers.find((m) => at > m.start && at < m.end);
-		if (container === undefined) {
-			out.push({
-				start: at,
-				excerpt: excerptAt(at),
-				reason: 'Marker opener has no closing `-->`.',
-				kind: 'unclosed-opener',
-			});
-			continue;
-		}
-		if (merged.has(container.start)) continue;
-		merged.add(container.start);
+		if (backslashRunBefore(content, at) > 0) continue;
 		out.push({
-			start: container.start,
-			excerpt: excerptAt(container.start),
-			reason: 'This marker contains another marker opener, so two markers have probably merged into one. Check for a missing `-->`.',
+			start: at,
+			excerpt: excerptAt(at),
+			reason: 'Marker opener has no closing `-->`.',
+			kind: 'unclosed-opener',
+		});
+	}
+
+	for (const m of markers) {
+		if (firstUnescaped(m.innerContent, HTML_OPENER_RE) < 0) continue;
+		out.push({
+			start: m.start,
+			excerpt: excerptAt(m.start),
+			reason: 'This marker contains an unescaped `<!--`, so the `-->` closing it may belong to that comment instead. Text between them would be hidden. Check for a missing `-->`.',
 			kind: 'possible-merge',
 		});
 	}
 
 	out.sort((a, b) => a.start - b.start);
 	return out;
+}
+
+// The spans an unclosed opener hides, as absolute offsets.
+//
+// A rewriting pass has to know about these because scanMarkers no longer does.
+// While an unclosed opener merged with the next marker's terminator, the whole
+// region WAS a marker, so anything asking scanMarkers what not to touch got
+// this span for free. Refusing that pairing takes the span off that list, and a
+// bulk conversion that rewrites inside it edits text sitting inside an HTML
+// comment: invisible in reading view, so the user cannot see what changed.
+//
+// The extent is the opener to the end of the next literal `-->`, which is what
+// a markdown renderer hides, or to the end of the document when there is none.
+// That is deliberately more than the plugin's own parse would claim: this
+// answers "what is currently invisible", not "what is a marker".
+export function unclosedOpenerRanges(content: string): MarkerRange[] {
+	const out: MarkerRange[] = [];
+	for (const finding of findMalformedMarkers(content)) {
+		if (finding.kind !== 'unclosed-opener') continue;
+		const closes = content.indexOf(TERMINATOR, finding.start);
+		out.push({
+			start: finding.start,
+			end: closes === -1 ? content.length : closes + TERMINATOR.length,
+		});
+	}
+	return out;
+}
+
+// The finding that must stop a write from REMOVING this marker, or undefined
+// when there is nothing in the way.
+//
+// Removal is the one operation that makes a damaged document worse rather than
+// merely leaving it damaged. An unclosed opener above the marker means the
+// marker's own `-->` is the terminator currently ending that hidden region, so
+// deleting the marker extends the region: more of the user's prose disappears
+// from reading view, and nothing says why. A suspected merge on the marker
+// itself is the same hazard from the other side, since the range being removed
+// may not be the range the user thinks it is.
+//
+// Openers BELOW the marker are not a blocker. Their region is terminated by
+// something else, and removing a marker above them cannot change that.
+//
+// Refusing rather than repairing is deliberate: this cannot know which `-->`
+// the user meant to write, and a wrong guess edits their document. The action is
+// repeatable once the marker is closed; prose removed by a write is not.
+// Takes the whole set of ranges a write is about to remove rather than one at a
+// time, so a bulk cleanup scans the document once and asks the same question
+// each single-marker verb asks. A second copy of the predicate for the bulk case
+// is the drift this file keeps warning about.
+export function findRemovalBlocker(
+	content: string,
+	markers: readonly MarkerRange[],
+): MalformedMarker | undefined {
+	if (markers.length === 0) return undefined;
+	const findings = findMalformedMarkers(content);
+	// 'malformed' is not a blocker. It means a marker whose category this
+	// version cannot read, which closes itself: removing something else in the
+	// note cannot make it worse.
+	return findings.find((f) =>
+		f.kind === 'unclosed-opener'
+			? markers.some((m) => f.start < m.start)
+			: f.kind === 'possible-merge'
+				? markers.some((m) => f.start === m.start)
+				: false,
+	);
 }

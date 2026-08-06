@@ -20,6 +20,7 @@ import type {
 	StatusFilter,
 } from './types';
 import { CommentIndex } from './index';
+import { MarkerDamageReporter } from './diagnostics';
 import {
 	AnnotecaSettingTab,
 	resolveSettingsCategories,
@@ -95,6 +96,7 @@ export default class AnnotecaPlugin extends Plugin {
 	comments!: CommentService;
 	diagnostics!: DiagnosticsService;
 	private vaultScanned = false;
+	private readonly markerDamage = new MarkerDamageReporter();
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -413,6 +415,7 @@ export default class AnnotecaPlugin extends Plugin {
 			this.app.vault.on('rename', (file, oldPath) => {
 				if (file instanceof TFile) {
 					this.commentIndex.rename(oldPath, file.path);
+					this.markerDamage.rename(oldPath, file.path);
 					this.events.trigger('index-changed');
 				}
 			}),
@@ -421,6 +424,7 @@ export default class AnnotecaPlugin extends Plugin {
 			this.app.vault.on('delete', (file) => {
 				if (file instanceof TFile) {
 					this.commentIndex.remove(file.path);
+					this.markerDamage.forget(file.path);
 					this.events.trigger('index-changed');
 				}
 			}),
@@ -638,9 +642,11 @@ export default class AnnotecaPlugin extends Plugin {
 									await this.deleteAllResolvedInFile(
 										file.path,
 									);
-								// null means the file could not be opened and
-								// the service has already said so. Reporting a
-								// count here would claim a deletion that did
+								// null means the sweep did not happen: the file
+								// could not be opened, or a marker in it is
+								// damaged in a way that makes removal unsafe.
+								// The service has already said which. Reporting
+								// a count here would claim a deletion that did
 								// not happen.
 								if (removed === null) return;
 								const noun =
@@ -900,7 +906,23 @@ export default class AnnotecaPlugin extends Plugin {
 
 	private async rebuildIndexForFile(file: TFile): Promise<void> {
 		const content = await this.app.vault.cachedRead(file);
-		this.commentIndex.rebuild(file.path, content);
+		const idx = this.commentIndex.rebuild(file.path, content);
+		// Surfaced HERE and not in `rebuild` itself, nor on the index-changed
+		// event, because this is the rebuild that means "a note the user is
+		// working in": it runs on open, on save, and on a file arriving. The
+		// vault-wide scans rebuild every note at once, and announcing damage in
+		// notes nobody has opened would be a wall of notices at startup with no
+		// context for any of them.
+		//
+		// Nothing is needed on the write paths. A write cannot introduce this
+		// damage (serialize always emits a terminator), and a note that already
+		// had it was announced when it was opened.
+		const notice = this.markerDamage.report(
+			file.path,
+			file.basename,
+			idx.malformed,
+		);
+		if (notice !== undefined) new Notice(notice);
 		this.events.trigger('index-changed', { path: file.path });
 	}
 
