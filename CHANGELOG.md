@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Annoteca now requires Obsidian 1.13.0 or later. The README has said so in three places for a while, but the plugin still declared 1.8.7, so Obsidian offered it to people on older versions who could not run it. Anyone on 1.9 through 1.12 keeps the version they have and stops receiving updates.
 - Everything read out of the plugin's settings file is now checked before it is used. That file is editable by hand, arrives over sync, and comes back out of restored backups, so a value in it is not guaranteed to be the kind of value it was saved as. Only a handful of settings were checked before, and the rest were used exactly as found.
+- The author tag is cleaned in exactly one place now, where settings are read in, instead of again each time a comment is signed. The second copy of the rule was weaker: a settings file edited by hand to hold something other than text made signing fail with an error, where the settings reader quietly falls back to "user". The exported AI skill built its reviewer line through the same second copy and now reads the cleaned value directly.
+- Removing, reordering, or moving a category no longer repaints the category list twice. The extra repaint drew into a copy of the list the settings screen had already discarded, so it was wasted work; what you see is unchanged.
 
 ### Added
 - "Clear orphaned stars" removes starred comments whose comment no longer exists anywhere in the vault. The Starred tab has always pointed at this command; until now there was no such command, and those stars could not be removed at all.
