@@ -444,6 +444,15 @@ describe('normalizeSettings: authorTag', () => {
 		expect(normalizeSettings({ authorTag: '' }).authorTag).toBe('');
 	});
 
+	it('trims a padded tag, which is what downstream readers rely on', () => {
+		// CommentService.resolvedAuthor used to trim for itself. It no longer
+		// does, so the trim has to happen here or a padded tag reaches the
+		// [author=...] line, fails the grammar, and breaks the walk.
+		expect(normalizeSettings({ authorTag: '  charles  ' }).authorTag).toBe(
+			'charles',
+		);
+	});
+
 	it('keeps a tag that already matches the grammar, casing included', () => {
 		expect(normalizeSettings({ authorTag: 'Reviewer.2' }).authorTag).toBe(
 			'Reviewer.2',

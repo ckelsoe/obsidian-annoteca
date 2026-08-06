@@ -5,7 +5,7 @@ import {
 	skillStatus,
 	SKILL_SCHEMA_VERSION,
 } from '../skill-export';
-import { parseAll } from '../parser';
+import { isAuthorToken, parseAll } from '../parser';
 import type { CategoryDefinition } from '../types';
 
 const CATEGORIES: CategoryDefinition[] = [
@@ -112,13 +112,79 @@ describe('buildSkillMarkdown', () => {
 		expect(skill).toContain('[reply ai 2026-05-23T09:15:30]');
 	});
 
+	it('teaches the author token grammar the parser actually enforces', () => {
+		expect(skill).toContain('[^\\s\\]<>]{1,32}');
+		// Checked against the parser rather than against the prose, so the
+		// worked repair the skill hands an assistant cannot drift from what
+		// the grammar accepts.
+		expect(isAuthorToken('Bob-Smith')).toBe(true);
+		expect(isAuthorToken('Bob Smith')).toBe(false);
+	});
+
+	it('says what an author that breaks the grammar costs', () => {
+		// The shape alone was already there through v4. What was missing is
+		// that a bad author in a trailing line ends the structured walk, which
+		// takes the id and the whole thread with it.
+		expect(skill).toContain('makes the whole line unmatchable');
+		expect(skill).toContain('Bob-Smith');
+	});
+
+	it('separates the two costs the way the parser actually applies them', () => {
+		// Driven against the parser, because the skill makes a claim about a
+		// difference between characters and a claim is where prose drifts.
+		const marker = (author: string): string =>
+			[
+				'<!-- annoteca/note: the body',
+				'[id=aaaa1111]',
+				`[author=${author}]`,
+				'-->',
+			].join('\n');
+		// A space drops the author line and keeps the identity.
+		const spaced = parseAll(marker('Bob Smith'))[0];
+		expect(spaced?.id).toBe('aaaa1111');
+		expect(spaced?.author).toBeUndefined();
+		// A `]` closes the bracket early, so the line is no structured shape at
+		// all, the walk stops on it, and the id goes into the body with it.
+		const bracketed = parseAll(marker('Bob]Smith'))[0];
+		expect(bracketed?.id).toBeUndefined();
+		expect(bracketed?.body).toContain('[id=aaaa1111]');
+		// Which is what the skill now tells an assistant.
+		expect(skill).toContain('A `]` is worse');
+	});
+
 	it("names the reviewer's author tag when one is configured", () => {
 		const withTag = buildSkillMarkdown(CATEGORIES, 'Charles');
 		expect(withTag).toContain('signs comments as `Charles`');
 	});
 
+	it('uses the configured tag verbatim rather than repairing it', () => {
+		// normalizeSettings is the single ingress and has already run the tag
+		// through the grammar, so this cannot arrive padded. The assertion
+		// exists to keep a second copy of that repair from growing back here.
+		expect(buildSkillMarkdown(CATEGORIES, ' Charles ')).toContain(
+			'signs comments as ` Charles `',
+		);
+	});
+
 	it('suggests a generic tag when no author tag is configured', () => {
 		expect(skill).toContain('such as `claude` or `ai`');
+	});
+
+	it('survives a reviewer tag holding backticks', () => {
+		// The grammar allows backticks (sanitizeAuthorToken strips only
+		// whitespace, ], < and >), so a single-backtick wrap ends the code
+		// span at the tag's own backtick and breaks the exported markdown.
+		// The delimiter has to exceed the longest run inside the tag, the
+		// same rule the annoteca-original fence follows.
+		expect(isAuthorToken('bob`dev')).toBe(true);
+		expect(buildSkillMarkdown(CATEGORIES, 'bob`dev')).toContain(
+			'signs comments as ``bob`dev``.',
+		);
+		// A tag that STARTS with a backtick needs the space padding
+		// CommonMark strips back out, or the delimiter absorbs it.
+		expect(buildSkillMarkdown(CATEGORIES, '`bob')).toContain(
+			'signs comments as `` `bob ``.',
+		);
 	});
 });
 
@@ -137,5 +203,14 @@ describe('skill staleness detection (F-277)', () => {
 			SKILL_SCHEMA_VERSION > 1 ? 'stale' : 'current',
 		);
 		expect(skillStatus(current)).toBe('current');
+	});
+
+	it('flags a v4 export as stale, because it predates the author grammar', () => {
+		// The prompt to re-export is the only thing that reaches an assistant
+		// already working from the old file, so teaching new grammar without
+		// the bump teaches nobody.
+		expect(skillStatus('---\nannoteca-skill-version: 4\n---')).toBe(
+			'stale',
+		);
 	});
 });

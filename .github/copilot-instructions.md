@@ -174,7 +174,14 @@ Settings tab section headings must not contain the words "settings", "options", 
 
 `minAppVersion` is 1.13.0, so `getSettingDefinitions()` is the only path. The imperative `display()` fallback and the parity script that kept the two in step are both deleted. Do not reintroduce either: a second path that the dev vault never exercises is how a row ends up invisible to half the supported range.
 
-`update()` is the re-render entry point, reached through `rerender()`. It reconciles bound controls from fresh definitions but does NOT re-invoke a custom block's `render` callback. So a custom block whose contents change MUST repaint its own DOM as well as calling `rerender()`; `commitCategoryChange` is the worked example. `rerender()` alone leaves the block showing what it drew last.
+`update()` is the re-render entry point, reached through `rerender()`. It rebuilds the tab from fresh definitions: bound controls reconcile, AND a custom block's `render` callback runs again against a NEW host element. Both halves are synchronous, so the new DOM is in place by the time `update()` returns.
+
+This paragraph said the opposite until 2026-08-05, and the code written against it repainted custom blocks by hand before calling `rerender()`. Measured in the running app (Obsidian 1.13.4) by adding a category in memory and calling `update()`: the row count went 8 to 9 immediately, the previous `.annoteca-category-list` node was a different object and already `isConnected === false`, and nothing changed again on a later tick. `containerEl` itself is stable across the call; only its contents are rebuilt.
+
+Two consequences, both load-bearing:
+
+- **Do not hand-repaint a custom block before `rerender()`.** The repaint lands on a node `update()` is about to detach and replace, so it is wasted work that reads as necessary.
+- **A DOM reference captured before `rerender()` is dead after it.** Re-find the element from `containerEl`, which survives. `refocusAfterMove` in `settings.ts` is the worked example.
 
 ### Every value read out of data.json goes through `normalizeSettings`
 
@@ -189,7 +196,7 @@ Settings tab section headings must not contain the words "settings", "options", 
 - Tests live in `__tests__/` and are named `*.test.ts`.
 - The Jest environment is `node` by default, so there is no DOM. Obsidian APIs are stubbed by `__mocks__/obsidian.ts`.
 - A test that needs a real DOM (constructing a CodeMirror `EditorView`, for instance) opts in per file with a `/** @jest-environment jsdom */` docblock, as `__tests__/live-views.test.ts` does. Do not switch the whole suite; the rest does not need it and jsdom is slower.
-- Under jsdom you still do NOT get Obsidian's injected DOM helpers (`document.win.createSpan`, `el.createDiv`, and friends). Prefer arranging the test so they are never called, the way `live-views.test.ts` uses `indicatorStyle: 'underline'` to avoid constructing any widget. Hand-writing a stub for them puts an imitation of Obsidian between the test and the code, and it trips `obsidianmd/prefer-create-el` on its own `createElement` call.
+- Under jsdom you still do NOT get Obsidian's injected DOM helpers (`document.win.createSpan`, `el.createDiv`, and friends). Prefer arranging the test so they are never called, the way `live-views.test.ts` uses `indicatorStyle: 'underline'` to avoid constructing any widget. When the surface under test is itself BUILT from them (the reply composer, the tooltip host), call `installObsidianDomHelpers()` from `__mocks__/obsidian.ts` instead of hand-writing a stub: it installs a strict subset of the real API and clones elements from seeds the test's jsdom `html` option supplies, which is what keeps it clear of `obsidianmd/prefer-create-el`'s ban on `createElement`. See `reply-composer-dismiss.test.ts` for the shape. An ad-hoc injected stub in a test file is still wrong: it puts a second, drifting imitation of Obsidian between the test and the code.
 - Shared test doubles go in a non-`*.test.ts` file under `__tests__/` so Jest does not collect them as a suite. `__tests__/stub-context.ts` is the `DecorationContext` double used by more than one suite.
 - Pure modules (`parser.ts`, `categories.ts`, `types.ts`, `skill-export.ts`, etc.) can be tested directly. Modules that import `obsidian` work via the stub — add new stubs to `__mocks__/obsidian.ts` if a class or function is missing.
 - Never remove or disable existing tests.

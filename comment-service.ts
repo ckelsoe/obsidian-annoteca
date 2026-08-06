@@ -624,8 +624,18 @@ export class CommentService {
 		return wrote ? 'written' : 'missing';
 	}
 
+	// Reads the tag; it does not repair it. `normalizeSettings` is the single
+	// ingress for data.json and already runs `authorTag` through the token
+	// grammar, so anything reaching here is a string that is either empty or a
+	// valid token. The `.trim()` this used to do was a second, weaker copy of
+	// that rule living outside the choke point, and it also threw outright on a
+	// non-string tag from a hand-edited file, which is the exact failure the
+	// normalizer exists to absorb.
+	//
+	// Empty still means "no tag set", which is a settings question rather than a
+	// grammar one and so is answered here rather than by the validator.
 	resolvedAuthor(): string {
-		const tag = this.plugin.settings.authorTag.trim();
+		const tag = this.plugin.settings.authorTag;
 		if (this.plugin.settings.enableAuthorTag && tag !== '') return tag;
 		return 'user';
 	}
