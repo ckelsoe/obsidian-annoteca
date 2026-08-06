@@ -366,6 +366,35 @@ function unescapeOpener(text: string): string {
 	);
 }
 
+// Put a guard back on any `<!--` that lost one, and touch nothing else.
+//
+// This exists because the opener escape is a PREFIX and the terminator escape
+// is an INFIX, and only one of those survives being cut in half. `-->` escapes
+// to `--\>`, so a cut either keeps the whole thing or leaves `--` or `>`, and
+// neither is a terminator. `<!--` escapes to `\<!--`, so a cut that lands
+// between the backslash and the bracket leaves a LIVE opener behind.
+//
+// The anchor is the one field that gets cut: serialize truncates it to
+// ANCHOR_LINE_MAX_CHARS after escaping. Executed before this existed: an anchor
+// holding a quoted opener 99 characters from its end serialized to a marker the
+// parser then refused to read, so the comment lost its id and came back under
+// the quoted category. That is serialize writing something parse cannot read,
+// which is the one thing the two of them must never do.
+//
+// NOT escapeOpener. That adds a backslash to whatever run is already there, so
+// running it twice would double-escape every opener that survived the cut
+// intact and hand the reader back an extra backslash. This only fills a gap.
+//
+// A cut can still cost the anchor a backslash of its own (`\\<!--` cut to
+// `\<!--` reads back as `<!--` rather than `\<!--`). Truncated text is lossy by
+// definition, so a character inside it differing is not the same class of
+// problem as a marker that will not parse.
+function reguardOpeners(text: string): string {
+	return text.replace(OPENER_RUN_RE, (match, slashes: string) =>
+		slashes.length > 0 ? match : `\\${match}`,
+	);
+}
+
 // The two wrapper escapes, applied together. Neither can manufacture input for
 // the other: the terminator escape only ever inserts a backslash before `>` and
 // the opener escape only before `<`, so they commute, and unescaping in the
@@ -1126,10 +1155,23 @@ export function serialize(c: SerializeInput): string {
 		// path can produce one today; this is the same guard at the funnel every
 		// write goes through, so a stored or hand-edited anchor cannot break the
 		// line either.
-		const text = midTruncate(
-			escapeInline(c.anchor.text).replace(/\]/g, ''),
-			ANCHOR_LINE_MAX_CHARS,
-		);
+		// Re-guarded AFTER the cut, because the cut is what can break the guard.
+		// See reguardOpeners: the opener escape is a prefix, so truncating in
+		// the middle of one leaves a live `<!--` in a line this function is
+		// about to hand to the parser.
+		//
+		// Then re-cut if the guard pushed it over, so the ceiling still holds.
+		// ANCHOR_LINE_MAX_CHARS is the FORMAT's limit, not this function's
+		// convenience, and .github/copilot-instructions.md states it as the
+		// contract. At most one guard can ever be added (the seam is the only
+		// place a run can be cut, and the ellipsis keeps an opener from forming
+		// across it), so one character of headroom is enough.
+		const escaped = escapeInline(c.anchor.text).replace(/\]/g, '');
+		let text = reguardOpeners(midTruncate(escaped, ANCHOR_LINE_MAX_CHARS));
+		if (text.length > ANCHOR_LINE_MAX_CHARS)
+			text = reguardOpeners(
+				midTruncate(escaped, ANCHOR_LINE_MAX_CHARS - 1),
+			);
 		if (text.trim() !== '') lines.push(`[anchor=${text}]`);
 	}
 	for (const r of c.replies ?? []) {
@@ -1263,7 +1305,23 @@ const OPENING_TOKEN_RE =
 // serialize escapes `<!--` now, so an unescaped one really is an opener and an
 // escaped one really is prose. The escape run is checked rather than the raw
 // match for exactly that reason.
-const OPENER_ANYWHERE_RE = /<!--\s*annoteca\/[a-z0-9-]+:/gi;
+// Built from OPENER_SRC, with `\s*:` like the two patterns it has to agree
+// with, and NOT hand-written. It was hand-written, and it drifted in exactly
+// the way the note at the top of this file warns about: MARKER_RE and
+// NESTED_OPENER_RE both allow whitespace before the colon, and this did not.
+//
+// `<!-- annoteca/todo : first` is therefore an opener that scanMarkers pairs by
+// and this scan could not see, which went from a cosmetic gap to a real one the
+// moment two new consumers were keyed on it. Executed on that document: the
+// parse split as it should, and then findMalformedMarkers returned nothing, so
+// the note never announced itself, findRemovalBlocker let every removal through,
+// and unclosedOpenerRanges left the hidden span unprotected, which let bulk
+// convert rewrite a `%%comment%%` sitting inside it. 1.13.0 reported the same
+// document and protected that span.
+//
+// Still deliberately looser than MARKER_RE's category group (case-insensitive,
+// leading digits allowed) so a near-miss is still reported.
+const OPENER_ANYWHERE_RE = new RegExp(`${OPENER_SRC}[a-z0-9-]+\\s*:`, 'gi');
 
 // Reported when an opener has no `-->` of its own, and when a marker's `-->`
 // may not be its own.

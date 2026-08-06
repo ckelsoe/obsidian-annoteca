@@ -1714,6 +1714,78 @@ describe('parser: unknown trailing lines survive a rewrite', () => {
 		expect(parseAll(text)[0]?.unknownLines).toEqual(['[retry=3]']);
 	});
 
+	it('never writes an anchor the parser cannot read back', () => {
+		// The anchor is the one field serialize CUTS: it is truncated to 200
+		// characters after escaping. The terminator escape is an infix, so half
+		// of `--\>` is not a terminator. The opener escape is a PREFIX, so a cut
+		// between the backslash and the bracket leaves a live `<!--` behind, and
+		// serialize then emits a marker its own parser refuses to read.
+		//
+		// Walked across the cut rather than asserted at one offset, because the
+		// break happens at exactly one alignment: at pad 77 the comment came
+		// back with no id, under the quoted category.
+		for (let pad = 0; pad < 200; pad++) {
+			const anchor =
+				'x'.repeat(250) + '<!-- annoteca/todo: q ' + 'y'.repeat(pad);
+			const text = serialize({
+				id: 'anchcut1',
+				category: 'clarify',
+				body: 'the body',
+				anchor: { text: anchor, truncated: true },
+			});
+			const comments = parseAll(text);
+			expect(comments).toHaveLength(1);
+			expect(comments[0]?.id).toBe('anchcut1');
+			expect(comments[0]?.category).toBe('clarify');
+			// And nothing in the note now looks like damage to the guards.
+			expect(findMalformedMarkers(text)).toEqual([]);
+		}
+	});
+
+	it('round-trips an anchor holding an opener that was never cut', () => {
+		// The other half of the re-guard: it must fill a gap the cut made, not
+		// add a backslash to a guard that is already there. Escaping twice
+		// would hand the reader back `\<!--` for text that said `<!--`, and an
+		// anchor short enough to survive intact is the common case, so this is
+		// where that would show up.
+		const anchor = 'write it as <!-- annoteca/todo: x --> here';
+		const text = serialize({
+			id: 'anchesc1',
+			category: 'clarify',
+			body: 'the body',
+			anchor: { text: anchor, truncated: false },
+		});
+		const c = parseAll(text)[0];
+		expect(c?.anchor?.text).toBe(anchor);
+		expect(c?.id).toBe('anchesc1');
+		// A fixed point, so repeated writes do not walk the backslash run.
+		expect(serialize(c as Comment)).toBe(text);
+		expect(parseAll(serialize(c as Comment))[0]?.anchor?.text).toBe(anchor);
+	});
+
+	it('keeps the anchor within the format ceiling after re-guarding', () => {
+		// The 200-character cap is the FORMAT's, stated in the repo's own
+		// instructions, so re-guarding a cut must not push a value past it.
+		// Swept across the seam rather than asserted at one offset, because
+		// only one alignment adds the guard at all.
+		for (let pad = 0; pad < 200; pad++) {
+			const anchor =
+				'x'.repeat(250) + '<!-- annoteca/todo: q ' + 'y'.repeat(pad);
+			const text = serialize({
+				id: 'anchcut2',
+				category: 'clarify',
+				body: 'b',
+				anchor: { text: anchor, truncated: true },
+			});
+			const line = text.split('\n').find((l) => l.startsWith('[anchor='));
+			expect(line).toBeDefined();
+			const value = (line ?? '').slice('[anchor='.length, -1);
+			expect(value.length).toBeLessThanOrEqual(200);
+			// And it is still readable, which is the point of the guard.
+			expect(parseAll(text)[0]?.id).toBe('anchcut2');
+		}
+	});
+
 	it('keeps an annoteca-original fence holding an opener verbatim', () => {
 		// The fence is inside the marker, so an unescaped `<!--` in the prose it
 		// captured would now split the marker at that point and lose the
@@ -2229,6 +2301,39 @@ describe('parser: findMalformedMarkers sees unclosed openers', () => {
 		const found = findMalformedMarkers(text);
 		expect(found.map((f) => f.kind)).toEqual(['unclosed-opener']);
 		expect(found[0]?.start).toBe(0);
+	});
+
+	it('sees an opener with whitespace before the colon', () => {
+		// The scan is built from the same source MARKER_RE pairs by, so it
+		// cannot disagree with it about what an opener is. It used to: this
+		// pattern was hand-written without the `\s*`, so `annoteca/todo :`
+		// split the parse while the diagnostic saw nothing, which took the
+		// removal guard and the bulk-convert protection down with it.
+		const text = [
+			'Intro.',
+			'',
+			'<!-- annoteca/todo : first',
+			'[id=spc00001]',
+			'',
+			'Prose.',
+			'',
+			'<!-- annoteca/question: second',
+			'[id=spc00002]',
+			'-->',
+		].join('\n');
+		expect(parseAll(text).map((c) => c.id)).toEqual(['spc00002']);
+		expect(findMalformedMarkers(text).map((f) => f.kind)).toEqual([
+			'unclosed-opener',
+		]);
+		expect(unclosedOpenerRanges(text)).toHaveLength(1);
+	});
+
+	it('says nothing about a closed marker with whitespace before the colon', () => {
+		// The control. That spacing is legal grammar, published to assistants
+		// in the exported skill, so flagging it would fire on healthy notes.
+		const text = 'Prose. <!-- annoteca/todo : fix this --> more.';
+		expect(parseAll(text)).toHaveLength(1);
+		expect(findMalformedMarkers(text)).toEqual([]);
 	});
 
 	it('reports a generic HTML comment inside a marker as a possible merge', () => {

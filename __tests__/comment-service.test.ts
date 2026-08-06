@@ -3,7 +3,11 @@ import { MarkdownView, TFile } from 'obsidian';
 // Relative, so it types against __mocks__/obsidian.ts rather than obsidian.d.ts.
 import { noticeLog } from '../__mocks__/obsidian';
 import type AnnotecaPlugin from '../main';
-import { CommentService, VANISHED_MESSAGE } from '../comment-service';
+import {
+	CommentService,
+	markerDamageMessage,
+	VANISHED_MESSAGE,
+} from '../comment-service';
 import { parseAll } from '../parser';
 import { convertAllComments } from '../imports';
 
@@ -1579,5 +1583,33 @@ describe('a blocked write is not reported as a stale transition', () => {
 			target(h.content),
 		);
 		expect(outcome).toBe('blocked');
+	});
+});
+
+// The two damage kinds are different problems and need different instructions.
+// "Add the missing `-->`" is right for an opener that never closed and WRONG for
+// a suspected merge, where adding a terminator would close the marker early and
+// spill the rest of it into the document as visible text.
+describe('markerDamageMessage tells the user what to actually do', () => {
+	it('tells an unclosed opener to add the terminator', () => {
+		const msg = markerDamageMessage({
+			start: 0,
+			excerpt: '<!-- annoteca/todo: never closed',
+			reason: 'Marker opener has no closing `-->`.',
+			kind: 'unclosed-opener',
+		});
+		expect(msg).toContain('Add the missing `-->`');
+		expect(msg).not.toContain('Escape the inner');
+	});
+
+	it('tells a suspected merge to escape the inner opener instead', () => {
+		const msg = markerDamageMessage({
+			start: 0,
+			excerpt: '<!-- annoteca/todo: has <!-- inside',
+			reason: 'This marker contains an unescaped `<!--`.',
+			kind: 'possible-merge',
+		});
+		expect(msg).toContain('Escape the inner `<!--`');
+		expect(msg).not.toContain('Add the missing');
 	});
 });

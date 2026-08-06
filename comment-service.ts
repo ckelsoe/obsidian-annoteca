@@ -87,8 +87,25 @@ export function ambiguousMessage(id: string): string {
 //
 // The finding's own reason is quoted rather than restated, so the words the
 // diagnostics report uses and the words this notice uses cannot drift.
+// Says what to DO, not only what is wrong, and the two kinds need different
+// instructions because they are different problems.
+//
+// An 'unclosed-opener' really is a missing terminator, and nothing inside the
+// plugin supplies one: no write re-serializes an opener that sits outside every
+// parsed marker, and the validation command reports without editing. The user
+// typing `-->` is the whole fix, so the notice says so.
+//
+// A 'possible-merge' is NOT a missing terminator. It is an unescaped `<!--`
+// inside a marker whose own `-->` may belong to that comment instead, and
+// telling the user to add another terminator there would have them close the
+// marker early and spill the rest into the document. That one is repaired by
+// escaping the inner opener, which any ordinary write already does.
 export function markerDamageMessage(finding: MalformedMarker): string {
-	return `Annoteca did not change this note. ${finding.reason} Removing a comment while that is unresolved would hide more of the note. Run "Validate marker format" to find it.`;
+	const fix =
+		finding.kind === 'unclosed-opener'
+			? 'Add the missing `-->` to close it, or run "Validate marker format" to see where it is.'
+			: 'Escape the inner `<!--` as `\\<!--`, or run "Validate marker format" to see where it is.';
+	return `Annoteca did not change this note. ${finding.reason} Removing a comment while that is unresolved would hide more of the note. ${fix}`;
 }
 
 // Every public mutating verb is a thin `enqueue` wrapper around a private
@@ -917,9 +934,15 @@ export class CommentService {
 	// Only these verbs. Resolve, reply and edit go through replaceMarker, which
 	// writes a marker back in place of a marker: the terminator survives, so the
 	// hidden region does not grow, and refusing there would leave a user unable
-	// to work in a note at all until they had gone marker-hunting. One of those
-	// writes also REPAIRS the note, because serialize escapes the `<!--` that a
-	// suspected merge is reported for.
+	// to work in a note at all until they had gone marker-hunting.
+	//
+	// One of those writes repairs a 'possible-merge', because the unescaped
+	// `<!--` it is reported for lives in a body that serialize escapes on the
+	// way out. It does NOT repair an 'unclosed-opener': that opener sits outside
+	// every parsed marker, so no write re-serializes it, and only the user
+	// typing the missing `-->` clears it. An earlier version of this comment
+	// claimed both, which would have sent someone looking for a repair that
+	// never happens.
 	private refusesForDamage(
 		content: string,
 		markers: readonly MarkerRange[],
