@@ -1613,3 +1613,75 @@ describe('markerDamageMessage tells the user what to actually do', () => {
 		expect(msg).not.toContain('Add the missing');
 	});
 });
+
+// The guard refuses what it must and nothing else. The hidden region runs from
+// the unclosed opener to the next `-->`; a comment starting past that is
+// outside it, so removing that comment leaves the region byte-identical.
+//
+// Blocking those too meant one legacy marker quoting the format disabled every
+// removing verb for the whole note, however far away the comment was, until the
+// user hand-edited the file.
+describe('the damage guard is scoped to the region, not the note', () => {
+	// A note that quotes the syntax (which 1.13.0's own serializer produced for
+	// any comment whose body did that), then two entirely healthy comments well
+	// past the region's terminator.
+	const NOTE = [
+		'# Style guide',
+		'',
+		'<!-- annoteca/note: write it as <!-- annoteca/todo: text --\\> at the head.',
+		'[id=aaaaaaaa]',
+		'-->',
+		'',
+		'Paragraph one.',
+		'',
+		'<!-- annoteca/todo: tighten this',
+		'[id=bbbbbbbb]',
+		'-->',
+		'',
+		'Paragraph two.',
+		'',
+		'<!-- annoteca/todo: and this',
+		'[id=cccccccc]',
+		'-->',
+		'',
+		'Paragraph three.',
+	].join('\n');
+
+	const byId = (content: string, id: string) => {
+		const c = parseAll(content).find((x) => x.id === id);
+		if (!c) throw new Error(`no comment ${id}`);
+		return c;
+	};
+
+	it('deletes a healthy comment that sits past the region', async () => {
+		const h = makeHarnessWith(NOTE);
+		await h.service.deleteComment('note.md', byId(h.content, 'cccccccc'));
+		expect(h.content).not.toContain('[id=cccccccc]');
+		// And the damaged region above it is untouched.
+		expect(h.content).toContain('<!-- annoteca/note: write it as');
+		expect(noticeLog.join(' ')).not.toContain('Validate marker format');
+	});
+
+	it('still refuses a comment inside the hidden region', async () => {
+		// The one whose `-->` is currently ending the region. Removing it is
+		// what would hide more of the note.
+		const inside = [
+			'Intro.',
+			'',
+			'<!-- annoteca/todo: never closed',
+			'[id=dddddddd]',
+			'',
+			'Prose the reader must see.',
+			'',
+			'<!-- annoteca/question: second',
+			'[id=eeeeeeee]',
+			'-->',
+			'',
+			'Outro.',
+		].join('\n');
+		const h = makeHarnessWith(inside);
+		await h.service.deleteComment('note.md', byId(h.content, 'eeeeeeee'));
+		expect(h.content).toBe(inside);
+		expect(noticeLog.join(' ')).toContain('Validate marker format');
+	});
+});

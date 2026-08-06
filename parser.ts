@@ -609,9 +609,10 @@ export function scanMarkers(content: string): RawMarker[] {
 		// the outer opener dangling in the note.
 		//
 		// Nothing is deleted, and the note is not touched until the user acts:
-		// the dangling opener is reported the moment the note is indexed, and
-		// every verb that REMOVES a marker refuses while it stands. Pinned in
-		// __tests__/parser.test.ts, "a marker written before the opener escape".
+		// the dangling opener is reported the moment the note is indexed, and a
+		// verb that REMOVES a marker inside the region it hides refuses while it
+		// stands. Pinned in __tests__/parser.test.ts, "a marker written before
+		// the opener escape".
 		//
 		// There is no parse-side discriminator to be had. An unescaped opener in
 		// a body and an opener that never closed are the same bytes, which is
@@ -1384,12 +1385,11 @@ export function findMalformedMarkers(content: string): MalformedMarker[] {
 	// while its terminator sat two words away.
 	//
 	// The wrong word used to be the whole cost. It is not any more: an
-	// 'unclosed-opener' finding blocks every write that would REMOVE a marker
-	// below it and marks the span to the next terminator off-limits to bulk
-	// convert, so one miscategorized near-miss disables both for the rest of the
-	// note. 'malformed' says the same thing about the document and blocks
-	// nothing, which is right for a marker that closes itself and merely cannot
-	// be read.
+	// 'unclosed-opener' finding blocks a write that would REMOVE a marker inside
+	// the span it hides, and marks that span off-limits to bulk convert, so one
+	// miscategorized near-miss disables both across the span it wrongly claims.
+	// 'malformed' says the same thing about the document and blocks nothing,
+	// which is right for a marker that closes itself and merely cannot be read.
 	const openers: number[] = [];
 	OPENER_ANYWHERE_RE.lastIndex = 0;
 	while ((match = OPENER_ANYWHERE_RE.exec(content)) !== null) {
@@ -1459,16 +1459,21 @@ export function findMalformedMarkers(content: string): MalformedMarker[] {
 // That is deliberately more than the plugin's own parse would claim: this
 // answers "what is currently invisible", not "what is a marker".
 export function unclosedOpenerRanges(content: string): MarkerRange[] {
-	const out: MarkerRange[] = [];
-	for (const finding of findMalformedMarkers(content)) {
-		if (finding.kind !== 'unclosed-opener') continue;
-		const closes = content.indexOf(TERMINATOR, finding.start);
-		out.push({
-			start: finding.start,
-			end: closes === -1 ? content.length : closes + TERMINATOR.length,
-		});
-	}
-	return out;
+	return findMalformedMarkers(content)
+		.filter((f) => f.kind === 'unclosed-opener')
+		.map((f) => ({
+			start: f.start,
+			end: openerRegionEnd(content, f.start),
+		}));
+}
+
+// Where the span an unclosed opener hides stops: the end of the next literal
+// `-->`, or the end of the document. Shared by the two callers that need it,
+// because they are asking the same question and a second copy of the answer is
+// the drift this file keeps warning about.
+function openerRegionEnd(content: string, start: number): number {
+	const closes = content.indexOf(TERMINATOR, start);
+	return closes === -1 ? content.length : closes + TERMINATOR.length;
 }
 
 // The finding that must stop a write from REMOVING this marker, or undefined
@@ -1485,9 +1490,21 @@ export function unclosedOpenerRanges(content: string): MarkerRange[] {
 // Openers BELOW the marker are not a blocker. Their region is terminated by
 // something else, and removing a marker above them cannot change that.
 //
+// NEITHER IS A MARKER PAST THE REGION'S OWN TERMINATOR, and the predicate says
+// so rather than blocking everything below the opener. The hidden region runs
+// from the opener to the next `-->`; a marker starting after that is outside it,
+// so splicing it out leaves the region byte-identical and the refusal would have
+// no reason behind it. The earlier version blocked on `f.start < m.start` alone,
+// which made one legacy marker quoting the syntax disable delete, resolve-and-
+// remove, delete-all-resolved and reject for EVERY comment in the note, however
+// far away, until the user hand-edited the file. The safety property is
+// unchanged: every marker whose removal could extend a hidden region is still
+// refused, because such a marker necessarily starts inside one.
+//
 // Refusing rather than repairing is deliberate: this cannot know which `-->`
 // the user meant to write, and a wrong guess edits their document. The action is
 // repeatable once the marker is closed; prose removed by a write is not.
+//
 // Takes the whole set of ranges a write is about to remove rather than one at a
 // time, so a bulk cleanup scans the document once and asks the same question
 // each single-marker verb asks. A second copy of the predicate for the bulk case
@@ -1497,15 +1514,14 @@ export function findRemovalBlocker(
 	markers: readonly MarkerRange[],
 ): MalformedMarker | undefined {
 	if (markers.length === 0) return undefined;
-	const findings = findMalformedMarkers(content);
 	// 'malformed' is not a blocker. It means a marker whose category this
 	// version cannot read, which closes itself: removing something else in the
 	// note cannot make it worse.
-	return findings.find((f) =>
-		f.kind === 'unclosed-opener'
-			? markers.some((m) => f.start < m.start)
-			: f.kind === 'possible-merge'
-				? markers.some((m) => f.start === m.start)
-				: false,
-	);
+	return findMalformedMarkers(content).find((f) => {
+		if (f.kind === 'possible-merge')
+			return markers.some((m) => f.start === m.start);
+		if (f.kind !== 'unclosed-opener') return false;
+		const end = openerRegionEnd(content, f.start);
+		return markers.some((m) => m.start > f.start && m.start < end);
+	});
 }

@@ -2163,8 +2163,9 @@ describe('parser: findMalformedMarkers sees unclosed openers', () => {
 		expect(only?.marker.start).toBeGreaterThan(0);
 
 		// What keeps it from becoming data loss: the dangling opener is
-		// reported, so the note announces itself and every removing verb
-		// refuses while it stands. Nothing rewrites the note on its own.
+		// reported, so the note announces itself, and a removing verb aimed
+		// inside the region it hides refuses while it stands. Nothing rewrites
+		// the note on its own.
 		const found = findMalformedMarkers(legacy);
 		expect(found.map((f) => f.kind)).toEqual(['unclosed-opener']);
 		expect(found[0]?.start).toBe(0);
@@ -2258,9 +2259,9 @@ describe('parser: findMalformedMarkers sees unclosed openers', () => {
 		// terminator two words away.
 		//
 		// The wrong word is no longer the whole cost. 'unclosed-opener' now
-		// blocks every write that would REMOVE a marker below it and marks the
-		// span to the next terminator off-limits to bulk convert, so one
-		// miscategorized near-miss would disable both for the rest of the note.
+		// blocks a write that would REMOVE a marker inside the span it hides,
+		// and marks that span off-limits to bulk convert, so one miscategorized
+		// near-miss would disable both across the span it wrongly claims.
 		const text = 'Prose. <!-- Annoteca/Todo: text --> more prose.';
 		const found = findMalformedMarkers(text);
 		expect(found.map((f) => f.kind)).toEqual(['malformed']);
