@@ -27,6 +27,19 @@ const DISABLE_OBSIDIANMD = /(?:\/\/|\/\*)\s*eslint-disable(?:-next-line|-line)?[
 // directive line is compliant only if it also contains a `--` separator.
 const ESLINT_DIRECTIVE = /(?:\/\/|\/\*)\s*eslint-(?:disable|enable)(?:-next-line|-line)?\b/;
 
+// Regex lookbehind. `(?<=` and `(?<!` are a PARSE error in JavaScriptCore before
+// iOS 16.4, not a runtime one: an affected phone fails to load the plugin at all
+// rather than mis-handling one note. This plugin is not desktop-only and esbuild
+// targets es2018, which does not downlevel lookbehind, so one written in source
+// ships verbatim. One nearly did, in the importer's code-span scanner, and
+// nothing in the toolchain would have caught it.
+//
+// Named capture groups are `(?<name>` and are fine, so only the two lookbehind
+// forms match.
+const LOOKBEHIND = /\(\?<[=!]/;
+const LOOKBEHIND_WHY =
+	"regex lookbehind is a parse error in JavaScriptCore before iOS 16.4, so the plugin will not load at all on those devices. Rewrite the pattern as a scan.";
+
 function* walkCode(dir) {
 	for (const entry of readdirSync(dir, { withFileTypes: true })) {
 		const path = `${dir}/${entry.name}`;
@@ -38,8 +51,22 @@ function* walkCode(dir) {
 	}
 }
 
+// Comments blanked, line numbers preserved, the same trick the styles.css check
+// below uses. The two eslint rules above READ comments and so want the raw line;
+// the lookbehind rule must not, or it flags the comment in imports.ts that
+// explains why lookbehind is banned, which is the one place in this repo
+// guaranteed to quote the syntax.
+function withoutComments(source) {
+	return source
+		.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "))
+		.split(/\r?\n/)
+		.map((line) => line.replace(/\/\/.*$/, ""));
+}
+
 for (const file of walkCode(".")) {
-	const lines = readFileSync(file, "utf8").split(/\r?\n/);
+	const source = readFileSync(file, "utf8");
+	const lines = source.split(/\r?\n/);
+	const code = withoutComments(source);
 	lines.forEach((line, index) => {
 		const where = `${file.replace(/^\.\//, "")}:${index + 1}`;
 		if (DISABLE_OBSIDIANMD.test(line)) {
@@ -47,6 +74,9 @@ for (const file of walkCode(".")) {
 		}
 		if (ESLINT_DIRECTIVE.test(line) && !line.includes("--")) {
 			findings.push(`${where}: eslint directive comment needs a "-- description" explaining why it is necessary.`);
+		}
+		if (LOOKBEHIND.test(code[index] ?? "")) {
+			findings.push(`${where}: ${LOOKBEHIND_WHY}`);
 		}
 	});
 }
@@ -68,6 +98,26 @@ try {
 	}
 } catch (error) {
 	findings.push(`manifest.json: could not read or parse (${error.message}).`);
+}
+
+// The BUILT bundle, when there is one, must also be free of lookbehind.
+//
+// Opportunistic, and deliberately NOT the primary check. `npm run lint` runs
+// before `npm run build` both in CI and in the release flow, and `main.js` is
+// gitignored, so on a fresh checkout there is no bundle to read and this finds
+// nothing. Making it the only guard would have shipped a check that never ran.
+// The source scan above is what actually holds; this adds the one thing sources
+// cannot show, which is a DEPENDENCY that inlines a lookbehind into the bundle,
+// and it fires locally and on any lint run after a build.
+try {
+	const bundle = readFileSync("main.js", "utf8");
+	bundle.split(/\r?\n/).forEach((line, index) => {
+		if (LOOKBEHIND.test(line)) {
+			findings.push(`main.js:${index + 1}: ${LOOKBEHIND_WHY}`);
+		}
+	});
+} catch {
+	// No bundle on this run. The source scan above already covers our own code.
 }
 
 // styles.css must not use !important (raise selector specificity instead). Block
