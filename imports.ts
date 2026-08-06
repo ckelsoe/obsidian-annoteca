@@ -10,25 +10,31 @@ const NATIVE_COMMENT_RE = /%%([\s\S]*?)%%/g;
 const HTML_COMMENT_RE = /<!--([\s\S]*?)-->/g;
 
 // A fenced code block opener or closer, per CommonMark: some indent, then a run
-// of at least three backticks or tildes. Group 2 is the indent, group 3 the
-// fence run, group 4 the rest of the line, which must be blank for the line to
+// of at least three backticks or tildes. Group 1 is the indent, group 2 the
+// fence run, group 3 the rest of the line, which must be blank for the line to
 // CLOSE a block.
 //
-// The indent is captured rather than capped here because the cap is RELATIVE.
-// CommonMark allows a fence up to three columns past where its containing
-// block's content starts, and this pattern used to write that as an absolute
-// /\s{0,3}/. A fence legally nested in a list item at four or more columns was
-// then not recognised as a fence at all, so bulk convert rewrote the samples
-// inside it and counted them as successes. The `openItems` stack in
-// protectedRanges is what the captured indent is measured against.
+// Matched against a line's CONTENT, after any block-quote markers have been
+// stripped, so it carries no quote prefix of its own. The indent is captured
+// rather than capped because the cap is RELATIVE: CommonMark allows a fence up
+// to three columns past where its containing block's content starts, and this
+// pattern used to write that as an absolute /\s{0,3}/, so a fence legally
+// nested in a list item at four or more columns was not recognised as a fence
+// at all and bulk convert rewrote the samples inside it.
+const FENCE_LINE_RE = /^([ \t]*)(`{3,}|~{3,})(.*)$/;
+
+// The block-quote markers opening a line, each with the one space of content it
+// is allowed to swallow. What follows is the quote's CONTENT, and every indent
+// rule here is measured from where that starts.
 //
-// The blockquote prefix is allowed because a fence inside a block quote is
-// ordinary CommonMark, and quoting documentation is exactly the case where a
-// note holds comment syntax it does not want converted. Tracking quote nesting
-// properly is more than this needs: treating a quoted fence as a fence can only
-// ever protect MORE text than a renderer would, and over-protecting during a
-// bulk rewrite means "left something alone", which is the recoverable direction.
-const FENCE_LINE_RE = /^((?:\s{0,3}>)*)(\s*)(`{3,}|~{3,})(.*)$/;
+// Stripping the markers first is what makes those rules work the same inside a
+// quote as outside one. Measuring a quoted line from column zero instead
+// charged the fence for indentation the markers had already consumed, and
+// ignoring the indent entirely went the other way and read an over-indented
+// literal `~~~` in a quote as an opener, protecting the ordinary quoted prose
+// under it. Both were executed regressions against the reference CommonMark
+// implementation before this became a strip-then-measure.
+const QUOTE_PREFIX_RE = /^(?:[ \t]{0,3}>[ \t]?)+/;
 
 // Inline code spans in a stretch of text, as offsets relative to it. Applied
 // outside fenced blocks, over a whole run of consecutive lines rather than one
@@ -247,12 +253,18 @@ const INTERRUPTING_ITEM_RE = /^ {0,3}(?:[-+*]|1[.)])[ \t]+\S/;
 // text, so an absolute test would protect a real comment there and bulk convert
 // would silently skip it. Outside any list `openItemIndent` is undefined and
 // this is the plain four-columns-or-a-tab rule.
+// Takes an indent already MEASURED in columns rather than a line, because the
+// column a line's content starts at is not always zero: inside a block quote it
+// starts after the markers, and a tab there lands on the next absolute tab stop,
+// not four columns further on. Measuring `> \t%%comment%%` from zero made a
+// two-column indent read as four and protected an ordinary quoted comment.
 function opensIndentedCode(
-	line: string,
+	indentCols: number,
+	blank: boolean,
 	openItemIndent: number | undefined,
 ): boolean {
-	if (line.trim() === '') return false;
-	return indentColumns(line) >= (openItemIndent ?? 0) + 4;
+	if (blank) return false;
+	return indentCols >= (openItemIndent ?? 0) + 4;
 }
 
 export interface ImportResult {
@@ -387,7 +399,13 @@ function protectedRanges(content: string): ProtectedRange[] {
 
 	let offset = 0;
 	let openFence:
-		| { char: string; length: number; from: number; itemDepth: number }
+		| {
+				char: string;
+				length: number;
+				from: number;
+				itemDepth: number;
+				quoted: boolean;
+		  }
 		| undefined;
 	let inHtmlComment = false;
 	// Content indents, in columns, of the list items currently open, outermost
@@ -466,6 +484,35 @@ function protectedRanges(content: string): ProtectedRange[] {
 			offset = lineEnd + 1;
 			continue;
 		}
+		// Strip the quote markers, then measure everything from where the quote's
+		// content starts. Outside a quote the prefix is empty and `body` is the
+		// whole line, so the unquoted rules are untouched.
+		const quotePrefix = QUOTE_PREFIX_RE.exec(line)?.[0] ?? '';
+		const quoted = quotePrefix !== '';
+		const prefixCols = quoted ? advanceColumns(quotePrefix, 0) : 0;
+		const body = quoted ? line.slice(quotePrefix.length) : line;
+		// Indent of the line's content within its container, in columns. Absolute
+		// tab stops, so a tab after a `> ` marker lands where a renderer puts it
+		// rather than being charged the marker's own columns.
+		const bodyIndent = (text: string): number =>
+			advanceColumns(text, prefixCols) - prefixCols;
+		const bodyIndentCols = bodyIndent(/^[ \t]*/.exec(body)?.[0] ?? '');
+		const bodyBlank = body.trim() === '';
+
+		// A fence inside a BLOCK QUOTE ends with the quote. A block quote ends at
+		// a blank line or at a line carrying no quote marker, and a fence cannot
+		// outlive the block that holds it, which is the same three-enders point
+		// as the list case below.
+		//
+		// This is what makes not measuring a quoted fence's indent safe. Without
+		// it, an opener recognised more freely runs to end of file and protects
+		// everything after the quote, so real comments below are skipped and
+		// reported as "converted 0". Executed: that is already true on main for
+		// an unclosed `> ```, and this closes it rather than widening it.
+		if (openFence?.quoted === true && !BLOCK_OPENER_RE.test(line)) {
+			out.push({ from: openFence.from, to: offset });
+			openFence = undefined;
+		}
 		// A non-blank line is out of every open item whose content it is not
 		// indented far enough to be in. Popping one at a time is what returns the
 		// allowance to the PARENT item rather than to the margin.
@@ -492,32 +539,14 @@ function protectedRanges(content: string): ProtectedRange[] {
 				openFence = undefined;
 			}
 		}
-		const fence = FENCE_LINE_RE.exec(line);
+		const fence = FENCE_LINE_RE.exec(body);
 		// Three columns past the containing block's content, per CommonMark. A
 		// fence run further in than that is not a fence; outside a list that is
 		// the absolute three columns this used to hard-code.
-		//
-		// In COLUMNS, like the allowance it is compared against, but only OUTSIDE
-		// a block quote.
-		//
-		// Inside one the indent is still counted in characters, which is what
-		// this rule did before columns arrived. A quote marker swallows a space
-		// of what follows it, and a nested quote swallows one per level, so a
-		// column count taken from the start of the line charges the fence for
-		// indentation the markers already consumed. Measuring `> \t~~~` that way
-		// made it four columns instead of two and stopped it being a fence at
-		// all, and bulk convert then rewrote the `%%samples%%` inside a quoted
-		// code block. Executed against the reference CommonMark implementation:
-		// three quoted shapes regressed that way, and counting characters here
-		// leaves quoted fences reading exactly as they did before this PR.
-		const quoted = (fence?.[1] ?? '') !== '';
-		const rawIndent = fence?.[2] ?? '';
-		const fenceIndent = quoted
-			? rawIndent.length
-			: advanceColumns(rawIndent, 0);
 		const fenceRun =
-			fence !== null && fenceIndent <= (innerItem() ?? 0) + 3
-				? fence[3]
+			fence !== null &&
+			bodyIndent(fence[1] ?? '') <= (innerItem() ?? 0) + 3
+				? fence[2]
 				: undefined;
 		if (openFence !== undefined) {
 			// A closing fence is the same character, at least as long, with
@@ -526,7 +555,7 @@ function protectedRanges(content: string): ProtectedRange[] {
 				fenceRun !== undefined &&
 				fenceRun.charAt(0) === openFence.char &&
 				fenceRun.length >= openFence.length &&
-				(fence?.[4] ?? '').trim() === ''
+				(fence?.[3] ?? '').trim() === ''
 			) {
 				out.push({ from: openFence.from, to: lineEnd });
 				openFence = undefined;
@@ -538,6 +567,7 @@ function protectedRanges(content: string): ProtectedRange[] {
 				length: fenceRun.length,
 				from: offset,
 				itemDepth: openItems.length,
+				quoted,
 			};
 		} else if (line.trim() === '') {
 			flushRun();
@@ -592,9 +622,38 @@ function protectedRanges(content: string): ProtectedRange[] {
 			if (!line.includes('-->'))
 				inHtmlComment = content.indexOf('-->', lineEnd) !== -1;
 		} else if (BLOCK_OPENER_RE.test(line)) {
-			// A quote already in progress carries on: consecutive `>` lines are
-			// one block, so a span may run across them.
-			if (textRun?.kind === 'quote') {
+			// A quote's content follows the same block rules as the document's,
+			// so an indented code block inside one is still code. Measured after
+			// the markers, and only with no run open, exactly as outside a quote:
+			// indented code cannot interrupt a paragraph, so a deep line under
+			// quoted prose is a continuation of it.
+			//
+			// The quote branch used to have no notion of this at all, so a
+			// `%%sample%%` in a quoted code block was rewritten and counted as a
+			// success. That is this file's founding defect, surviving one axis
+			// over because the axis was never swept.
+			// A list item inside the quote is still a list item, and the indent
+			// rules need its content indent the same way they do outside one.
+			// The list branch above tests the UNSTRIPPED line, which never
+			// matches through a `>`, so a quoted list never reached the stack:
+			// `> - item` / `>` / `>     Continuation %%real%%` then measured the
+			// continuation against no item at all, read four columns as code, and
+			// skipped a real comment that converted correctly before.
+			if (bodyBlank) {
+				// A quote line carrying no content is a blank line INSIDE the
+				// quote, and ends the paragraph there exactly as a blank line
+				// does outside one. Without this the run carried straight across
+				// it, so an indented block below read as a continuation of the
+				// prose above and never got the chance to be code.
+				flushRun();
+			} else if (
+				textRun === undefined &&
+				opensIndentedCode(bodyIndentCols, bodyBlank, innerItem())
+			) {
+				out.push({ from: offset, to: lineEnd });
+			} else if (textRun?.kind === 'quote') {
+				// A quote already in progress carries on: consecutive `>` lines
+				// are one block, so a span may run across them.
 				textRun = { ...textRun, to: lineEnd };
 			} else {
 				flushRun();
@@ -607,7 +666,7 @@ function protectedRanges(content: string): ProtectedRange[] {
 			}
 		} else if (
 			textRun === undefined &&
-			opensIndentedCode(line, innerItem())
+			opensIndentedCode(bodyIndentCols, bodyBlank, innerItem())
 		) {
 			// Opens an indented code block, so it is not the first line of the
 			// paragraph below it, and every character on it is code.
