@@ -9,9 +9,18 @@ const NATIVE_COMMENT_RE = /%%([\s\S]*?)%%/g;
 // Match `<!-- text -->` HTML comments. Non-greedy, multiline.
 const HTML_COMMENT_RE = /<!--([\s\S]*?)-->/g;
 
-// A fenced code block opener or closer, per CommonMark: up to three spaces of
-// indent, then a run of at least three backticks or tildes. Group 3 is the rest
-// of the line, which must be blank for the line to CLOSE a block.
+// A fenced code block opener or closer, per CommonMark: some indent, then a run
+// of at least three backticks or tildes. Group 2 is the indent, group 3 the
+// fence run, group 4 the rest of the line, which must be blank for the line to
+// CLOSE a block.
+//
+// The indent is captured rather than capped here because the cap is RELATIVE.
+// CommonMark allows a fence up to three columns past where its containing
+// block's content starts, and this pattern used to write that as an absolute
+// /\s{0,3}/. A fence legally nested in a list item at four or more columns was
+// then not recognised as a fence at all, so bulk convert rewrote the samples
+// inside it and counted them as successes. The `openItems` stack in
+// protectedRanges is what the captured indent is measured against.
 //
 // The blockquote prefix is allowed because a fence inside a block quote is
 // ordinary CommonMark, and quoting documentation is exactly the case where a
@@ -19,7 +28,7 @@ const HTML_COMMENT_RE = /<!--([\s\S]*?)-->/g;
 // properly is more than this needs: treating a quoted fence as a fence can only
 // ever protect MORE text than a renderer would, and over-protecting during a
 // bulk rewrite means "left something alone", which is the recoverable direction.
-const FENCE_LINE_RE = /^((?:\s{0,3}>)*\s{0,3})(`{3,}|~{3,})(.*)$/;
+const FENCE_LINE_RE = /^((?:\s{0,3}>)*)(\s*)(`{3,}|~{3,})(.*)$/;
 
 // Inline code spans in a stretch of text, as offsets relative to it. Applied
 // outside fenced blocks, over a whole run of consecutive lines rather than one
@@ -164,6 +173,50 @@ function leadingIndent(line: string): number {
 	return line.length - line.trimStart().length;
 }
 
+// Leading indent in COLUMNS, with a tab advancing to the next multiple of four,
+// which is how CommonMark measures indentation. `leadingIndent` counts
+// CHARACTERS instead, and the two are deliberately not merged: the nested-item
+// ceiling above is documented as character-counted (a tab-indented nested list
+// costs over-protection there), while the fence and indented-code rules below
+// decide whether a line is CODE, where reading a tab as one column would leave
+// a tab-indented code sample unprotected and let bulk convert rewrite it.
+function indentColumns(line: string): number {
+	let col = 0;
+	for (const ch of line) {
+		if (ch === ' ') col += 1;
+		else if (ch === '\t') col += 4 - (col % 4);
+		else break;
+	}
+	return col;
+}
+
+// Where an item's content begins, in columns. The column twin of
+// `listContentIndent`, and what a fence or an indented-code line inside the item
+// is measured against.
+//
+// Five or more COLUMNS of padding after the marker is CommonMark's
+// indented-code case: the content starts one column past the marker and the
+// rest is code. Without that clamp the allowance grows with the padding, and a
+// deep fence far below could be read as an opener that never closes, which
+// protects the rest of the file and reports "converted 0" as if there had been
+// nothing to convert.
+//
+// Measured after expansion, not as `spaces.length`. `-\t\titem` is two padding
+// CHARACTERS but seven columns, so a character count slips under the clamp and
+// puts the item's content at column 8, which then reads an ordinary four-column
+// paragraph below it as indented code and skips a real comment in it.
+function listContentColumns(line: string): number {
+	const m = LIST_MARKER_RE.exec(line);
+	if (!m) return 0;
+	const markerEnd = indentColumns(line) + (m[2]?.length ?? 0);
+	const spaces = m[3] ?? '';
+	let col = markerEnd;
+	for (const ch of spaces) col += ch === '\t' ? 4 - (col % 4) : 1;
+	// A marker with no padding still opens content one column along.
+	if (col - markerEnd === 0 || col - markerEnd >= 5) return markerEnd + 1;
+	return col;
+}
+
 // The subset that can INTERRUPT an open paragraph: non-empty, and, when ordered,
 // numbered 1. `2. still code` in the middle of a paragraph is ordinary text, so
 // treating every ordered marker as a boundary split real code spans and let
@@ -174,10 +227,23 @@ function leadingIndent(line: string): number {
 // numbered from 2 behave like a list rather than like one long paragraph.
 const INTERRUPTING_ITEM_RE = /^ {0,3}(?:[-+*]|1[.)])[ \t]+\S/;
 
-// Four spaces or a tab, which opens an indented code block when no paragraph is
-// open. It cannot interrupt one, so this is only consulted when there is no run
-// in progress; a deeply indented continuation line stays with its paragraph.
-const INDENTED_CODE_RE = /^(?: {4}|\t)/;
+// Four columns past where the containing block's content starts, which opens an
+// indented code block when no paragraph is open. It cannot interrupt one, so
+// this is only consulted when there is no run in progress; a deeply indented
+// continuation line stays with its paragraph.
+//
+// Relative, not absolute. Inside a list item whose content starts at column 2, a
+// line at four columns is only two past the content and is ordinary paragraph
+// text, so an absolute test would protect a real comment there and bulk convert
+// would silently skip it. Outside any list `openItemIndent` is undefined and
+// this is the plain four-columns-or-a-tab rule.
+function opensIndentedCode(
+	line: string,
+	openItemIndent: number | undefined,
+): boolean {
+	if (line.trim() === '') return false;
+	return indentColumns(line) >= (openItemIndent ?? 0) + 4;
+}
 
 export interface ImportResult {
 	updated: string;
@@ -262,6 +328,9 @@ function protectedRanges(content: string): ProtectedRange[] {
 		}
 	};
 
+	// Monotonic cursor into `markers` for the walk in flushRun.
+	let flushAt = 0;
+
 	const flushRun = (): void => {
 		const region = textRun;
 		textRun = undefined;
@@ -283,8 +352,21 @@ function protectedRanges(content: string): ProtectedRange[] {
 		// marker interiors as opaque. Splitting also means the text after a
 		// marker's closing `-->` on the same line is scanned, which the
 		// line-at-a-time scanner never did either.
+		//
+		// Walked from a monotonic cursor rather than from the start of `markers`
+		// every time. Regions are flushed in increasing `from` order, so a marker
+		// already behind one region can never matter to a later one; restarting
+		// the walk made a note with many markers cost O(markers x flushes), and
+		// flushRun runs about once per line.
+		while (
+			flushAt < markers.length &&
+			(markers[flushAt]?.end ?? 0) <= region.from
+		)
+			flushAt++;
 		let at = region.from;
-		for (const m of markers) {
+		for (let i = flushAt; i < markers.length; i++) {
+			const m = markers[i];
+			if (m === undefined) continue;
 			if (m.end <= at) continue;
 			if (m.start >= region.to) break;
 			scanSegment(at, Math.min(m.start, region.to));
@@ -294,8 +376,22 @@ function protectedRanges(content: string): ProtectedRange[] {
 	};
 
 	let offset = 0;
-	let openFence: { char: string; length: number; from: number } | undefined;
+	let openFence:
+		| { char: string; length: number; from: number; itemDepth: number }
+		| undefined;
 	let inHtmlComment = false;
+	// Content indents, in columns, of the list items currently open, outermost
+	// first. What the fence and indented-code rules are measured against, and it
+	// deliberately SURVIVES a blank line: a blank line does not close a list
+	// item, and the shape that started this was a fence one blank line under its
+	// list item.
+	//
+	// A STACK rather than one value, because leaving a nested item returns to its
+	// parent rather than to the document margin. Collapsing to "no list" instead
+	// read the parent's own four-column paragraph as top-level indented code and
+	// silently skipped a real comment in it.
+	const openItems: number[] = [];
+	const innerItem = (): number | undefined => openItems[openItems.length - 1];
 	for (const line of content.split('\n')) {
 		const lineEnd = offset + line.length;
 		if (insideMarker(offset)) {
@@ -360,8 +456,40 @@ function protectedRanges(content: string): ProtectedRange[] {
 			offset = lineEnd + 1;
 			continue;
 		}
+		// A non-blank line is out of every open item whose content it is not
+		// indented far enough to be in. Popping one at a time is what returns the
+		// allowance to the PARENT item rather than to the margin.
+		if (line.trim() !== '') {
+			const col = indentColumns(line);
+			while (openItems.length > 0 && col < (innerItem() ?? 0))
+				openItems.pop();
+			// An UNCLOSED fence ends with the item that HOLDS it, not at end of
+			// file. A fence has three enders (its closing line, the end of the
+			// block holding it, and EOF) and only the first and last were
+			// modelled, because before the allowance went relative a fence could
+			// only ever be top-level, where those two are the whole list.
+			// Executed: `- item:` / blank / a four-column unterminated fence /
+			// blank / ordinary prose left the prose protected to EOF, so a real
+			// comment in it was skipped and reported as "converted 0".
+			//
+			// `itemDepth` is the stack height when the fence opened, so this
+			// fires exactly when the item that contained it has been popped.
+			if (
+				openFence !== undefined &&
+				openItems.length < openFence.itemDepth
+			) {
+				out.push({ from: openFence.from, to: offset });
+				openFence = undefined;
+			}
+		}
 		const fence = FENCE_LINE_RE.exec(line);
-		const fenceRun = fence?.[2];
+		// Three columns past the containing block's content, per CommonMark. A
+		// fence run further in than that is not a fence; outside a list that is
+		// the absolute three columns this used to hard-code.
+		const fenceRun =
+			fence !== null && (fence[2]?.length ?? 0) <= (innerItem() ?? 0) + 3
+				? fence[3]
+				: undefined;
 		if (openFence !== undefined) {
 			// A closing fence is the same character, at least as long, with
 			// nothing after it.
@@ -369,7 +497,7 @@ function protectedRanges(content: string): ProtectedRange[] {
 				fenceRun !== undefined &&
 				fenceRun.charAt(0) === openFence.char &&
 				fenceRun.length >= openFence.length &&
-				(fence?.[3] ?? '').trim() === ''
+				(fence?.[4] ?? '').trim() === ''
 			) {
 				out.push({ from: openFence.from, to: lineEnd });
 				openFence = undefined;
@@ -380,6 +508,7 @@ function protectedRanges(content: string): ProtectedRange[] {
 				char: fenceRun.charAt(0),
 				length: fenceRun.length,
 				from: offset,
+				itemDepth: openItems.length,
 			};
 		} else if (line.trim() === '') {
 			flushRun();
@@ -407,6 +536,10 @@ function protectedRanges(content: string): ProtectedRange[] {
 				leadingIndent(line) < textRun.contentIndent + 4)
 		) {
 			flushRun();
+			// The pop above already left only items this line sits inside, so a
+			// sibling item has had its predecessor removed and this pushes the
+			// new one; a nested item pushes on top of its parent.
+			openItems.push(listContentColumns(line));
 			textRun = {
 				from: offset,
 				to: lineEnd,
@@ -443,18 +576,22 @@ function protectedRanges(content: string): ProtectedRange[] {
 					contentIndent: 0,
 				};
 			}
-		} else if (textRun === undefined && INDENTED_CODE_RE.test(line)) {
+		} else if (
+			textRun === undefined &&
+			opensIndentedCode(line, innerItem())
+		) {
 			// Opens an indented code block, so it is not the first line of the
-			// paragraph below it. Scanned alone rather than skipped, which keeps
-			// the per-line behaviour this replaced; protecting indented code
-			// wholesale is a separate change from bounding the runs.
-			textRun = {
-				from: offset,
-				to: lineEnd,
-				kind: 'text',
-				contentIndent: 0,
-			};
-			flushRun();
+			// paragraph below it, and every character on it is code.
+			//
+			// PROTECTED outright, where this used to only scan the line for code
+			// spans and leave the rest of it convertible. A renderer shows this
+			// line inside a <pre><code>, so a `%%sample%%` on it is documentation
+			// of the syntax, not a comment, and bulk convert rewrote it and
+			// counted it as a success. Protecting the whole line also covers the
+			// continuation lines of the block, which stay in this branch because
+			// nothing here opens a run: a blank line inside the block flushes
+			// nothing, so the line after it is still measured as code.
+			out.push({ from: offset, to: lineEnd });
 		} else {
 			textRun =
 				textRun === undefined

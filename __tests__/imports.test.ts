@@ -788,3 +788,195 @@ describe('the prose after a multi-line marker terminator, same line', () => {
 		expect(r.updated).toContain('annoteca/note: real');
 	});
 });
+
+// M4: code blocks whose CONTENT sits four or more columns in. Both mechanisms
+// were executed against marked@12 as a CommonMark oracle before the fix: 55 of
+// 263 generated container shapes had a sample rewritten and counted as a
+// success, and 0 do now, with no shape moving the other way.
+describe('protectedRanges: indented code and nested fences', () => {
+	it('leaves a native comment inside an indented code block alone', () => {
+		const doc =
+			'How to write a comment:\n\n    Some prose. %%a native comment%%\n\nThat is all.';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
+	});
+
+	it('leaves an HTML comment inside an indented code block alone', () => {
+		const doc = 'Example:\n\n    <!-- an html comment -->\n\nEnd.';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
+	});
+
+	it('measures a tab as four columns, so a tab-indented block is code', () => {
+		const doc = 'How to:\n\n\tSome prose. %%a native comment%%\n\nEnd.';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
+	});
+
+	it('keeps protecting an indented block across its blank lines', () => {
+		const doc =
+			'Example:\n\n    line one\n\n    %%still the same code block%%\n\nEnd.';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
+	});
+
+	it('protects an indented block that opens the file', () => {
+		const doc = '    Some prose. %%a native comment%%\n\nThat is all.';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
+	});
+
+	it('recognises a fence nested in a list item at four columns', () => {
+		const doc =
+			'- Step one, write a comment:\n\n    ```markdown\n    Some prose. %%a native comment%%\n    ```\n\n- Step two.';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
+	});
+
+	it('recognises a fence under a wide ordered marker with no blank line', () => {
+		const doc =
+			'10. Step one:\n    ```markdown\n    Some prose. %%a native comment%%\n    ```\n11. Step two.';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
+	});
+
+	// Tilde fences, deliberately. A nested BACKTICK fence is protected even with
+	// the indent bug present, because the code-span scanner pairs the opener's
+	// ``` run with the closer's and calls everything between them a span. That
+	// accident masks the fence rule: mutating the allowance back to an absolute
+	// three columns left every backtick-fence test in this file green. A tilde
+	// fence has no backticks, so it isolates the rule under test.
+	it('recognises a tilde fence nested in a list item at four columns', () => {
+		const doc =
+			'- Step one:\n\n    ~~~\n    %%a native comment%%\n    ~~~\n\n- Step two.';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
+	});
+
+	it('recognises a tilde fence under a wide marker with no blank line', () => {
+		const doc =
+			'10. Step one:\n    ~~~\n    %%a native comment%%\n    ~~~\n11. Step two.';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
+	});
+
+	it('protects a task item whose sample sits past its content indent', () => {
+		const doc =
+			'- [ ] Step one:\n\n      ```markdown\n      %%a native comment%%\n      ```\n';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
+	});
+
+	// The other direction. The indent rule is RELATIVE, so inside an item whose
+	// content starts at column 2 a line at four columns is ordinary paragraph
+	// text. An absolute four-column rule would protect this and bulk convert
+	// would silently skip a real comment.
+	it('still converts a comment in an indented list continuation paragraph', () => {
+		const doc =
+			'- item\n\n    A continuation paragraph %%with a comment%%.';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(1);
+		expect(r.updated).toContain('annoteca/uncategorized: with a comment');
+	});
+
+	it('treats six columns inside that same item as code', () => {
+		const doc = '- item\n\n      A code block %%sample%% inside the item.';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
+	});
+
+	// Five or more spaces after the marker is CommonMark's indented-code case:
+	// content starts one column past the marker, it does NOT start where the
+	// padded text does. Letting the allowance grow with the padding pushed the
+	// code threshold out to eleven columns, and a real comment at four was
+	// protected and silently skipped. marked@12 agrees it is prose.
+	it('clamps the content indent when the marker is widely padded', () => {
+		const doc =
+			'1.     padded item\n\n    %%a real comment%% at four columns.';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(1);
+		expect(r.updated).toContain('annoteca/uncategorized: a real comment');
+	});
+
+	it('clamps it for a bullet marker too', () => {
+		const doc =
+			'-      padded item\n\n    %%a real comment%% at four columns.';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(1);
+		expect(r.updated).toContain('annoteca/uncategorized: a real comment');
+	});
+
+	// Leaving a NESTED item returns to its parent, not to the document margin.
+	// Collapsing to "no list" read the parent's own four-column paragraph as
+	// top-level indented code and skipped the real comment in it.
+	it('restores the parent content indent after a nested item ends', () => {
+		const doc = '- parent\n\n  - child\n\n  parent text\n\n    %%real%%';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(1);
+		expect(r.updated).toContain('annoteca/uncategorized: real');
+	});
+
+	it('still reads code inside that parent item as code', () => {
+		const doc =
+			'- parent\n\n  - child\n\n  parent text\n\n      %%sample%%';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
+	});
+
+	// The wide-padding clamp measures COLUMNS. `-\t\titem` is two padding
+	// characters but seven columns, so a character count slipped under the clamp
+	// and put the item's content at column 8, which then read an ordinary
+	// four-column paragraph below it as code.
+	it('clamps tab padding by column, not by character count', () => {
+		const doc = '-\t\titem\n\n    %%real%%';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(1);
+		expect(r.updated).toContain('annoteca/uncategorized: real');
+	});
+
+	it('goes back to the absolute rule once the list is over', () => {
+		const doc =
+			'- item\n\nParagraph.\n\n    %%sample in real indented code%%\n';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
+	});
+
+	// A fence has three enders, not two. Raising the indent allowance is what
+	// made the middle one reachable: before it, a fence could only be top-level,
+	// where its closing line and EOF are the whole list.
+	it('ends an unclosed fence with the list item that holds it', () => {
+		const doc =
+			'- item:\n\n    ```\n    unterminated\n\nOrdinary paragraph %%a real comment%% here.';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(1);
+		expect(r.updated).toContain('annoteca/uncategorized: a real comment');
+	});
+
+	it('does not read a line past the allowance as a fence opener', () => {
+		const doc =
+			'- item:\n\n        ```\n\nOrdinary paragraph %%a real comment%% here.';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(1);
+		expect(r.updated).toContain('annoteca/uncategorized: a real comment');
+	});
+
+	it('leaves a top-level unclosed fence protecting through end of file', () => {
+		const doc = 'Prose.\n\n```\n%%sample%%\n';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
+	});
+});

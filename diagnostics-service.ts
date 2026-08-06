@@ -102,6 +102,14 @@ export class DiagnosticsService {
 
 	async runDriftCheck(): Promise<void> {
 		await this.plugin.scanVaultIfNeeded();
+		// Sibling of the orphaned-stars defect, same mechanism. The pruning at
+		// the bottom of this method deletes every snapshot whose id is not in
+		// `liveIds`, and `liveIds` is built from the INDEX rather than from the
+		// content read a line above it. A note absent from the index therefore
+		// contributes no ids, and its comments' drift baselines are deleted as if
+		// the comments were gone. `scanVaultIfNeeded` is one-shot and cannot
+		// promise the index knows about the vault as it is now.
+		await this.plugin.indexUnseenFiles();
 		const prior: Record<string, PositionSnapshot> =
 			this.plugin.settings.driftSnapshots ?? {};
 		const allFindings: DriftFinding[] = [];

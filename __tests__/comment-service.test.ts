@@ -3,8 +3,9 @@ import { MarkdownView, TFile } from 'obsidian';
 // Relative, so it types against __mocks__/obsidian.ts rather than obsidian.d.ts.
 import { noticeLog } from '../__mocks__/obsidian';
 import type AnnotecaPlugin from '../main';
-import { CommentService } from '../comment-service';
+import { CommentService, VANISHED_MESSAGE } from '../comment-service';
 import { parseAll } from '../parser';
+import { convertAllComments } from '../imports';
 
 beforeEach(() => {
 	noticeLog.length = 0;
@@ -954,6 +955,9 @@ function makeRacingHarness(initial: string) {
 function makeEditorHarness(initial: string) {
 	let content = initial;
 	let afterNextGetValue: (() => void) | undefined;
+	// Both write paths land in the same `content`, so a test that only reads it
+	// back cannot tell them apart. This counter is what distinguishes them.
+	let processCalls = 0;
 	const file = new TFile();
 	const editor = {
 		getValue: () => {
@@ -984,6 +988,7 @@ function makeEditorHarness(initial: string) {
 					p === 'note.md' ? file : null,
 				read: () => Promise.resolve(content),
 				process: (_f: TFile, fn: (data: string) => string) => {
+					processCalls++;
 					content = fn(content);
 					return Promise.resolve(content);
 				},
@@ -1003,6 +1008,13 @@ function makeEditorHarness(initial: string) {
 		},
 		set content(updated: string) {
 			content = updated;
+		},
+		// Stands in for unsaved typing: the editor moves on, the vault does not.
+		setEditorValue(updated: string) {
+			content = updated;
+		},
+		get processCalls() {
+			return processCalls;
 		},
 		onceAfterRead(fn: () => void) {
 			afterNextGetValue = fn;
@@ -1163,5 +1175,233 @@ describe('resolvedAuthor reads the tag and does not re-validate it', () => {
 		expect(author({ enableAuthorTag: false, authorTag: 'charles' })).toBe(
 			'user',
 		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// M3: bulk import's per-file write.
+//
+// It used to sit in main.ts as vault.read -> convert -> vault.modify, outside
+// both the write queue and the staleness check. Executed against a real
+// filesystem, a Resolve clicked during the sweep was blind-overwritten at 2 of
+// 72 trials while the only notice the user saw was "Resolved."
+// ---------------------------------------------------------------------------
+
+const NOTE_WITH_NATIVE = [
+	'Prose under review. <!-- annoteca/clarify: which products?',
+	'[id=a1b2c3d4]',
+	'-->',
+	'',
+	'More prose. %%an old native comment%%',
+].join('\n');
+
+// Closed-file harness with a hook that lands a write just before the sweep's
+// own write runs, which is the window the old code computed its offsets in.
+function makeConvertHarness(initial: string) {
+	let content = initial;
+	let beforeNextProcess: (() => void) | undefined;
+	let afterNextRead: (() => void) | undefined;
+	const file = new TFile();
+	const plugin = {
+		settings: {
+			enableAuthorTag: true,
+			authorTag: 'charles',
+			deleteOnResolve: false,
+		},
+		app: {
+			vault: {
+				getAbstractFileByPath: (p: string) =>
+					p === 'note.md' ? file : null,
+				// Snapshots first, then fires the hook, so a hook can land a
+				// whole other write inside the window between a verb's read and
+				// the write it computes from it.
+				read: () => {
+					const snapshot = content;
+					const hook = afterNextRead;
+					afterNextRead = undefined;
+					if (hook) hook();
+					return Promise.resolve(snapshot);
+				},
+				cachedRead: () => Promise.resolve(content),
+				process: (_f: TFile, fn: (data: string) => string) => {
+					const hook = beforeNextProcess;
+					beforeNextProcess = undefined;
+					if (hook) hook();
+					content = fn(content);
+					return Promise.resolve(content);
+				},
+			},
+			workspace: {
+				getLeavesOfType: () => [],
+				getActiveFile: () => null,
+			},
+		},
+		commentIndex: { rebuild: () => undefined },
+		events: { trigger: () => undefined },
+	} as unknown as AnnotecaPlugin;
+	return {
+		service: new CommentService(plugin),
+		file,
+		get content() {
+			return content;
+		},
+		set content(updated: string) {
+			content = updated;
+		},
+		onceBeforeWrite(fn: () => void) {
+			beforeNextProcess = fn;
+		},
+		onceAfterRead(fn: () => void) {
+			afterNextRead = fn;
+		},
+	};
+}
+
+const convertAll = (content: string) =>
+	convertAllComments(content, 'all', 'uncategorized');
+
+describe('convertFileComments', () => {
+	it('converts and reports the count', async () => {
+		const h = makeConvertHarness(NOTE_WITH_NATIVE);
+		const n = await h.service.convertFileComments(
+			'note.md',
+			h.file,
+			convertAll,
+		);
+		expect(n).toBe(1);
+		expect(h.content).toContain(
+			'annoteca/uncategorized: an old native comment',
+		);
+		// The pre-existing marker is untouched, not re-converted.
+		expect(parseAll(h.content)).toHaveLength(2);
+	});
+
+	it('counts what it wrote, not what it read', async () => {
+		// The document loses its only convertible comment between the caller's
+		// pre-filter read and the write. Converting before the lock reported a
+		// success for a comment that was no longer there; converting inside it
+		// reports nothing, because nothing was converted.
+		const h = makeConvertHarness(NOTE_WITH_NATIVE);
+		h.onceBeforeWrite(() => {
+			h.content = h.content.replace('%%an old native comment%%', 'gone');
+		});
+		const n = await h.service.convertFileComments(
+			'note.md',
+			h.file,
+			convertAll,
+		);
+		expect(n).toBe(0);
+		expect(h.content).toContain('gone');
+		expect(h.content).not.toContain('annoteca/uncategorized:');
+	});
+
+	it('does not lose a resolve that lands while the sweep runs', async () => {
+		// The ledger's repro, as an interleaving rather than a wall-clock race:
+		// both verbs are queued per file, so the sweep can no longer compute its
+		// replacement from a document the resolve has already moved on from.
+		const h = makeConvertHarness(NOTE_WITH_NATIVE);
+		const target = firstComment(h.content);
+		await Promise.all([
+			h.service.resolveComment('note.md', target),
+			h.service.convertFileComments('note.md', h.file, convertAll),
+		]);
+		// Both effects survive.
+		expect(h.content).toContain('[resolved charles');
+		expect(h.content).toContain(
+			'annoteca/uncategorized: an old native comment',
+		);
+		// And neither verb had to refuse, so no "vanished" notice was raised.
+		expect(noticeLog.join(' ')).not.toContain('no longer');
+	});
+
+	it('holds in the other click order too', async () => {
+		const h = makeConvertHarness(NOTE_WITH_NATIVE);
+		const target = firstComment(h.content);
+		await Promise.all([
+			h.service.convertFileComments('note.md', h.file, convertAll),
+			h.service.resolveComment('note.md', target),
+		]);
+		expect(h.content).toContain('[resolved charles');
+		expect(h.content).toContain(
+			'annoteca/uncategorized: an old native comment',
+		);
+		expect(noticeLog.join(' ')).not.toContain('no longer');
+	});
+
+	it('queues behind a resolve rather than landing inside its window', async () => {
+		// The sweep is fired from INSIDE the resolve's read window, which is the
+		// one interleaving that still costs something once each write is
+		// individually atomic: the resolve's own compare would find the document
+		// moved, refuse, and tell the user their comment had vanished, when all
+		// that happened is that this plugin wrote to the file itself. Queueing per
+		// file is what turns that into two successful writes.
+		const h = makeConvertHarness(NOTE_WITH_NATIVE);
+		const target = firstComment(h.content);
+		let sweep: Promise<number> | undefined;
+		h.onceAfterRead(() => {
+			sweep = h.service.convertFileComments(
+				'note.md',
+				h.file,
+				convertAll,
+			);
+		});
+		await h.service.resolveComment('note.md', target);
+		await sweep;
+		expect(h.content).toContain('[resolved charles');
+		expect(h.content).toContain(
+			'annoteca/uncategorized: an old native comment',
+		);
+		expect(noticeLog).not.toContain(VANISHED_MESSAGE);
+	});
+
+	it('writes through the editor when the file is open', async () => {
+		// A vault write to an open file is what the header of comment-service.ts
+		// forbids: the editor flushes its now-stale buffer back over it. Both
+		// paths leave the same text in this harness, so the assertion that
+		// separates them is that the vault was never asked to write at all.
+		const h = makeEditorHarness(NOTE_WITH_NATIVE);
+		const n = await h.service.convertFileComments(
+			'note.md',
+			new TFile(),
+			convertAll,
+		);
+		expect(n).toBe(1);
+		expect(h.content).toContain(
+			'annoteca/uncategorized: an old native comment',
+		);
+		expect(h.processCalls).toBe(0);
+	});
+
+	it('leaves a file with nothing to convert untouched', async () => {
+		const clean = 'Just prose, no comments at all.';
+		const h = makeConvertHarness(clean);
+		const n = await h.service.convertFileComments(
+			'note.md',
+			h.file,
+			convertAll,
+		);
+		expect(n).toBe(0);
+		expect(h.content).toBe(clean);
+	});
+});
+
+// The source a caller must consult before deciding a file has nothing to do.
+// `cachedRead` lags an open editor by everything typed since the last save, and
+// bulk convert visits each file exactly once, so pre-filtering on the cache
+// dropped a comment the user had just typed and reported nothing to convert.
+describe('currentContentFor', () => {
+	it("returns the editor's buffer when the note is open", async () => {
+		const h = makeEditorHarness('saved text only');
+		// What the user has typed but not saved. The vault still holds the old
+		// bytes; the editor is the truth.
+		h.setEditorValue('saved text plus %%a fresh comment%%');
+		const seen = await h.service.currentContentFor('note.md', new TFile());
+		expect(seen).toBe('saved text plus %%a fresh comment%%');
+	});
+
+	it('falls back to the vault cache when no editor holds it', async () => {
+		const h = makeConvertHarness('on disk %%comment%%');
+		const seen = await h.service.currentContentFor('note.md', h.file);
+		expect(seen).toBe('on disk %%comment%%');
 	});
 });
