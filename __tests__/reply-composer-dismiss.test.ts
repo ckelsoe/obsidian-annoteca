@@ -28,7 +28,9 @@ import {
 } from '../decorations';
 import { DEFAULT_SETTINGS } from '../settings';
 import type { AnnotecaSettings } from '../types';
-import { installObsidianDomHelpers } from './obsidian-dom-helpers';
+// The relative path, not 'obsidian': the installer is a module-level export
+// of the mock only, so production code keeps typing against obsidian.d.ts.
+import { installObsidianDomHelpers } from '../__mocks__/obsidian';
 import { stubDecorationContext } from './stub-context';
 
 const DOC = 'Prose before. <!-- annoteca/clarify: needs a source --> after.';

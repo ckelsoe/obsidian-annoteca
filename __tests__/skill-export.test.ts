@@ -169,6 +169,23 @@ describe('buildSkillMarkdown', () => {
 	it('suggests a generic tag when no author tag is configured', () => {
 		expect(skill).toContain('such as `claude` or `ai`');
 	});
+
+	it('survives a reviewer tag holding backticks', () => {
+		// The grammar allows backticks (sanitizeAuthorToken strips only
+		// whitespace, ], < and >), so a single-backtick wrap ends the code
+		// span at the tag's own backtick and breaks the exported markdown.
+		// The delimiter has to exceed the longest run inside the tag, the
+		// same rule the annoteca-original fence follows.
+		expect(isAuthorToken('bob`dev')).toBe(true);
+		expect(buildSkillMarkdown(CATEGORIES, 'bob`dev')).toContain(
+			'signs comments as ``bob`dev``.',
+		);
+		// A tag that STARTS with a backtick needs the space padding
+		// CommonMark strips back out, or the delimiter absorbs it.
+		expect(buildSkillMarkdown(CATEGORIES, '`bob')).toContain(
+			'signs comments as `` `bob ``.',
+		);
+	});
 });
 
 describe('skill staleness detection (F-277)', () => {

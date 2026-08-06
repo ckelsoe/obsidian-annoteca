@@ -62,8 +62,26 @@ export function skillTargetPaths(target: SkillExportTarget): string[] {
 }
 
 function categoryTable(categories: CategoryDefinition[]): string {
+	// Single backticks are safe here: a category id is `[a-z][a-z0-9-]*`, so
+	// it cannot hold a backtick. The reviewer tag can, hence inlineCode below.
 	const rows = categories.map((c) => `| \`${c.id}\` | ${c.displayName} |`);
 	return ['| Category | Meaning |', '| --- | --- |', ...rows].join('\n');
+}
+
+// A code span whose delimiter is longer than any backtick run inside the text,
+// space-padded when the text starts or ends with a backtick (CommonMark strips
+// that padding back out). The author token grammar allows backticks, so a
+// literal single-backtick wrap around the tag ends the span at the tag's own
+// backtick and the exported markdown breaks. Same rule the annoteca-original
+// fence follows: measure the content, exceed it.
+function inlineCode(text: string): string {
+	let longest = 0;
+	for (const run of text.match(/`+/g) ?? []) {
+		if (run.length > longest) longest = run.length;
+	}
+	const delimiter = '`'.repeat(longest + 1);
+	const pad = text.startsWith('`') || text.endsWith('`') ? ' ' : '';
+	return `${delimiter}${pad}${text}${pad}${delimiter}`;
 }
 
 export function buildSkillMarkdown(
@@ -77,7 +95,7 @@ export function buildSkillMarkdown(
 	const reviewer =
 		authorTag !== undefined && authorTag !== '' ? authorTag : undefined;
 	const reviewerLine = reviewer
-		? `The human reviewer in this vault signs comments as \`${reviewer}\`. Pick a different tag for yourself (for example \`claude\` or \`ai\`).`
+		? `The human reviewer in this vault signs comments as ${inlineCode(reviewer)}. Pick a different tag for yourself (for example \`claude\` or \`ai\`).`
 		: `Sign your lines with a short tag such as \`claude\` or \`ai\`.`;
 
 	return `---

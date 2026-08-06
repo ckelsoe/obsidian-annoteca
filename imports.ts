@@ -303,6 +303,31 @@ function protectedRanges(content: string): ProtectedRange[] {
 			// fence opened OUTSIDE a marker stays open across it, which is what
 			// a renderer does too.
 			flushRun();
+			// A multi-line marker can END on this line, with ordinary prose
+			// after its `-->`. That tail is inline content like any other, so
+			// it starts a run the following lines may extend, or a code span
+			// sitting against the terminator would go unprotected and bulk
+			// convert would rewrite the sample inside it. flushRun's marker
+			// walk keeps any further marker inside the tail opaque.
+			//
+			// NOT inside an open fence, though. There the tail is fence
+			// content, protected by the fence itself when it closes, and the
+			// fence branch below neither extends nor flushes a run, so one
+			// seeded here would outlive the fence and pair its backticks with
+			// the prose after it, falsely protecting a real comment.
+			const covering = markers[markerAt];
+			if (
+				openFence === undefined &&
+				covering !== undefined &&
+				covering.end < lineEnd
+			) {
+				textRun = {
+					from: covering.end,
+					to: lineEnd,
+					kind: 'text',
+					contentIndent: 0,
+				};
+			}
 			// It DOES close a generic HTML comment opened above it, though. An
 			// HTML block ends on the first line carrying `-->`, and a marker's
 			// own terminator is such a line. Without this the comment state

@@ -729,3 +729,62 @@ describe('imports: protected regions', () => {
 		expect(second.updated).toBe(first.updated);
 	});
 });
+
+// A multi-line marker can END mid-line, with ordinary prose after its `-->`.
+// The line starts inside the marker, so the line-at-a-time walk used to consume
+// all of it and nothing scanned the tail: a code span sitting against the
+// terminator went unprotected, and bulk convert rewrote the sample inside it.
+describe('the prose after a multi-line marker terminator, same line', () => {
+	const MULTILINE_OPEN = [
+		'Intro prose.',
+		'<!-- annoteca/note: heading line',
+		'body line',
+	];
+
+	it('protects a code span in the tail', () => {
+		const doc = [
+			...MULTILINE_OPEN,
+			'--> and `%%sample%%` sits in a span.',
+		].join('\n');
+		const r = convertAllComments(doc, 'all', 'note');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
+	});
+
+	it('still converts a bare native comment in the tail', () => {
+		const doc = [...MULTILINE_OPEN, '--> tail %%real%% prose.'].join('\n');
+		const r = convertAllComments(doc, 'all', 'note');
+		expect(r.converted).toBe(1);
+		expect(r.updated).toContain('annoteca/note: real');
+	});
+
+	it('pairs a span from the tail across the line break, like any run', () => {
+		const doc = [
+			...MULTILINE_OPEN,
+			'--> tail with `a span',
+			'that closes %%here%% now`.',
+		].join('\n');
+		const r = convertAllComments(doc, 'all', 'note');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
+	});
+
+	it('does not carry a tail run out of an open fence', () => {
+		// The marker ends mid-line INSIDE a fenced block. The tail is fence
+		// content, protected by the fence itself when it closes; a run seeded
+		// there would outlive the fence (nothing in the fence branch flushes
+		// it) and pair its stray backtick with one in the prose below, falsely
+		// protecting a real comment.
+		const doc = [
+			'```',
+			'fence content',
+			'<!-- annoteca/note: heading',
+			'--> tail with ` stray backtick',
+			'```',
+			'Prose with %%real%% and ` another stray.',
+		].join('\n');
+		const r = convertAllComments(doc, 'all', 'note');
+		expect(r.converted).toBe(1);
+		expect(r.updated).toContain('annoteca/note: real');
+	});
+});
