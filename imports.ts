@@ -34,7 +34,12 @@ const FENCE_LINE_RE = /^([ \t]*)(`{3,}|~{3,})(.*)$/;
 // literal `~~~` in a quote as an opener, protecting the ordinary quoted prose
 // under it. Both were executed regressions against the reference CommonMark
 // implementation before this became a strip-then-measure.
-const QUOTE_PREFIX_RE = /^(?:[ \t]{0,3}>[ \t]?)+/;
+// Up to three SPACES of indent per marker, never a tab, which is the same rule
+// `BLOCK_OPENER_RE` uses. A tab expands to four columns and so cannot open a
+// quote, and letting one through here made the two disagree: `\t> text` counted
+// as a quote continuation and held an open fence past the line that really ends
+// it, so a genuine `> %%comment%%` below was protected and skipped.
+const QUOTE_PREFIX_RE = /^(?: {0,3}>[ \t]?)+/;
 
 // Inline code spans in a stretch of text, as offsets relative to it. Applied
 // outside fenced blocks, over a whole run of consecutive lines rather than one
@@ -404,7 +409,7 @@ function protectedRanges(content: string): ProtectedRange[] {
 				length: number;
 				from: number;
 				itemDepth: number;
-				quoted: boolean;
+				quoteDepth: number;
 		  }
 		| undefined;
 	let inHtmlComment = false;
@@ -489,6 +494,15 @@ function protectedRanges(content: string): ProtectedRange[] {
 		// whole line, so the unquoted rules are untouched.
 		const quotePrefix = QUOTE_PREFIX_RE.exec(line)?.[0] ?? '';
 		const quoted = quotePrefix !== '';
+		// How many quotes deep the line sits, not merely whether it is quoted.
+		// A boolean cannot tell `> >` from `>`, so a fence opened in the inner
+		// quote was treated as still open on a line belonging to the OUTER one
+		// and was closed by it. With the depth, that line ends the inner fence
+		// and then OPENS a new one in the outer quote, which is what a renderer
+		// does: `> > ``` / > > code / > ``` / > %%sample%%` puts the sample in a
+		// second, outer code block. Executed both ways round, the boolean
+		// rewrote that sample and skipped a real comment in the other shape.
+		const quoteDepth = (quotePrefix.match(/>/g) ?? []).length;
 		const prefixCols = quoted ? advanceColumns(quotePrefix, 0) : 0;
 		const body = quoted ? line.slice(quotePrefix.length) : line;
 		// Indent of the line's content within its container, in columns. Absolute
@@ -509,7 +523,11 @@ function protectedRanges(content: string): ProtectedRange[] {
 		// everything after the quote, so real comments below are skipped and
 		// reported as "converted 0". Executed: that is already true on main for
 		// an unclosed `> ```, and this closes it rather than widening it.
-		if (openFence?.quoted === true && !BLOCK_OPENER_RE.test(line)) {
+		// Any DROP in quote depth ends it, which covers leaving the quote
+		// altogether (a blank or unquoted line is depth 0) and stepping out of a
+		// nested quote into its parent. An unquoted fence has depth 0, so this
+		// never fires for one and its own enders below are untouched.
+		if (openFence !== undefined && quoteDepth < openFence.quoteDepth) {
 			out.push({ from: openFence.from, to: offset });
 			openFence = undefined;
 		}
@@ -567,7 +585,7 @@ function protectedRanges(content: string): ProtectedRange[] {
 				length: fenceRun.length,
 				from: offset,
 				itemDepth: openItems.length,
-				quoted,
+				quoteDepth,
 			};
 		} else if (line.trim() === '') {
 			flushRun();

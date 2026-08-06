@@ -1074,6 +1074,39 @@ describe('protectedRanges: indented code and nested fences', () => {
 		expect(r.converted).toBe(0);
 	});
 
+	// A fence remembers how many quotes DEEP it opened, not merely that it was
+	// quoted. A boolean cannot tell `> >` from `>`, so a fence opened in the
+	// inner quote was treated as still open on an outer-quote line and closed by
+	// it. With the depth, that line ends the inner fence and opens a NEW one in
+	// the outer quote, which is where the sample below actually sits: the
+	// reference implementation renders this as two code blocks, the second of
+	// them holding `%%sample%%`. Both directions were executed, one rewriting
+	// that sample and the other skipping a real comment.
+	it('does not close an inner-quote fence with an outer-quote line', () => {
+		const doc = '> > ```\n> > code\n> ```\n> %%sample%% here.';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
+	});
+
+	it('ends the fence when the quote depth drops, not at end of file', () => {
+		const doc = '> > ```\n> > code\n> ordinary %%real%% quoted prose.';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(1);
+		expect(r.updated).toContain('annoteca/uncategorized: real');
+	});
+
+	// A tab expands to four columns, so it cannot open a block quote. Accepting
+	// one when detecting the quote prefix made that detector disagree with the
+	// one deciding whether a line is a quote at all, and an open fence was held
+	// past the line that really ends it.
+	it('does not treat a tab-indented quote-like line as a continuation', () => {
+		const doc = '> ```\n> code\n\t> text\n> %%real%% here.';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(1);
+		expect(r.updated).toContain('annoteca/uncategorized: real');
+	});
+
 	it('does not read a backtick run in quoted prose as a fence', () => {
 		const doc = '> talk about ``` in quoted prose\n\nProse %%real%% here.';
 		const r = convertAllComments(doc, 'all', 'uncategorized');
