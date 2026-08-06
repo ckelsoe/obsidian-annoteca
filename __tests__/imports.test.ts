@@ -1051,27 +1051,164 @@ describe('protectedRanges: indented code and nested fences', () => {
 		expect(r.updated).toBe(doc);
 	});
 
-	// KNOWN LIMITATION, pinned rather than endorsed.
-	//
-	// A list inside a block quote is not tracked: the list matchers test the
-	// unstripped line and never match through a `>`, so the item never reaches
-	// the indent stack and a four-column continuation paragraph inside it is
-	// measured against no item and read as code. The comment there is left
-	// unconverted.
-	//
-	// Kept deliberately, on measurement rather than preference. Over 1500
-	// generated shapes judged by the reference CommonMark implementation:
-	// tracking quoted lists made things worse (0 destructive to 74), and
-	// dropping the quoted indented-code rule entirely left 280 destructive
-	// shapes standing. This costs a skipped conversion, which is recoverable;
-	// the alternatives cost rewritten code samples, which are not.
-	//
-	// Change this test when quoted lists are tracked properly. It is a record of
-	// where the line currently sits, not an argument that it is right.
-	it('leaves a comment in a quoted list continuation unconverted (known)', () => {
-		const doc = '> - item\n>\n>     Continuation %%real%% here.';
+	// Lists INSIDE a block quote. The list matchers test the unstripped line and
+	// never match through a `>`, so a quoted item never reached the indent stack
+	// and its continuation paragraph was measured against no item at all: 44 of
+	// 240 generated quoted-list shapes had their comment read as code and
+	// skipped. The stack now records which quote depth each item belongs to,
+	// because a content indent only means anything inside its own container.
+	it.each([
+		['a bullet', '> - item\n>\n>     Continuation %%real%% here.'],
+		[
+			'an ordered marker',
+			'> 1. item\n>\n>     Continuation %%real%% here.',
+		],
+		['a tight continuation', '> - item\n>   Continuation %%real%% here.'],
+		[
+			'a nested quote',
+			'> > - item\n> >\n> >     Continuation %%real%% here.',
+		],
+	])(
+		'converts a comment in a quoted list continuation under %s',
+		(_l, doc) => {
+			const r = convertAllComments(doc, 'all', 'uncategorized');
+			expect(r.converted).toBe(1);
+			expect(r.updated).toContain('annoteca/uncategorized: real');
+		},
+	);
+
+	// A content indent only means something inside its own container. With a
+	// document-level item still open, a quoted line four columns in is measured
+	// against the QUOTE, not against that item: carrying the item's indent
+	// across the frame boundary puts the code threshold at six and reads a
+	// quoted code block as ordinary prose.
+	it('measures a quoted line against its quote, not an open outer item', () => {
+		const doc = '- item\n\n>     %%a code sample%%\n';
 		const r = convertAllComments(doc, 'all', 'uncategorized');
 		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
+	});
+
+	// And the mirror: an item opened INSIDE a quote dies with that quote. Left on
+	// the stack it becomes the baseline for the next quote further down the note,
+	// which is a different container entirely.
+	it('drops a quoted item when the quote ends, not at the next quote', () => {
+		const doc = '> - item\n\nProse.\n\n>     %%a code sample%%\n';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
+	});
+
+	// A block quote at the margin ends the list above it, so the indented block
+	// AFTER the quote is measured against the document, not against that item.
+	// Hiding the outer item from the pop instead of comparing against it left it
+	// alive across the whole quote and its sample was rewritten.
+	it('ends an outer list item at a top-level quote', () => {
+		const doc = '- item\n\n> quote\n\n    %%a code sample%%\n';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
+	});
+
+	// `- - -` reads as a bullet to every marker pattern here, so it has to be
+	// ruled out as a thematic break FIRST, exactly as the unquoted chain does.
+	// It also ENDS the paragraph above it, which the quote branch never did: the
+	// run carried across it and the indented block below read as a continuation
+	// of the prose rather than as code.
+	it.each([
+		['tight', '> - Step:\n> - - -\n>     %%a code sample%%\n'],
+		['spaced', '> - Step:\n> - - -\n>\n>     %%a code sample%%\n'],
+	])('treats a quoted thematic break as a break, %s', (_l, doc) => {
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
+	});
+
+	// The second item of a quoted ordered list. `2.` cannot interrupt a
+	// paragraph and a run is open, so a reduced copy of the list rules missed it
+	// and left the continuation of every item after the first with no allowance.
+	it('tracks the next item of a quoted list, not only the first', () => {
+		const doc =
+			'> 1. first\n> 2. second\n>\n>     Continuation %%real%% here.\n';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(1);
+		expect(r.updated).toContain('annoteca/uncategorized: real');
+	});
+
+	it('tracks a nested item inside a quoted list', () => {
+		const doc =
+			'> - outer\n>   - inner\n>\n>       Continuation %%real%% here.\n';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(1);
+		expect(r.updated).toContain('annoteca/uncategorized: real');
+	});
+
+	it('tracks a nested ordered item past the first inside a quote', () => {
+		const doc =
+			'> - outer\n>   1. inner\n>   2. inner2\n>\n>      Continuation %%real%% here.\n';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(1);
+		expect(r.updated).toContain('annoteca/uncategorized: real');
+	});
+
+	// The shape that needs the third opener, and the shape that shows its marker
+	// set matters as much as its indent. Past three columns nothing else fires,
+	// so a nested BULLET is only tracked by this clause. Accepting any ordered
+	// marker there instead read `2.` under an open paragraph as a new item, put
+	// its content seven columns in, and rewrote the quoted code block below it.
+	// Only a bullet or a `1.` starts an item wherever it appears.
+	it('tracks a deeply nested bullet inside a quote', () => {
+		const doc =
+			'> - outer\n>     - deep\n>\n>       Continuation %%real%% here.\n';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(1);
+		expect(r.updated).toContain('annoteca/uncategorized: real');
+	});
+
+	it('does not treat a deeply nested "2." as starting an item', () => {
+		const doc =
+			'> - outer\n>     2. deep\n>\n>        %%a code sample%% here.\n';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
+	});
+
+	// Code is arbitrary text, and plenty of it starts with a bullet. Four columns
+	// past the open item's content the line is code INSIDE that item, so the
+	// nested-item rule stops there, the same ceiling its unquoted twin has.
+	it('does not read a bullet inside quoted indented code as an item', () => {
+		const doc =
+			'> - item\n>\n>       - literal bullet\n>         %%a code sample%%\n';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
+	});
+
+	// Tab stops are absolute. In `> -\titem` the tab lands on column 4, so the
+	// content begins two columns into the quote, not four; expanding from column
+	// zero recorded four and put the code threshold two columns too deep.
+	it('expands a quoted marker tab from the quote, not from column zero', () => {
+		const doc = '> -\titem\n>\n>       %%a code sample%%\n';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
+	});
+
+	it('and still reads real code inside that nested item as code', () => {
+		const doc =
+			'> - outer\n>   - inner\n>\n>         %%a code sample%% deep\n';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
+	});
+
+	it('still protects real code inside a quoted list item', () => {
+		// Four columns past the item's content, so it IS code. main rewrote this
+		// one and counted it as a success.
+		const doc = '> - item\n>\n>       %%a code sample%% deep';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
 	});
 
 	// A fence remembers how many quotes DEEP it opened, not merely that it was
@@ -1155,5 +1292,59 @@ describe('protectedRanges: indented code and nested fences', () => {
 		const r = convertAllComments(doc, 'all', 'uncategorized');
 		expect(r.converted).toBe(0);
 		expect(r.updated).toBe(doc);
+	});
+});
+
+// Round four of the quoted-list work. Each of these was destructive when found:
+// bulk convert rewrote a `%%sample%%` sitting in genuine indented code and
+// counted it as a success. All three come from the same root cause, which is
+// that a container's rules have to be evaluated in that container's own frame.
+describe('protectedRanges: quoted containers, relative frames', () => {
+	it('does not open a list from a non-interrupting marker in quoted prose', () => {
+		// `2.` cannot interrupt a paragraph, so this is ordinary quoted text and
+		// the block below it is code. Treating it as a list handed that block a
+		// false allowance.
+		const doc =
+			'> ordinary prose\n> 2. ordinary\n>\n>     %%a code sample%%\n';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
+	});
+
+	it('still carries a quoted list from "1." to "2."', () => {
+		// The same marker, but with a list rather than a paragraph in progress,
+		// so here it really does start the next item.
+		const doc =
+			'> 1. first\n> 2. second\n>\n>     Continuation %%real%% here.\n';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(1);
+		expect(r.updated).toContain('annoteca/uncategorized: real');
+	});
+
+	it('sees a thematic break indented inside a quoted list item', () => {
+		// Four columns from the margin, but only two past the item's content, so
+		// it is a break. A margin-anchored test missed it and the nested-item
+		// rule took it for a bullet.
+		const doc = '> - item\n>     - - -\n>       %%a code sample%%\n';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
+	});
+
+	it('ends an outer list at a bare quote marker', () => {
+		// `>` has no content, so it is blank INSIDE its quote, but to the
+		// document it is a block quote and ends the list above it.
+		const doc = '- item\n\n>\n\n    %%a code sample%%\n';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(0);
+		expect(r.updated).toBe(doc);
+	});
+
+	it('does not let a bare quote marker end an item that quote holds', () => {
+		// The mirror of the case above, and what stops that fix going too far.
+		const doc = '> - item\n>\n>     Continuation %%real%% here.\n';
+		const r = convertAllComments(doc, 'all', 'uncategorized');
+		expect(r.converted).toBe(1);
+		expect(r.updated).toContain('annoteca/uncategorized: real');
 	});
 });

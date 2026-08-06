@@ -34,6 +34,7 @@ const FENCE_LINE_RE = /^([ \t]*)(`{3,}|~{3,})(.*)$/;
 // literal `~~~` in a quote as an opener, protecting the ordinary quoted prose
 // under it. Both were executed regressions against the reference CommonMark
 // implementation before this became a strip-then-measure.
+//
 // Up to three SPACES of indent per marker, never a tab, which is the same rule
 // `BLOCK_OPENER_RE` uses. A tab expands to four columns and so cannot open a
 // quote, and letting one through here made the two disagree: `\t> text` counted
@@ -228,14 +229,24 @@ function advanceColumns(text: string, from: number): number {
 // CHARACTERS but seven columns, so a character count slips under the clamp and
 // puts the item's content at column 8, which then reads an ordinary four-column
 // paragraph below it as indented code and skips a real comment in it.
-function listContentColumns(line: string): number {
+//
+// `from` is the absolute column the text starts at, which is what makes the tab
+// stops right inside a block quote: the answer comes back relative to `from`,
+// but the expansion happens in absolute columns. For `> -\titem` the tab lands
+// on column 4 rather than advancing a full four from zero, so the content
+// begins two columns into the quote, not four. Expanding from zero recorded
+// four, which put the code threshold two columns too deep and let a sample in
+// genuine quoted code be rewritten.
+function listContentColumns(line: string, from = 0): number {
 	const m = LIST_MARKER_RE.exec(line);
 	if (!m) return 0;
-	const markerEnd = indentColumns(line) + (m[2]?.length ?? 0);
+	const indentEnd = advanceColumns(m[1] ?? '', from);
+	const markerEnd = indentEnd + (m[2]?.length ?? 0);
 	const col = advanceColumns(m[3] ?? '', markerEnd);
+	const padding = col - markerEnd;
 	// A marker with no padding still opens content one column along.
-	if (col - markerEnd === 0 || col - markerEnd >= 5) return markerEnd + 1;
-	return col;
+	if (padding === 0 || padding >= 5) return markerEnd + 1 - from;
+	return col - from;
 }
 
 // The subset that can INTERRUPT an open paragraph: non-empty, and, when ordered,
@@ -247,6 +258,17 @@ function listContentColumns(line: string): number {
 // item, and from then on the run remembers it is one. That is what makes a list
 // numbered from 2 behave like a list rather than like one long paragraph.
 const INTERRUPTING_ITEM_RE = /^ {0,3}(?:[-+*]|1[.)])[ \t]+\S/;
+
+// The same markers at ANY indent. Used inside a block quote, where a nested item
+// sits past the three columns `INTERRUPTING_ITEM_RE` allows and there is no
+// listItem run to consult, only the item stack.
+//
+// The marker set matters as much as the indent. `NESTED_LIST_ITEM_RE` accepts
+// any ordered marker, and using it here read `2.` under an open paragraph as a
+// new item: executed, that put the item's content seven columns in and a
+// genuine quoted code block below it was rewritten. A bullet or a `1.` starts an
+// item wherever it appears; anything else is continuation text.
+const NESTED_ITEM_START_RE = /^[ \t]*(?:[-+*]|1[.)])[ \t]+\S/;
 
 // Four columns past where the containing block's content starts, which opens an
 // indented code block when no paragraph is open. It cannot interrupt one, so
@@ -423,8 +445,19 @@ function protectedRanges(content: string): ProtectedRange[] {
 	// parent rather than to the document margin. Collapsing to "no list" instead
 	// read the parent's own four-column paragraph as top-level indented code and
 	// silently skipped a real comment in it.
-	const openItems: number[] = [];
-	const innerItem = (): number | undefined => openItems[openItems.length - 1];
+	//
+	// Each entry remembers the quote depth it belongs to, because a content
+	// indent only means anything inside its own container: an item at the
+	// document margin is measured from column zero, one inside `> ` from after
+	// the marker. Comparing the two mixes coordinate systems, which is what made
+	// the first attempt at quoted lists worse rather than better.
+	const openItems: { contentIndent: number; quoteDepth: number }[] = [];
+	const innerItemAt = (depth: number): number | undefined => {
+		const top = openItems[openItems.length - 1];
+		return top !== undefined && top.quoteDepth === depth
+			? top.contentIndent
+			: undefined;
+	};
 	for (const line of content.split('\n')) {
 		const lineEnd = offset + line.length;
 		if (insideMarker(offset)) {
@@ -531,13 +564,50 @@ function protectedRanges(content: string): ProtectedRange[] {
 			out.push({ from: openFence.from, to: offset });
 			openFence = undefined;
 		}
+		// Leaving a quote ends every container inside it, blank line or not: those
+		// items live in a coordinate system this line is no longer in.
+		while (
+			openItems.length > 0 &&
+			(openItems[openItems.length - 1]?.quoteDepth ?? 0) > quoteDepth
+		)
+			openItems.pop();
 		// A non-blank line is out of every open item whose content it is not
 		// indented far enough to be in. Popping one at a time is what returns the
-		// allowance to the PARENT item rather than to the margin.
+		// allowance to the PARENT item rather than to the margin. Compared in the
+		// line's OWN container, so a quoted item is measured from after the quote
+		// markers, like the line is.
+		// Guarded on the LINE being blank, not the body. A bare `>` carries no
+		// content, so it is a blank line inside its own quote, but to the document
+		// it is a block quote and ends the list above it. Skipping the whole pass
+		// for it left a document-level item alive across the quote, and a
+		// top-level four-column block below was then measured against it and its
+		// sample rewritten.
+		// Whether a list was in progress in this frame BEFORE the pop below, which
+		// is the quote branch's stand-in for the `listItem` run kind the unquoted
+		// branch consults. A quoted run is always kind 'quote', so without this
+		// there is no way to tell `> 1. first` / `> 2. second`, where a list is
+		// carrying on, from `> prose` / `> 2. ordinary`, where `2.` is text.
+		const listWasOpen = innerItemAt(quoteDepth) !== undefined;
 		if (line.trim() !== '') {
-			const col = indentColumns(line);
-			while (openItems.length > 0 && col < (innerItem() ?? 0))
+			// Each entry is compared in ITS OWN frame. An item at the same quote
+			// depth sees this line's body indent; one further OUT sees where the
+			// line begins in the document, which for a quoted line is the column
+			// its `>` sits at. Hiding the outer item instead of comparing against
+			// it left it on the stack across the whole quote, and it then became
+			// the baseline for a top-level indented block below: executed,
+			// `- item` / blank / `> quote` / blank / a four-column sample had the
+			// sample rewritten.
+			while (openItems.length > 0) {
+				const top = openItems[openItems.length - 1];
+				if (top === undefined) break;
+				if (top.quoteDepth === quoteDepth) {
+					// A blank line inside a quote does not end an item THAT QUOTE
+					// holds; it only ends the paragraph, which flushRun does.
+					if (bodyBlank) break;
+					if (bodyIndentCols >= top.contentIndent) break;
+				} else if (indentColumns(line) >= top.contentIndent) break;
 				openItems.pop();
+			}
 			// An UNCLOSED fence ends with the item that HOLDS it, not at end of
 			// file. A fence has three enders (its closing line, the end of the
 			// block holding it, and EOF) and only the first and last were
@@ -563,7 +633,7 @@ function protectedRanges(content: string): ProtectedRange[] {
 		// the absolute three columns this used to hard-code.
 		const fenceRun =
 			fence !== null &&
-			bodyIndent(fence[1] ?? '') <= (innerItem() ?? 0) + 3
+			bodyIndent(fence[1] ?? '') <= (innerItemAt(quoteDepth) ?? 0) + 3
 				? fence[2]
 				: undefined;
 		if (openFence !== undefined) {
@@ -616,7 +686,10 @@ function protectedRanges(content: string): ProtectedRange[] {
 			// The pop above already left only items this line sits inside, so a
 			// sibling item has had its predecessor removed and this pushes the
 			// new one; a nested item pushes on top of its parent.
-			openItems.push(listContentColumns(line));
+			openItems.push({
+				contentIndent: listContentColumns(line),
+				quoteDepth,
+			});
 			textRun = {
 				from: offset,
 				to: lineEnd,
@@ -641,22 +714,57 @@ function protectedRanges(content: string): ProtectedRange[] {
 				inHtmlComment = content.indexOf('-->', lineEnd) !== -1;
 		} else if (BLOCK_OPENER_RE.test(line)) {
 			// A quote's content follows the same block rules as the document's,
-			// so an indented code block inside one is still code. Measured after
-			// the markers, and only with no run open, exactly as outside a quote:
-			// indented code cannot interrupt a paragraph, so a deep line under
-			// quoted prose is a continuation of it.
+			// so this mirrors the unquoted chain against `body`. It used to model
+			// none of them, which is why this file's founding defect survived
+			// here long after it was fixed everywhere else: a `%%sample%%` in a
+			// quoted code block was rewritten and counted as a success.
 			//
-			// The quote branch used to have no notion of this at all, so a
-			// `%%sample%%` in a quoted code block was rewritten and counted as a
-			// success. That is this file's founding defect, surviving one axis
-			// over because the axis was never swept.
-			// A list item inside the quote is still a list item, and the indent
-			// rules need its content indent the same way they do outside one.
-			// The list branch above tests the UNSTRIPPED line, which never
-			// matches through a `>`, so a quoted list never reached the stack:
-			// `> - item` / `>` / `>     Continuation %%real%%` then measured the
-			// continuation against no item at all, read four columns as code, and
-			// skipped a real comment that converted correctly before.
+			// Everything below is measured RELATIVE to the open item, because
+			// "three columns" and "four columns" mean columns past the container's
+			// content, not past the document margin.
+			const openIndent = innerItemAt(quoteDepth);
+			const relIndent = bodyIndentCols - (openIndent ?? 0);
+			// A thematic break, heading or setext rule. Checked on the trimmed
+			// body under a relative ceiling: `>     - - -` is four columns from
+			// the margin but only two past its item's content, so a
+			// margin-anchored test missed it and the nested-item rule below took
+			// it for a bullet, widening the allowance until the code beneath was
+			// rewritten.
+			const selfContained =
+				relIndent < 4 && SELF_CONTAINED_BLOCK_RE.test(body.trimStart());
+			// A list item inside the quote is still a list item. The list branch
+			// above tests the UNSTRIPPED line, which never matches through a `>`,
+			// so a quoted item never reached the stack at all and its
+			// continuation paragraph was measured against no item: 44 of 240
+			// quoted-list shapes had their comment read as code and skipped.
+			//
+			// The full classification, in the same order and with the same
+			// guards its unquoted twin uses. A marker that can interrupt a
+			// paragraph always starts an item. Any marker starts one where
+			// nothing is open at all, which is why that clause needs `textRun`
+			// too: with a quoted paragraph in progress, `> 2. ordinary` is
+			// ordinary text, and treating it as a list handed the indented block
+			// below a false allowance. With an item open, a bullet or `1.` at any
+			// indent starts the next one, up to the point where four columns past
+			// its content makes the line CODE, and code is arbitrary text that
+			// often starts with a bullet.
+			if (!bodyBlank && !selfContained) {
+				const itemOpen = openIndent !== undefined;
+				if (
+					INTERRUPTING_ITEM_RE.test(body) ||
+					(!itemOpen &&
+						(textRun === undefined || listWasOpen) &&
+						LIST_ITEM_RE.test(body)) ||
+					(itemOpen &&
+						NESTED_ITEM_START_RE.test(body) &&
+						relIndent < 4)
+				) {
+					openItems.push({
+						contentIndent: listContentColumns(body, prefixCols),
+						quoteDepth,
+					});
+				}
+			}
 			if (bodyBlank) {
 				// A quote line carrying no content is a blank line INSIDE the
 				// quote, and ends the paragraph there exactly as a blank line
@@ -664,9 +772,28 @@ function protectedRanges(content: string): ProtectedRange[] {
 				// it, so an indented block below read as a continuation of the
 				// prose above and never got the chance to be code.
 				flushRun();
+			} else if (selfContained) {
+				// One whole block, and it ends the paragraph above it, which the
+				// unquoted chain has always done and this branch never did. The
+				// run carried across `> - - -` instead, so the indented block
+				// under it read as a continuation of the prose above and its
+				// sample was rewritten. Scanned alone, like its unquoted twin,
+				// because a heading's text can still hold a code span.
+				flushRun();
+				textRun = {
+					from: offset,
+					to: lineEnd,
+					kind: 'text',
+					contentIndent: 0,
+				};
+				flushRun();
 			} else if (
 				textRun === undefined &&
-				opensIndentedCode(bodyIndentCols, bodyBlank, innerItem())
+				opensIndentedCode(
+					bodyIndentCols,
+					bodyBlank,
+					innerItemAt(quoteDepth),
+				)
 			) {
 				out.push({ from: offset, to: lineEnd });
 			} else if (textRun?.kind === 'quote') {
@@ -684,7 +811,11 @@ function protectedRanges(content: string): ProtectedRange[] {
 			}
 		} else if (
 			textRun === undefined &&
-			opensIndentedCode(bodyIndentCols, bodyBlank, innerItem())
+			opensIndentedCode(
+				bodyIndentCols,
+				bodyBlank,
+				innerItemAt(quoteDepth),
+			)
 		) {
 			// Opens an indented code block, so it is not the first line of the
 			// paragraph below it, and every character on it is code.
