@@ -26,6 +26,7 @@ import {
 	moveCategory,
 } from './categories';
 import {
+	authorTokenOrEmpty,
 	isAuthorToken,
 	isSerializableCategory,
 	sanitizeAuthorToken,
@@ -215,11 +216,63 @@ function validCategory(raw: unknown): CategoryDefinition | undefined {
 
 function validAuthorStyle(raw: unknown): AuthorStyle | undefined {
 	if (!isRecord(raw)) return undefined;
-	if (typeof raw.tag !== 'string' || raw.tag === '') return undefined;
-	const style: AuthorStyle = { tag: raw.tag };
+	if (typeof raw.tag !== 'string') return undefined;
+	// Repaired through the same funnel as `authorTag` one entry below in the
+	// validator table, which is the asymmetry this closes: the add-author UI
+	// rejects a non-token with a Notice, but data.json is untrusted and reaches
+	// this validator instead, which used to store whatever it found.
+	//
+	// The stored tag is what `authorPickerOptions` offers in the reply composer,
+	// while every marker write sanitizes at serialize(). So an unrepaired
+	// 'Bob Smith' was offered, picked, and written as 'Bob-Smith', and from then
+	// on the colour configured for 'Bob Smith' matched nothing the file
+	// contained and the picker listed both spellings. Markers stayed valid; the
+	// damage was that the user's own colour silently stopped applying.
+	//
+	// The no-fallback repair, so a row with nothing usable in it is DECLINED.
+	// sanitizeAuthorToken would answer '', '   ' and '<>' alike with its 'user'
+	// fallback, which invents a collaborator nobody configured and, worse, lets
+	// that invented row occupy the name of a real 'user' style below it.
+	const tag = authorTokenOrEmpty(raw.tag);
+	if (tag === '') return undefined;
+	const style: AuthorStyle = { tag };
 	if (typeof raw.color === 'string') style.color = raw.color;
 	return style;
 }
+
+const validAuthorStyles: SettingValidator<'authorStyles'> = (raw) => {
+	const list = arrayOf(validAuthorStyle)(raw);
+	if (list === undefined) return undefined;
+	// A list that arrived carrying rows and lost every one of them is not "no
+	// collaborators", it is a list this build cannot read. The difference only
+	// shows on the RESTORE path, where an accepted value replaces the live one
+	// and `undefined` falls back to it: a backup holding nothing but unusable
+	// rows would otherwise delete the colours the user has configured. An
+	// explicitly empty list is still accepted, because that is what "no
+	// collaborators" genuinely looks like, and it is the shipped default.
+	if (list.length === 0 && Array.isArray(raw) && raw.length > 0)
+		return undefined;
+	// Repairing can collide: 'Bob Smith' and 'Bob-Smith' are two rows going in
+	// and one token coming out. Duplicates have to go, because the add-author UI
+	// refuses a tag it already holds and authorPickerOptions dedupes on read, so
+	// a duplicate row would be an entry the user can neither see twice nor
+	// delete cleanly.
+	//
+	// First occurrence wins, matching those two. It does adopt a colour from a
+	// later collided row when it has none itself: the colour is the only thing
+	// the row carries besides the tag, and dropping one the user chose because
+	// an earlier row happened to be colourless would be a silent settings loss.
+	const byTag = new Map<string, AuthorStyle>();
+	for (const style of list) {
+		const kept = byTag.get(style.tag);
+		if (kept === undefined) {
+			byTag.set(style.tag, style);
+		} else if (kept.color === undefined && style.color !== undefined) {
+			kept.color = style.color;
+		}
+	}
+	return [...byTag.values()];
+};
 
 function validPreset(raw: unknown): UserPreset | undefined {
 	if (!isRecord(raw)) return undefined;
@@ -294,8 +347,17 @@ function validDriftSnapshots(
 	return out;
 }
 
-const validAuthorTag: SettingValidator<'authorTag'> = (raw) => {
-	if (typeof raw !== 'string') return undefined;
+// Exported because normalizeSettings is NOT the only authorTag ingress within a
+// session: the declarative settings runtime routes edits through
+// setControlValue, which writes to the settings object directly. That path used
+// to depend entirely on Obsidian honouring the control's `validate` callback,
+// which is someone else's guarantee to keep. Both ingresses call this, so the
+// token grammar keeps one implementation.
+//
+// A value that already satisfies the grammar is returned untouched, so this
+// never rewrites a tag as it is being typed; only input `validate` should have
+// refused gets repaired.
+export function repairAuthorTag(raw: string): string {
 	// Empty is a legitimate stored value: it is what "no tag set" looks like,
 	// and sanitizing it would invent the token "user" for someone who never
 	// asked for one. isAuthorToken deliberately answers only the grammar
@@ -306,6 +368,11 @@ const validAuthorTag: SettingValidator<'authorTag'> = (raw) => {
 	// applies at the write funnel, imported rather than restated so the token
 	// grammar has one implementation.
 	return sanitizeAuthorToken(raw);
+}
+
+const validAuthorTag: SettingValidator<'authorTag'> = (raw) => {
+	if (typeof raw !== 'string') return undefined;
+	return repairAuthorTag(raw);
 };
 
 const validCategories: SettingValidator<'categories'> = (raw) => {
@@ -341,7 +408,7 @@ const SETTING_VALIDATORS: {
 	deleteOnResolve: bool,
 	enableAuthorTag: bool,
 	authorTag: validAuthorTag,
-	authorStyles: arrayOf(validAuthorStyle),
+	authorStyles: validAuthorStyles,
 	composerLocation: oneOf('modal', 'panel'),
 	selectionPopup: bool,
 	submitCommentOnEnter: bool,
@@ -876,8 +943,15 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 	async setControlValue(key: string, value: unknown): Promise<void> {
 		if (key === 'authorTag') {
 			// Preserve the tag's casing; the parser accepts mixed-case authors.
+			//
+			// Repaired through the same funnel the load path uses, rather than
+			// trimmed and trusted. This is a second ingress for the same field:
+			// it does not go through normalizeSettings, so a value that reaches
+			// it unrepaired stays unrepaired for the rest of the session, and
+			// skill-export reads settings.authorTag directly on the stated
+			// assumption that normalizeSettings is the only way in.
 			this.plugin.settings.authorTag =
-				typeof value === 'string' ? value.trim() : '';
+				typeof value === 'string' ? repairAuthorTag(value.trim()) : '';
 		} else {
 			(this.plugin.settings as unknown as Record<string, unknown>)[key] =
 				value;
