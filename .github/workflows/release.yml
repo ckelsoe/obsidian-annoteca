@@ -18,16 +18,31 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
 
       - name: Use Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
+          # No dependency cache in the release workflow: it runs with contents,
+          # id-token, and attestations write plus VT_API_KEY, so it must not
+          # restore an untrusted npm cache. package-manager-cache: false, not just
+          # omitting `cache`: setup-node auto-caches (default true) when
+          # package.json declares npm. CI keeps its cache; this job does not.
           node-version: "22"
-          cache: "npm"
+          package-manager-cache: false
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Lint
+        # The scorecard gate (eslint-plugin-obsidianmd, prettier, the submission
+        # pre-check). CI runs it on every PR, but a tag can be pushed at a commit
+        # CI never covered, so the release must not skip it and cut an unlinted
+        # build. Runs before Build because check-submission scans sources, and
+        # main.js does not exist yet.
+        run: npm run lint
 
       - name: Test
         run: npm test
@@ -36,7 +51,7 @@ jobs:
         run: npm run build
 
       - name: Generate artifact attestation
-        uses: actions/attest-build-provenance@v4
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
         with:
           subject-path: |
             main.js
@@ -44,12 +59,13 @@ jobs:
             styles.css
 
       - name: VirusTotal scan of release artifacts
+        id: virustotal
         # Best-effort: VirusTotal returns HTTP 409 ("resource already exists")
         # when a byte-identical artifact was scanned before, and the action
         # treats that as fatal. continue-on-error keeps a 409 (or any VirusTotal
         # hiccup) from blocking the release; the scan still runs and reports.
         continue-on-error: true
-        uses: crazy-max/ghaction-virustotal@v5
+        uses: crazy-max/ghaction-virustotal@936d8c5c00afe97d3d9a1af26d017cfdf26800a2 # v5
         with:
           vt_api_key: ${{ secrets.VT_API_KEY }}
           files: |
@@ -69,6 +85,29 @@ jobs:
           echo "Extracted release notes:"
           cat release-notes.md
 
+      - name: Append VirusTotal links to release notes
+        if: steps.virustotal.outputs.analysis != ''
+        # Via env, not inline ${{ }} in the script, so the action's output cannot
+        # break out of the shell.
+        env:
+          VT_ANALYSIS: ${{ steps.virustotal.outputs.analysis }}
+        run: |
+          # The scan runs before the release is created, so without capturing its
+          # output the analysis URLs lived only in the workflow log. Fold them into
+          # the notes so the release itself records where each artifact was
+          # scanned. Only when the CHANGELOG produced notes: an empty file means
+          # Create release falls back to --generate-notes, and appending here would
+          # both defeat that and leave a notes-only-VirusTotal release.
+          # Non-whitespace, not just -s: awk can emit a lone blank line, which -s
+          # counts as content. Same test the Create release guard uses.
+          grep -q '[^[:space:]]' release-notes.md || exit 0
+          {
+            printf '\n## VirusTotal\n\n'
+            printf '%s' "$VT_ANALYSIS" | tr ',' '\n' | while IFS='=' read -r name url; do
+              [ -n "$url" ] && printf -- '- [%s](%s)\n' "$name" "$url"
+            done
+          } >> release-notes.md
+
       - name: Create release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -80,7 +119,9 @@ jobs:
           case "$tag" in
             *-beta*|*-rc*|*-alpha*) prerelease="--prerelease" ;;
           esac
-          if [ -s release-notes.md ]; then
+          # Non-whitespace rather than -s: a lone blank line from awk is not real
+          # notes, and would otherwise take --notes-file over --generate-notes.
+          if grep -q '[^[:space:]]' release-notes.md; then
             gh release create "$tag" $prerelease \
               --title="$tag" \
               --notes-file release-notes.md \

@@ -18,10 +18,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "22"
           cache: "npm"
@@ -68,28 +70,42 @@ jobs:
       - name: Check for deprecated Obsidian API usage
         run: |
           echo "Scanning for known deprecated Obsidian APIs..."
+          # Recursive over every source .ts (declarations, tests, mocks, and deps
+          # excluded), not the main.ts entry alone: a deprecated call in any of
+          # the other ~30 modules was previously invisible. --include/--exclude
+          # rather than a word-split file list, which is not portable across
+          # shells. Sources not the minified bundle, which rewrites getLeaf(true)
+          # to getLeaf(!0). Explicit ERE boundaries rather than \b, which grep
+          # without -P treats as a backspace.
+          # The include/exclude set written once, with "$1" quoted so neither the
+          # options nor the pattern depend on shell word-splitting.
+          scan() {
+            grep -rnE --include='*.ts' --exclude='*.d.ts' \
+              --exclude-dir=node_modules --exclude-dir=__tests__ --exclude-dir=__mocks__ \
+              "$1" .
+          }
           FOUND=0
 
           # workspace.activeLeaf — deprecated, use getActiveViewOfType()
-          if grep -n "\.activeLeaf\b" main.ts; then
+          if scan "\.activeLeaf([^A-Za-z0-9_]|$)"; then
             echo "::error::Deprecated API: 'activeLeaf'. Use getActiveViewOfType() or getLeaf() instead."
             FOUND=1
           fi
 
           # MarkdownRenderer.renderMarkdown — deprecated, use MarkdownRenderer.render()
-          if grep -n "renderMarkdown(" main.ts; then
+          if scan "renderMarkdown\("; then
             echo "::error::Deprecated API: 'renderMarkdown'. Use MarkdownRenderer.render() instead."
             FOUND=1
           fi
 
           # getLeaf() with a boolean argument — deprecated, use getLeaf('tab') etc.
-          if grep -n "getLeaf(true)\|getLeaf(false)" main.ts; then
+          if scan "getLeaf\((true|false)\)"; then
             echo "::error::Deprecated API: 'getLeaf(bool)'. Use getLeaf('tab') or getLeaf('split') instead."
             FOUND=1
           fi
 
           # Notice.noticeEl — deprecated, use Notice.messageEl
-          if grep -n "\.noticeEl\b" main.ts; then
+          if scan "\.noticeEl([^A-Za-z0-9_]|$)"; then
             echo "::error::Deprecated API: 'noticeEl'. Use 'messageEl' instead."
             FOUND=1
           fi
@@ -115,9 +131,11 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
       - name: Run OSV-Scanner
-        uses: google/osv-scanner-action/osv-scanner-action@v2.0.3
+        uses: google/osv-scanner-action/osv-scanner-action@40a8940a65eab1544a6af759e43d936201a131a2 # v2.0.3
         with:
           scan-args: |-
             --lockfile=package-lock.json
@@ -131,8 +149,10 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/dependency-review-action@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4
         with:
           fail-on-severity: high
           comment-summary-in-pr: on-failure
