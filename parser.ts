@@ -222,18 +222,26 @@ function midTruncate(text: string, max: number): string {
 // separately; this must hold regardless of how the value arrived.
 const AUTHOR_MAX_CHARS = 32;
 
-export function sanitizeAuthorToken(raw: string): string {
+// The repair itself, with no fallback. An empty result means nothing usable
+// survived, which is a distinction the WRITE funnel does not need (it must
+// produce some token) and the SETTINGS ingress does (it can decline the row
+// rather than invent a collaborator). Split so both ask the same function what
+// the token grammar allows, rather than one of them restating the rule.
+export function authorTokenOrEmpty(raw: string): string {
 	// `String(...)` rather than trusting the parameter type. The value can be
 	// the author tag straight out of data.json, which is untyped at runtime, and
 	// a hand edit or a synced backup can make it a number or null. Throwing here
 	// would take the whole write with it, which is a worse failure than the one
-	// this function exists to prevent. Validating the tag at the settings
-	// boundary is a separate change; this has to hold either way.
+	// this function exists to prevent.
 	const token = String(raw ?? '')
 		.trim()
 		.replace(/\s+/g, '-')
 		.replace(/[\]<>]/g, '');
-	const capped = capCodeUnits(token, AUTHOR_MAX_CHARS);
+	return capCodeUnits(token, AUTHOR_MAX_CHARS);
+}
+
+export function sanitizeAuthorToken(raw: string): string {
+	const capped = authorTokenOrEmpty(raw);
 	return capped === '' ? 'user' : capped;
 }
 

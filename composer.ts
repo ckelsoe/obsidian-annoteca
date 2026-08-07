@@ -2,7 +2,13 @@
 // side-panel composer (ComposerPanelView). The same controls render in both
 // hosts; only the surrounding chrome differs.
 
-import { Notice, Setting, type Editor, type EditorPosition } from 'obsidian';
+import {
+	Notice,
+	Setting,
+	type Editor,
+	type EditorPosition,
+	type MarkdownFileInfo,
+} from 'obsidian';
 
 import type AnnotecaPlugin from './main';
 import type { AnchorText, Comment } from './types';
@@ -24,9 +30,26 @@ import {
 } from './templates';
 import { createStackedRow } from './ui-helpers';
 
+// Shown when the tab the composer was opened from has moved on to another
+// file. Deliberately not VANISHED_MESSAGE: nothing has moved or been deleted,
+// and "reopen the note" is the wrong instruction when the note is fine and the
+// TAB is what changed.
+export function wrongFileMessage(path: string): string {
+	return `That tab no longer shows ${path}, so nothing was saved. Open the note again and retry.`;
+}
+
 export interface ComposerRequest {
 	editor: Editor;
 	filePath: string;
+	// The view the editor belongs to, so submit can ask which file that editor
+	// is showing NOW. Required rather than optional: this is the only thing
+	// standing between Save and a write into someone else's note, and an
+	// optional field is one a future call site can forget to pass.
+	//
+	// Typed as MarkdownFileInfo rather than MarkdownView because that is the
+	// interface carrying `file`, and it is what `editorCallback` actually hands
+	// over (`MarkdownView | MarkdownFileInfo`), so no call site has to narrow.
+	view: MarkdownFileInfo;
 	// When set, the form opens with the scratchpad category preselected.
 	scratchpad?: boolean;
 	// When set, the form opens preloaded with an existing comment for editing.
@@ -60,6 +83,10 @@ export class ComposerForm {
 	// line/column pair: text inserted above the marker moves the marker without
 	// changing the pair, so converting it late silently points somewhere else.
 	private readonly editingStartOffset: number;
+	// The exact marker source text as it stood WHEN THE FORM OPENED, which is
+	// the whole fingerprint an id-less marker has. Captured for the same reason
+	// as the offset: it has to be read before the document moves on.
+	private readonly editingMarkerText: string;
 	// The body textarea of the most recent render, for `focusBody`.
 	private bodyArea?: HTMLTextAreaElement;
 
@@ -74,6 +101,14 @@ export class ComposerForm {
 		this.editingStartOffset = request.editing
 			? request.editor.posToOffset(request.editing.from)
 			: 0;
+		this.editingMarkerText = request.editing
+			? request.editor
+					.getValue()
+					.slice(
+						this.editingStartOffset,
+						request.editor.posToOffset(request.editing.to),
+					)
+			: '';
 		this.state = {
 			selectedCategory: request.scratchpad
 				? 'uncategorized'
@@ -328,19 +363,49 @@ export class ComposerForm {
 		}
 
 		// Id-less markers stay supported because the format supports them. They
-		// resolve by position plus category plus extent, which is all the file
-		// carries; a document edited above the marker fails this check and
-		// refuses, rather than writing at an offset that now points at prose.
+		// have no identity beyond their position and their own text, so the
+		// marker sitting at the remembered offset has to be BYTE-IDENTICAL to the
+		// one the form opened on. A document edited above the marker fails that
+		// and refuses, rather than writing at an offset that now points at prose.
 		//
-		// The end offset is checked as well as the start, matching what
-		// CommentService.freshComment does for the same case. It cannot compare
-		// the BODY the way that one does, because the body is what the user is
-		// changing, so extent is the only other thing left to identify with.
+		// The whole marker rather than a list of fields. Category plus extent
+		// used to be the test, and it is not an identity: `convert comments`
+		// (imports.ts) emits id-less markers with no id, no date and no author, so
+		// a run of them differs only in body and two of equal body length have
+		// equal extent. Deleting one line above slid the NEXT marker onto the
+		// remembered offset, both guards passed, and Save destroyed a comment the
+		// user never opened. Adding the body to the list closed that repro but not
+		// the rule: any two fields of equal length, another author or a reply,
+		// still sum to the same extent with the same body, and the rewrite would
+		// then carry the WRONG marker's author, date and thread forward.
+		//
+		// Comparing the source text settles all of it at once and cannot drift out
+		// of step with the format the way a field list does. `parseAt` only
+		// matches a marker starting exactly at `start`, so this compares the same
+		// span the form was opened on.
+		//
+		// The SNAPSHOT comparisons stay alongside it, and are not redundant. The
+		// fingerprint was read out of the document using the snapshot's offsets,
+		// so if that snapshot was ALREADY stale when the form opened - a Hub card
+		// drawn before an edit and clicked after it, with the index refresh still
+		// in flight - the fingerprint is a copy of whatever occupies those offsets
+		// now, and comparing it to itself would accept anything. Category and body
+		// come from the card the user actually clicked, so they are the only tie
+		// back to the comment that was asked for rather than to the offsets.
+		//
+		// Residue, stated rather than hidden: two markers really can be
+		// byte-identical, and then nothing in the file tells them apart, so a
+		// drifted twin still takes the edit. That costs the edit's placement
+		// between two markers that are the same character for character, and no
+		// content, because every field the rewrite carries forward is identical.
 		const at = parseAt(content, this.editingStartOffset);
 		if (
 			at !== undefined &&
+			content.slice(at.marker.start, at.marker.end) ===
+				this.editingMarkerText &&
 			at.category === snapshot.category &&
-			at.marker.end === snapshot.marker.end
+			at.marker.end === snapshot.marker.end &&
+			at.body === snapshot.body
 		)
 			return at;
 		new Notice(VANISHED_MESSAGE);
@@ -358,6 +423,34 @@ export class ComposerForm {
 		const category = this.state.selectedCategory;
 		if (!enabled.find((c) => c.id === category)) {
 			new Notice('Selected category is not enabled.');
+			return;
+		}
+
+		// Which file is this editor showing NOW? The path was captured when the
+		// form opened, and every write below goes through `editor.replaceRange`,
+		// so the editor decides the document, not `filePath`.
+		//
+		// Obsidian reuses the SAME Editor object when a markdown leaf switches
+		// file (checked live on 1.13.4: the stale Editor's getValue() returns the
+		// new file's buffer), and the default composer location is the side
+		// panel, whose whole point is that the editor stays usable behind the
+		// form. So "the tab moved on while the form was open" is ordinary: a
+		// wikilink click, a file-explorer click and Make a copy all reuse the
+		// current tab. Save then wrote the marker into whatever that tab now
+		// showed, silently, and `onSubmitted` reindexed the file that was never
+		// touched.
+		//
+		// Checked for CREATE as well as EDIT. The edit path is the one the
+		// defect was reported against, but a new comment goes through the same
+		// replaceRange and lands in the same wrong document; only the edit path
+		// had any file-related guard at all, and even that one ran at open time.
+		//
+		// Refuse rather than redirect: the form stays open with the text the user
+		// typed, which is the same reason every other refusal here leaves it open.
+		// Redirecting would write into a document they cannot see.
+		const showing = this.request.view.file?.path;
+		if (showing !== this.request.filePath) {
+			new Notice(wrongFileMessage(this.request.filePath));
 			return;
 		}
 

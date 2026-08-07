@@ -8,6 +8,7 @@ import {
 	TFile,
 	getAllTags,
 	normalizePath,
+	type MarkdownFileInfo,
 	type WorkspaceLeaf,
 } from 'obsidian';
 
@@ -119,7 +120,7 @@ export default class AnnotecaPlugin extends Plugin {
 				addCommentForSelection: () => {
 					const view =
 						this.app.workspace.getActiveViewOfType(MarkdownView);
-					if (view) this.openModalForSelection(view.editor);
+					if (view) this.openModalForSelection(view.editor, view);
 				},
 				categoryFor: (id) =>
 					getCategoryOrFallback(
@@ -451,7 +452,7 @@ export default class AnnotecaPlugin extends Plugin {
 								.setTitle('Annoteca: add comment for selection')
 								.setIcon('message-square-plus')
 								.onClick(() =>
-									this.openModalForSelection(editor),
+									this.openModalForSelection(editor, view),
 								),
 						);
 					} else {
@@ -459,7 +460,9 @@ export default class AnnotecaPlugin extends Plugin {
 							item
 								.setTitle('Annoteca: add comment here')
 								.setIcon('message-square-plus')
-								.onClick(() => this.openModalAtCursor(editor)),
+								.onClick(() =>
+									this.openModalAtCursor(editor, view),
+								),
 						);
 					}
 
@@ -480,7 +483,12 @@ export default class AnnotecaPlugin extends Plugin {
 							.setTitle('Annoteca: edit comment')
 							.setIcon('pencil')
 							.onClick(() =>
-								this.openEditModal(editor, file.path, inside),
+								this.openEditModal(
+									editor,
+									view,
+									file.path,
+									inside,
+								),
 							),
 					);
 					if (inside.resolution) {
@@ -540,26 +548,27 @@ export default class AnnotecaPlugin extends Plugin {
 		this.addCommand({
 			id: 'add-comment-at-cursor',
 			name: 'Add comment here',
-			editorCallback: (editor: Editor) => this.openModalAtCursor(editor),
+			editorCallback: (editor: Editor, view: MarkdownView) =>
+				this.openModalAtCursor(editor, view),
 		});
 		this.addCommand({
 			id: 'add-comment-for-selection',
 			name: 'Add comment for selection',
-			editorCallback: (editor: Editor) =>
-				this.openModalForSelection(editor),
+			editorCallback: (editor: Editor, view: MarkdownView) =>
+				this.openModalForSelection(editor, view),
 		});
 		this.addCommand({
 			id: 'add-scratchpad-comment',
 			name: 'Add scratchpad comment',
-			editorCallback: (editor: Editor) =>
-				this.openScratchpadModal(editor),
+			editorCallback: (editor: Editor, view: MarkdownView) =>
+				this.openScratchpadModal(editor, view),
 		});
 		this.addCommand({
 			id: 'edit-comment-at-cursor',
 			name: 'Edit comment here',
 			editorCallback: (editor: Editor, view: MarkdownView) => {
 				this.withCommentAtCursor(editor, view, (path, c) =>
-					this.openEditModal(editor, path, c),
+					this.openEditModal(editor, view, path, c),
 				);
 			},
 		});
@@ -981,26 +990,35 @@ export default class AnnotecaPlugin extends Plugin {
 
 	// Composer openers (modal or side panel based on setting) -----------
 
-	private openModalAtCursor(editor: Editor): void {
-		const path = this.app.workspace.getActiveFile()?.path;
+	// The path comes from the VIEW rather than from `getActiveFile()`. They are
+	// usually the same, but the composer now re-checks at Save that the view is
+	// still showing this path, and only the view's own file is a path that check
+	// can ever agree with. Taking the workspace's idea of "active" would let the
+	// form open against one file and refuse to save against another.
+	private openModalAtCursor(editor: Editor, view: MarkdownFileInfo): void {
+		const path = view.file?.path;
 		if (!path) return;
-		this.openComposer({ editor, filePath: path });
+		this.openComposer({ editor, view, filePath: path });
 	}
 
-	private openModalForSelection(editor: Editor): void {
-		const path = this.app.workspace.getActiveFile()?.path;
+	private openModalForSelection(
+		editor: Editor,
+		view: MarkdownFileInfo,
+	): void {
+		const path = view.file?.path;
 		if (!path) return;
-		this.openComposer({ editor, filePath: path });
+		this.openComposer({ editor, view, filePath: path });
 	}
 
-	private openScratchpadModal(editor: Editor): void {
-		const path = this.app.workspace.getActiveFile()?.path;
+	private openScratchpadModal(editor: Editor, view: MarkdownFileInfo): void {
+		const path = view.file?.path;
 		if (!path) return;
-		this.openComposer({ editor, filePath: path, scratchpad: true });
+		this.openComposer({ editor, view, filePath: path, scratchpad: true });
 	}
 
 	private openEditModal(
 		editor: Editor,
+		view: MarkdownFileInfo,
 		path: string,
 		comment: Comment,
 	): void {
@@ -1008,6 +1026,7 @@ export default class AnnotecaPlugin extends Plugin {
 		const to = editor.offsetToPos(comment.marker.end);
 		this.openComposer({
 			editor,
+			view,
 			filePath: path,
 			editing: { comment, from, to },
 		});
@@ -1447,7 +1466,7 @@ export default class AnnotecaPlugin extends Plugin {
 			new Notice('Open the file to edit this comment.');
 			return;
 		}
-		this.openEditModal(view.editor, path, comment);
+		this.openEditModal(view.editor, view, path, comment);
 	}
 
 	// A markdown leaf showing `path`, including one that has never been

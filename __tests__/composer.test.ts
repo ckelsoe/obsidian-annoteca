@@ -14,9 +14,10 @@
 // and the defect is in the submit path, not the form.
 
 import { noticeLog } from '../__mocks__/obsidian';
-import type { Editor, EditorPosition } from 'obsidian';
+import type { Editor, EditorPosition, MarkdownFileInfo } from 'obsidian';
 import type AnnotecaPlugin from '../main';
 import { ComposerForm, type ComposerRequest } from '../composer';
+import { convertNativeComments } from '../imports';
 import { parseAll, serialize } from '../parser';
 import { DEFAULT_SETTINGS } from '../settings';
 import type { Comment } from '../types';
@@ -28,8 +29,13 @@ beforeEach(() => {
 // Positions are (line, ch); offsets are absolute. The stub implements the pair
 // honestly, because the whole point of the range defect is that a line/column
 // pair keeps pointing at the same LINE while the marker moves to another one.
-function makeEditor(initial: string) {
+// `showing` is the path the host's view reports, and it is settable because
+// Obsidian hands the SAME Editor object back after a leaf switches file: the
+// buffer changes under it and the view starts naming the other note. That pair
+// of moves is the whole of the wrong-file defect.
+function makeEditor(initial: string, path = 'note.md') {
 	let content = initial;
+	let showing: string | null = path;
 	const posToOffset = (pos: EditorPosition): number => {
 		const lines = content.split('\n');
 		let offset = 0;
@@ -58,13 +64,25 @@ function makeEditor(initial: string) {
 			content = content.slice(0, start) + insert + content.slice(end);
 		},
 	};
+	const view = {
+		get file() {
+			return showing === null ? null : { path: showing };
+		},
+	};
 	return {
 		editor: editor as unknown as Editor,
+		view: view as unknown as MarkdownFileInfo,
 		get content() {
 			return content;
 		},
 		set content(updated: string) {
 			content = updated;
+		},
+		// Model a tab switching to another note: the buffer swaps and the view
+		// names the new file, both under the Editor object the form is holding.
+		switchTo(otherPath: string | null, otherContent: string) {
+			showing = otherPath;
+			content = otherContent;
 		},
 	};
 }
@@ -91,6 +109,7 @@ function openEditor(
 	let submittedAt = -1;
 	const request: ComposerRequest = {
 		editor: host.editor,
+		view: host.view,
 		filePath: 'note.md',
 		editing: { comment, from, to },
 	};
@@ -107,6 +126,26 @@ function openEditor(
 		closed: () => closed,
 		submitted: () => submittedAt,
 	};
+}
+
+// The create path, which shares `submit` with the edit path and therefore
+// shares the editor that decides which document gets written.
+function openCreate(host: ReturnType<typeof makeEditor>): {
+	form: ComposerInternals;
+	closed: () => boolean;
+} {
+	let closed = false;
+	const request: ComposerRequest = {
+		editor: host.editor,
+		view: host.view,
+		filePath: 'note.md',
+	};
+	const form = new ComposerForm(makePlugin(), request, {
+		close: () => {
+			closed = true;
+		},
+	});
+	return { form: form as unknown as ComposerInternals, closed: () => closed };
 }
 
 function only(content: string): Comment {
@@ -274,6 +313,124 @@ describe('composer edit: markers with no id', () => {
 		expect(closed()).toBe(false);
 	});
 
+	// The document below is the SHIPPED importer's output rather than a
+	// hand-built string, because `convert comments` is where id-less markers
+	// come from in practice: it emits `serialize({ category, body })` with no id,
+	// no date and no author, so a run of them differs only in body. Two bodies of
+	// equal length then give two markers of equal extent, and category plus
+	// extent plus start offset stops being an identity.
+	it('refuses when a whole line is deleted above an imported run of markers', async () => {
+		const imported = convertNativeComments(
+			[
+				'%%fix the wording%%',
+				'%%cite the source%%',
+				'%%cut this aside.%%',
+				'Closing prose.',
+			].join('\n'),
+			'clarify',
+		);
+		const host = makeEditor(imported.updated);
+
+		const before = parseAll(host.content);
+		// The premise the defect rests on: the importer assigns no ids.
+		expect(before.map((c) => c.id)).toEqual([
+			undefined,
+			undefined,
+			undefined,
+		]);
+		const target = before[1];
+		if (!target) throw new Error('no second marker');
+		const { form, closed } = openEditor(host, target);
+
+		// A plain whole-line delete above, which is the ordinary thing to do
+		// while the panel composer is open. It slides marker #3 onto the offset
+		// marker #2 was opened at, where the old category and extent guards both
+		// passed and Save destroyed "cut this aside." with no notice at all.
+		host.content = host.content.slice(host.content.indexOf('\n') + 1);
+		const unchanged = host.content;
+
+		form.state.body = 'EDIT MEANT FOR cite the source';
+		await form.submit();
+
+		expect(host.content).toBe(unchanged);
+		expect(parseAll(host.content).map((c) => c.body)).toEqual([
+			'cite the source',
+			'cut this aside.',
+		]);
+		expect(noticeLog.join('\n')).toContain('moved or been deleted');
+		expect(closed()).toBe(false);
+	});
+
+	// Category, extent and body together are still not an identity. Two markers
+	// can agree on all three and differ in a field of the same length, and the
+	// rewrite carries the target's author, date and thread forward, so landing on
+	// the wrong one attaches the edit to somebody else's comment.
+	it('refuses when a marker differing only in equal-length metadata lands on the offset', async () => {
+		const twinA = serialize({
+			category: 'clarify',
+			body: 'note',
+			author: 'aa',
+		});
+		const twinB = serialize({
+			category: 'clarify',
+			body: 'note',
+			author: 'bb',
+		});
+		// The premise: identical but for two characters of author.
+		expect(twinB).toHaveLength(twinA.length);
+		expect(twinB).not.toBe(twinA);
+
+		const padding = `${'P'.repeat(twinA.length + 8)}\n`;
+		const host = makeEditor(`${padding}${twinA}\n${twinB}\ntail`);
+		const [first, second] = parseAll(host.content);
+		if (!first || !second) throw new Error('expected two markers');
+		const { form, closed } = openEditor(host, first);
+
+		// Delete exactly the distance between the two marker starts, from above
+		// both, so the SECOND marker comes to rest on the offset the form
+		// remembers.
+		const gap = second.marker.start - first.marker.start;
+		host.content = host.content.slice(gap);
+		expect(parseAll(host.content)[1]?.marker.start).toBe(
+			first.marker.start,
+		);
+		const unchanged = host.content;
+
+		form.state.body = 'EDIT MEANT FOR the first marker';
+		await form.submit();
+
+		expect(host.content).toBe(unchanged);
+		expect(noticeLog.join('\n')).toContain('moved or been deleted');
+		expect(closed()).toBe(false);
+	});
+
+	// The fingerprint is read out of the document using the snapshot's offsets,
+	// so on its own it can only ever agree with itself. If the snapshot was
+	// already stale when the form opened, that self-agreement would accept the
+	// marker sitting there instead of the comment the user clicked.
+	it('refuses when the snapshot was already stale before the form opened', async () => {
+		const wanted = serialize({ category: 'clarify', body: 'wanted' });
+		// Same total length, so the extent check cannot be what refuses and the
+		// tie back to the clicked card is what has to do the work.
+		const other = serialize({ category: 'tone', body: 'other!!!!' });
+		expect(other).toHaveLength(wanted.length);
+
+		// The document holds `other` where the Hub card still believes `wanted`
+		// is: an edit landed and the index refresh has not caught up.
+		const host = makeEditor(`Prose.\n${other}\ntail`);
+		const stale = parseAll(`Prose.\n${wanted}\ntail`)[0];
+		if (!stale) throw new Error('no snapshot parsed');
+		const { form, closed } = openEditor(host, stale);
+		const unchanged = host.content;
+
+		form.state.body = 'EDIT MEANT FOR wanted';
+		await form.submit();
+
+		expect(host.content).toBe(unchanged);
+		expect(noticeLog.join('\n')).toContain('moved or been deleted');
+		expect(closed()).toBe(false);
+	});
+
 	it('refuses when a different marker of the same category now starts there', async () => {
 		const host = makeEditor(IDLESS_NOTE);
 		const { form, closed } = openEditor(host, only(host.content));
@@ -342,5 +499,78 @@ describe('composer edit: a vanished marker refuses instead of writing', () => {
 		expect(host.content).toBe(before);
 		expect(noticeLog.join('\n')).toContain('identifier edit0001');
 		expect(closed()).toBe(false);
+	});
+});
+
+// The tab the composer was opened from can move on to another file while the
+// form is open, and the panel composer is BUILT for the editor to stay usable
+// behind it. Obsidian hands back the same Editor object across that switch
+// (checked live on 1.13.4), so `editor.replaceRange` writes into whichever file
+// the tab now shows unless something re-checks at Save time.
+describe('composer: the write refuses when the tab moved to another file', () => {
+	const OTHER_NOTE = ['Chapter one.', '', 'Tail of the other note.'].join(
+		'\n',
+	);
+
+	it('refuses to EDIT into the file the tab switched to', async () => {
+		const host = makeEditor(ADDRESSED_NOTE);
+		const { form, closed, submitted } = openEditor(
+			host,
+			only(host.content),
+		);
+
+		// "Make a copy" is the nastiest shape: identical text, identical marker
+		// id, so resolving by id finds a perfectly good target in the wrong file.
+		host.switchTo('note copy.md', ADDRESSED_NOTE);
+
+		form.state.body = 'the edited body';
+		await form.submit();
+
+		expect(host.content).toBe(ADDRESSED_NOTE);
+		expect(noticeLog.join('\n')).toContain('no longer shows note.md');
+		expect(closed()).toBe(false);
+		expect(submitted()).toBe(-1);
+	});
+
+	it('refuses to CREATE into the file the tab switched to', async () => {
+		const host = makeEditor(ADDRESSED_NOTE);
+		const { form, closed } = openCreate(host);
+
+		host.switchTo('note copy.md', OTHER_NOTE);
+
+		form.state.selectedCategory = 'clarify';
+		form.state.body = 'a new comment meant for note.md';
+		await form.submit();
+
+		expect(host.content).toBe(OTHER_NOTE);
+		expect(noticeLog.join('\n')).toContain('no longer shows note.md');
+		expect(closed()).toBe(false);
+	});
+
+	it('refuses when the tab is showing no file at all', async () => {
+		const host = makeEditor(ADDRESSED_NOTE);
+		const { form } = openEditor(host, only(host.content));
+
+		host.switchTo(null, ADDRESSED_NOTE);
+
+		form.state.body = 'the edited body';
+		await form.submit();
+
+		expect(host.content).toBe(ADDRESSED_NOTE);
+		expect(noticeLog.join('\n')).toContain('no longer shows note.md');
+	});
+
+	// The control. Without it the three refusals above would also pass against a
+	// composer that refused everything.
+	it('still saves when the tab is showing the file it was opened on', async () => {
+		const host = makeEditor(ADDRESSED_NOTE);
+		const { form, closed } = openEditor(host, only(host.content));
+
+		form.state.body = 'the edited body';
+		await form.submit();
+
+		expect(host.content).toContain('the edited body');
+		expect(noticeLog).toEqual([]);
+		expect(closed()).toBe(true);
 	});
 });

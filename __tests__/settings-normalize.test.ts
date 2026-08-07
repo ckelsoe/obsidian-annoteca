@@ -1,4 +1,5 @@
 import {
+	AnnotecaSettingTab,
 	normalizeSettings,
 	reconcileDefaultCategory,
 	mergeRestoredSettings,
@@ -196,6 +197,93 @@ describe('normalizeSettings: structural keys', () => {
 			{ tag: 'bob', color: '#ff0000' },
 			{ tag: 'ann' },
 		]);
+	});
+
+	// The add-author UI rejects a non-token with a Notice, but data.json is
+	// untrusted and arrives through the validator instead. Repairing here rather
+	// than discarding matches what `authorTag` does one entry below in the same
+	// table.
+	it('repairs an author style tag into a token instead of storing it raw', () => {
+		const s = normalizeSettings({
+			authorStyles: [{ tag: 'Bob Smith', color: '#ff0000' }],
+		});
+		// Left raw, this tag was offered by the reply-composer picker, written
+		// through serialize() as 'Bob-Smith', and the colour configured for the
+		// spaced spelling then matched nothing in the file.
+		expect(s.authorStyles).toEqual([
+			{ tag: 'Bob-Smith', color: '#ff0000' },
+		]);
+	});
+
+	it('strips the characters that would break the marker, as authorTag does', () => {
+		const s = normalizeSettings({ authorStyles: [{ tag: 'a<b>c]d' }] });
+		expect(s.authorStyles).toEqual([{ tag: 'abcd' }]);
+	});
+
+	it('drops a tag with nothing usable left, without displacing a real "user"', () => {
+		// sanitizeAuthorToken answers '<>' with its 'user' fallback. Stored, that
+		// invented row would then occupy the name of the style below it, and
+		// first-occurrence-wins would hand it that style's colour too.
+		const s = normalizeSettings({
+			authorStyles: [
+				{ tag: '<>', color: '#111111' },
+				{ tag: 'user', color: '#222222' },
+			],
+		});
+		expect(s.authorStyles).toEqual([{ tag: 'user', color: '#222222' }]);
+	});
+
+	it('drops a whitespace-only tag rather than inventing "user" for it', () => {
+		// sanitizeAuthorToken answers '   ' with its 'user' fallback, which would
+		// add a collaborator nobody configured.
+		expect(
+			normalizeSettings({ authorStyles: [{ tag: '   ' }] }).authorStyles,
+		).toEqual([]);
+	});
+
+	it('collapses styles that repair to the same tag, keeping a colour offered later', () => {
+		const s = normalizeSettings({
+			authorStyles: [
+				{ tag: 'Bob Smith' },
+				{ tag: 'Bob-Smith', color: '#ff0000' },
+				{ tag: 'ann', color: '#00ff00' },
+			],
+		});
+		expect(s.authorStyles).toEqual([
+			{ tag: 'Bob-Smith', color: '#ff0000' },
+			{ tag: 'ann', color: '#00ff00' },
+		]);
+	});
+
+	it('keeps the FIRST colour when two collided rows both carry one', () => {
+		const s = normalizeSettings({
+			authorStyles: [
+				{ tag: 'Bob Smith', color: '#111111' },
+				{ tag: 'Bob-Smith', color: '#222222' },
+			],
+		});
+		expect(s.authorStyles).toEqual([
+			{ tag: 'Bob-Smith', color: '#111111' },
+		]);
+	});
+
+	it('keeps an explicitly empty author-style list, which is the default', () => {
+		expect(normalizeSettings({ authorStyles: [] }).authorStyles).toEqual(
+			[],
+		);
+	});
+
+	it('falls back rather than wiping live styles when no restored row survives', () => {
+		// Only visible on the restore path: an accepted value REPLACES the live
+		// one, so a backup carrying nothing but unusable rows would delete the
+		// colours the user has configured.
+		const live = normalizeSettings({
+			authorStyles: [{ tag: 'bob', color: '#ff0000' }],
+		});
+		const merged = mergeRestoredSettings(live, {
+			authorStyles: [{ tag: '<>' }],
+		});
+		expect(merged.authorStyles).toEqual([{ tag: 'bob', color: '#ff0000' }]);
 	});
 
 	it('keeps only presets that still have categories to offer', () => {
@@ -611,5 +699,63 @@ describe('mergeRestoredSettings', () => {
 		expect(merged.categories).not.toBe(live.categories);
 		merged.categories.push({ id: 'extra', displayName: 'Extra' });
 		expect(live.categories).toHaveLength(defaultIds.length);
+	});
+});
+
+// The declarative settings runtime writes through setControlValue, which does
+// NOT go through normalizeSettings. Within a session that made it a second,
+// unrepaired ingress for the same field, guarded only by Obsidian honouring the
+// control's `validate` callback.
+describe('AnnotecaSettingTab.setControlValue: the other authorTag ingress', () => {
+	function makeTab(): {
+		tab: { setControlValue(key: string, value: unknown): Promise<void> };
+		settings: AnnotecaSettings;
+		saves: () => number;
+	} {
+		const settings = normalizeSettings({});
+		let saves = 0;
+		const plugin = {
+			settings,
+			saveSettings: () => {
+				saves += 1;
+				return Promise.resolve();
+			},
+			applyIndicatorSize: () => undefined,
+			applyAnchorAppearance: () => undefined,
+		};
+		const tab = new AnnotecaSettingTab(
+			{} as never,
+			plugin as never,
+		) as unknown as {
+			setControlValue(key: string, value: unknown): Promise<void>;
+		};
+		return { tab, settings, saves: () => saves };
+	}
+
+	it('repairs a display name typed into the tag field', async () => {
+		const { tab, settings, saves } = makeTab();
+		await tab.setControlValue('authorTag', 'Bob Smith');
+		expect(settings.authorTag).toBe('Bob-Smith');
+		expect(saves()).toBe(1);
+	});
+
+	it('strips the characters that would break the marker', async () => {
+		const { tab, settings } = makeTab();
+		await tab.setControlValue('authorTag', 'a<b>c]d');
+		expect(settings.authorTag).toBe('abcd');
+	});
+
+	it('leaves a tag that already matches the grammar exactly as typed', async () => {
+		// The guarantee that makes repairing safe on a keystroke-by-keystroke
+		// control: a valid tag is never rewritten under the user.
+		const { tab, settings } = makeTab();
+		await tab.setControlValue('authorTag', 'Reviewer.2');
+		expect(settings.authorTag).toBe('Reviewer.2');
+	});
+
+	it('keeps the empty tag empty rather than inventing "user"', async () => {
+		const { tab, settings } = makeTab();
+		await tab.setControlValue('authorTag', '   ');
+		expect(settings.authorTag).toBe('');
 	});
 });
