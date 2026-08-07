@@ -84,3 +84,33 @@ Third paragraph. <!-- annoteca/cut: too long
 		expect(s.unresolvedCount).toBe(2);
 	});
 });
+
+// The index is where the marker diagnostic finally gets asked. Its only caller
+// used to be a command, so a user with no reason to suspect a problem never ran
+// it, and the damage cost them a paragraph before anything mentioned it.
+describe('CommentIndex carries marker damage', () => {
+	it('reports an unclosed opener alongside the comments it did find', () => {
+		const idx = new CommentIndex();
+		const built = idx.rebuild(
+			'note.md',
+			[
+				'<!-- annoteca/todo: never closed',
+				'[id=aaaaaaaa]',
+				'',
+				'Prose.',
+				'',
+				'<!-- annoteca/question: second',
+				'[id=bbbbbbbb]',
+				'-->',
+			].join('\n'),
+		);
+		expect(built.comments.map((c) => c.id)).toEqual(['bbbbbbbb']);
+		expect(built.malformed.map((m) => m.kind)).toEqual(['unclosed-opener']);
+	});
+
+	it('is empty for a healthy file', () => {
+		const idx = new CommentIndex();
+		const built = idx.rebuild('note.md', '<!-- annoteca/tone: fine -->');
+		expect(built.malformed).toEqual([]);
+	});
+});

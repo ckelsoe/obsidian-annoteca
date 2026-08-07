@@ -103,6 +103,27 @@ describe('buildSkillMarkdown', () => {
 		expect(parseSkillVersion(skill)).toBe(SKILL_SCHEMA_VERSION);
 	});
 
+	it('teaches both halves of the wrapper escape, not just `-->`', () => {
+		// An assistant writing a marker by hand hits the opener case without
+		// trying: quoting the marker syntax inside a comment body is exactly
+		// what it does when explaining the format. Left unescaped, the marker
+		// splits in two and the prose between the halves is hidden.
+		expect(skill).toContain('--\\>');
+		expect(skill).toContain('\\<!--');
+		expect(skill).toContain('Escaping `<!--`');
+	});
+
+	it('teaches escaping a body line that mimics a trailing line', () => {
+		// The other write the assistant makes without noticing. The block is
+		// read bottom-up, so a body ending `[resolved bob ...]` marks the
+		// comment resolved and leaves the body at the same time.
+		expect(skill).toContain('\\[');
+		expect(skill).toContain('[key=value]');
+		// And it says which bracket-leading markdown to leave alone, or an
+		// assistant escaping defensively would mangle ordinary links.
+		expect(skill).toContain('[[Wikilink]]');
+	});
+
 	it('teaches the full timestamp and warns against date-only stamps (F-280)', () => {
 		expect(skill).toContain('YYYY-MM-DDTHH:MM:SS');
 		expect(skill).toContain(

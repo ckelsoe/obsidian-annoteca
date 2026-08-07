@@ -25,6 +25,7 @@ const COMMENT: Comment = {
 	replies: [],
 	addressed: undefined,
 	resolution: undefined,
+	unknownLines: [],
 	marker: { start: 0, end: 0 },
 };
 

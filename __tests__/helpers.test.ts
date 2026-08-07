@@ -102,6 +102,7 @@ describe('bucketCommentsByHeading', () => {
 		resolution: resolved
 			? { date: '2026-01-01', author: 'x', note: '' }
 			: undefined,
+		unknownLines: [],
 	});
 
 	it('returns an empty array when there are no headings', () => {
@@ -214,6 +215,7 @@ describe('planActiveCommentDecorations (F-276)', () => {
 		replies: [],
 		addressed: undefined,
 		resolution: undefined,
+		unknownLines: [],
 	});
 	const markers = [mk(10, 20), mk(50, 60)];
 
