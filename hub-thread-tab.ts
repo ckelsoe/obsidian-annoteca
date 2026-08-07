@@ -58,6 +58,11 @@ export class ThreadTabRenderer {
 	// Not public: the parent view sets the offset from an event that carries no
 	// id, so this is derived here rather than assigned from outside.
 	private activeId: string | undefined;
+	// The cardKey of the comment `activeStart` points at, learned on the same
+	// render that resolves it. An id-less comment has no id to recover by, so
+	// when its offset goes stale after an edit above, this text identity
+	// (category+body, the same key card-expand uses) is what re-finds it.
+	private activeTextKey: string | undefined;
 	// Per-session collapse state for file groups in multi-file Thread scopes.
 	// Reset when the active file changes and autoCollapseInactiveFiles is on.
 	private collapsedFilePaths = new Set<string>();
@@ -108,6 +113,7 @@ export class ThreadTabRenderer {
 		this.activePath = path;
 		this.activeStart = start;
 		this.activeId = undefined;
+		this.activeTextKey = undefined;
 	}
 
 	// Unloads the current render's markdown lifetime. Called when the hub view
@@ -278,9 +284,10 @@ export class ThreadTabRenderer {
 						?.comments.find(
 							(c) => c.marker.start === this.activeStart,
 						);
-		if (current) {
+		if (current && this.activePath !== undefined) {
 			// Learn the identity behind the offset while the two still agree.
 			this.activeId = current.id;
+			this.activeTextKey = this.cardKey(this.activePath, current);
 			return;
 		}
 
@@ -320,12 +327,40 @@ export class ThreadTabRenderer {
 			}
 		}
 
+		// Id-less comments have no id to recover by; their identity is their
+		// text, the same (category, body) key card-expand uses. Recover within
+		// the file the selection was in, requiring exactly one match for the
+		// same reason the id branch does: two byte-identical id-less comments
+		// cannot be told apart, and guessing lands the selection on the wrong
+		// one. No cross-file search, because an id-less comment carries no
+		// copied id that would make it the same comment in another file.
+		if (
+			this.activeStart !== undefined &&
+			this.activeId === undefined &&
+			this.activeTextKey !== undefined
+		) {
+			const group = groups.find((g) => g.path === this.activePath);
+			const hits = group
+				? group.comments.filter(
+						(c) =>
+							this.cardKey(group.path, c) === this.activeTextKey,
+					)
+				: [];
+			const only = hits.length === 1 ? hits[0] : undefined;
+			if (only && group) {
+				this.activePath = group.path;
+				this.activeStart = only.marker.start;
+				return;
+			}
+		}
+
 		const def = activeGroup?.comments[0] ?? groups[0]?.comments[0];
 		const defGroup = activeGroup ?? groups[0];
 		if (def && defGroup) {
 			this.activePath = defGroup.path;
 			this.activeStart = def.marker.start;
 			this.activeId = def.id;
+			this.activeTextKey = this.cardKey(defGroup.path, def);
 		}
 	}
 

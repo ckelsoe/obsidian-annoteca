@@ -87,25 +87,15 @@ export function ambiguousMessage(id: string): string {
 //
 // The finding's own reason is quoted rather than restated, so the words the
 // diagnostics report uses and the words this notice uses cannot drift.
-// Says what to DO, not only what is wrong, and the two kinds need different
-// instructions because they are different problems.
 //
-// An 'unclosed-opener' really is a missing terminator, and nothing inside the
-// plugin supplies one: no write re-serializes an opener that sits outside every
-// parsed marker, and the validation command reports without editing. The user
-// typing `-->` is the whole fix, so the notice says so.
-//
-// A 'possible-merge' is NOT a missing terminator. It is an unescaped `<!--`
-// inside a marker whose own `-->` may belong to that comment instead, and
-// telling the user to add another terminator there would have them close the
-// marker early and spill the rest into the document. That one is repaired by
-// escaping the inner opener, which any ordinary write already does.
+// Both kinds that reach here (unclosed-opener, possible-merge) carry their own
+// repair in the reason: one repair when the text decides it, two opposite ones
+// when it cannot. The once-per-note open/save notice quotes only the reason, so
+// the reason is the one place the guidance can live. This adds no instruction of
+// its own; a second copy here is the drift the parser file warns about, and an
+// earlier one gave a single repair that disagreed with the reason.
 export function markerDamageMessage(finding: MalformedMarker): string {
-	const fix =
-		finding.kind === 'unclosed-opener'
-			? 'Add the missing `-->` to close it, or run "Validate marker format" to see where it is.'
-			: 'Escape the inner `<!--` as `\\<!--`, or run "Validate marker format" to see where it is.';
-	return `Annoteca did not change this note. ${finding.reason} Removing a comment while that is unresolved would hide more of the note. ${fix}`;
+	return `Annoteca did not change this note. ${finding.reason} Removing a comment while that is unresolved would hide more of the note. Run "Validate marker format" to see where it is.`;
 }
 
 // Every public mutating verb is a thin `enqueue` wrapper around a private

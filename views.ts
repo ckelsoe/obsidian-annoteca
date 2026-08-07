@@ -1,10 +1,9 @@
 import { ItemView, WorkspaceLeaf } from 'obsidian';
 
 import type AnnotecaPlugin from './main';
-import type { Comment, LocatedComment, CategoryDefinition } from './types';
+import type { LocatedComment, CategoryDefinition } from './types';
 import { getCategoryOrFallback } from './categories';
 import { resolveSettingsCategories } from './settings';
-import { serialize } from './parser';
 import {
 	extractIndexTerm,
 	bucketCommentsByHeading,
@@ -335,21 +334,6 @@ export class ComposerPanelView extends AnnotecaBaseView {
 	}
 }
 
-export function serializeReplyAppended(
-	c: Comment,
-	reply: { author: string; date: string; body: string },
-): string {
-	return serialize({
-		id: c.id,
-		category: c.category,
-		body: c.body,
-		date: c.date,
-		author: c.author,
-		replies: [...c.replies, reply],
-		resolution: c.resolution,
-	});
-}
-
 // Annoteca hub panel ---------------------------------------------------------
 //
 // The hub is the plugin's single right-sidebar surface. Replaces three earlier
@@ -370,7 +354,13 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 		this.threadRenderer = new ThreadTabRenderer(plugin, this.app, () =>
 			this.scheduleRefresh(),
 		);
-		this.outlineRenderer = new OutlineTabRenderer(plugin, this.app);
+		this.outlineRenderer = new OutlineTabRenderer(plugin, this.app, () => {
+			// Only repaint if the outline tab is still on screen. The deferred
+			// leaf load that triggers this can finish after the user has moved to
+			// Thread or Starred, and refreshing then would rebuild an unrelated
+			// tab and disconnect whatever they had focused there.
+			if (this.activeTab === 'outline') this.scheduleRefresh();
+		});
 		this.starredRenderer = new StarredTabRenderer(plugin);
 	}
 

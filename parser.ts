@@ -1431,20 +1431,56 @@ export function findMalformedMarkers(content: string): MalformedMarker[] {
 			});
 			continue;
 		}
+		// A later unescaped opener sitting in the span this one hides is the shape
+		// where "add a `-->`" can be the WRONG repair. A comment written before
+		// serialize() escaped `<!--`, whose body quotes an opener, is byte for
+		// byte a marker that never closed (see the scanMarkers note above): it
+		// splits at the quoted opener and leaves THIS outer opener dangling.
+		// Adding a `-->` here closes it in the wrong place; escaping the quoted
+		// comment is the real repair. Parse cannot tell the two apart, and the
+		// open/save notice quotes only this reason, so it names both repairs
+		// rather than the one that damages the quoting case. `closes` was -1
+		// across [at, nextOpener), so any next opener falls before this span's
+		// terminating `-->` and is genuinely inside the region it hides. When
+		// nothing follows, there is nothing to escape and the single repair holds.
+		//
+		// The escape repair states WHERE the single backslash goes, but in words
+		// and scoped to the QUOTED comment. Three constraints shape it. The escape
+		// is asymmetric: `<!--` becomes `\<!--` (backslash before the `<`) while
+		// `-->` becomes `--\>` (before the `>`, NOT `\-->`, which leaves a live
+		// terminator), so "needs escaping" alone is not actionable. It must reach
+		// the quoted comment's OWN `-->` (escaping only its `<!--` leaves it
+		// truncating the marker) but never the marker's own closing `-->` (a quoted
+		// opener with no `-->` leaves the terminator as the only `>` in sight). And
+		// it says "backslash" rather than printing one, because "Validate marker
+		// format" writes findings through JSON.stringify, which would double a
+		// literal backslash.
+		const hidesLaterOpener = openers[i + 1] !== undefined;
 		out.push({
 			start: at,
 			excerpt: excerptAt(at),
-			reason: 'Marker opener has no closing `-->`.',
+			reason: hidesLaterOpener
+				? 'A marker opener has no closing `-->` before the next opener. Add its `-->` to close it, or, if its text quotes a marker, escape the marker syntax inside that quote: put a backslash just before the `<` of the quoted `<!--`, and just before the `>` of the quoted `-->` if it has one, but not before the `>` that should close this marker.'
+				: 'Marker opener has no closing `-->`. Add one to close it.',
 			kind: 'unclosed-opener',
 		});
 	}
 
+	// Like the unclosed-opener case above, this is undecidable from the text: the
+	// marker may have lost its own `-->` and merged with a following comment (add
+	// the `-->`), or it may simply quote an HTML comment and have closed correctly
+	// (escape the quoted comment). The two repairs are opposite, and the open/save
+	// notice quotes only this reason, so it names both rather than the one that
+	// damages the other case. "Check for a missing `-->`" alone told merge-victims
+	// right and quoting-markers wrong, while the block-on-delete notice said only
+	// to escape and disagreed with it. The escape states where the backslash goes,
+	// scoped to the quoted comment (see the unclosed-opener note above for why).
 	for (const m of markers) {
 		if (firstUnescaped(m.innerContent, HTML_OPENER_RE) < 0) continue;
 		out.push({
 			start: m.start,
 			excerpt: excerptAt(m.start),
-			reason: 'This marker contains an unescaped `<!--`, so the `-->` closing it may belong to that comment instead. Text between them would be hidden. Check for a missing `-->`.',
+			reason: 'This marker contains an unescaped `<!--`, so the `-->` closing it may belong to that comment instead, and any text between them would be hidden. If the marker lost its own `-->`, add it where the marker should end. If its text quotes an HTML comment, escape the marker syntax inside that quote: put a backslash just before the `<` of the quoted `<!--`, and just before the `>` of the quoted `-->` if it has one, but not before the `>` that ends this marker.',
 			kind: 'possible-merge',
 		});
 	}
