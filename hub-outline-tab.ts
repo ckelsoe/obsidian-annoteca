@@ -9,9 +9,15 @@ import type AnnotecaPlugin from './main';
 import type { Comment } from './types';
 
 export class OutlineTabRenderer {
+	// The path we have already kicked off a deferred-leaf load for, so a failed
+	// load or an in-flight one cannot re-trigger every render and loop. Cleared
+	// once the leaf resolves to a real MarkdownView (the synchronous path below).
+	private deferredAttemptedFor: string | undefined;
+
 	constructor(
 		private readonly plugin: AnnotecaPlugin,
 		private readonly app: App,
+		private readonly requestRerender: () => void,
 	) {}
 
 	render(container: HTMLElement): void {
@@ -58,17 +64,16 @@ export class OutlineTabRenderer {
 		// so there is one definition of "the leaf holding this note" instead of
 		// two that can drift.
 		//
-		// This does NOT fix the deferred case, and saying otherwise would be
-		// wrong: checked in the running app, a leaf restored from a saved
-		// workspace and never activated holds a view that is not a MarkdownView
-		// and has no `editor`, so the guard below skips it exactly as the old
-		// predicate did and no heading is marked. Fixing it needs an async load
-		// and a re-render, which this synchronous render cannot do without a
-		// refresh loop; the cost is one unmarked heading that corrects itself as
-		// soon as the tab is touched.
+		// A leaf restored from a saved workspace and never activated holds a
+		// DeferredView with no `editor`, so this synchronous read cannot see the
+		// cursor on the first render. When that is the case, load the leaf once
+		// (loadedMarkdownView waits for the buffer to fill) and re-render; the
+		// synchronous branch below then marks the heading. Guarded to one attempt
+		// per path so a failed load cannot loop.
 		const editorLeaf = this.plugin.findMarkdownLeafForPath(file.path);
 		let cursorBucket = -1;
 		if (editorLeaf?.view instanceof MarkdownView) {
+			this.deferredAttemptedFor = undefined;
 			const editor = editorLeaf.view.editor;
 			const offset = editor.posToOffset(editor.getCursor());
 			for (let i = 0; i < headings.length; i++) {
@@ -77,6 +82,13 @@ export class OutlineTabRenderer {
 				if (h.position.start.offset > offset) break;
 				cursorBucket = i;
 			}
+		} else if (editorLeaf && this.deferredAttemptedFor !== file.path) {
+			this.deferredAttemptedFor = file.path;
+			void this.plugin
+				.ensureLeafLoadedForPath(file.path)
+				.then((loaded) => {
+					if (loaded) this.requestRerender();
+				});
 		}
 
 		for (let i = 0; i < headings.length; i++) {

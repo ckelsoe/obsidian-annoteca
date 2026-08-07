@@ -292,6 +292,36 @@ describe('M10: the selection follows the comment, not the offset', () => {
 		expect(expandedCount(container)).toBe(expandedBefore);
 	});
 
+	it('keeps an id-less comment selected after text is typed above it', () => {
+		// The selection half of the id-less story. Its card expansion already
+		// survived an edit above (text-keyed), but the selection did not:
+		// recovery went through the id, which an id-less comment has none of,
+		// and fell through to the first comment while the editor highlight
+		// stayed on the one the user chose. It now recovers by the same
+		// (category, body) key the card does.
+		const idless = (lead: string) =>
+			`${lead}<!-- annoteca/clarify: first plain -->\n\n` +
+			`<!-- annoteca/clarify: second plain -->`;
+		const { renderer, render, container, index } = harness(
+			{ [A]: idless('') },
+			fileScope(),
+			A,
+		);
+		const second = index.get(A)!.comments[1]!;
+		renderer.setActiveComment(A, second.marker.start);
+		render();
+		expect(activeBody(container)).toContain('second plain');
+
+		// Text lands at the top; every offset below moves.
+		index.rebuild(A, idless('abcd'));
+		render();
+
+		expect(activeBody(container)).toContain('second plain');
+		expect(renderer.activeStart).toBe(
+			index.get(A)!.comments[1]!.marker.start,
+		);
+	});
+
 	it('still falls back to the first comment when the selected one is deleted', () => {
 		// The control. Without it, "follows the comment" could just mean
 		// "never re-selects".
