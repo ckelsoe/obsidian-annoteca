@@ -27,8 +27,11 @@ jobs:
         with:
           # No dependency cache in the release workflow: it runs with contents,
           # id-token, and attestations write plus VT_API_KEY, so it must not
-          # restore an untrusted npm cache. CI keeps its cache; this job does not.
+          # restore an untrusted npm cache. package-manager-cache: false, not just
+          # omitting `cache`: setup-node auto-caches (default true) when
+          # package.json declares npm. CI keeps its cache; this job does not.
           node-version: "22"
+          package-manager-cache: false
 
       - name: Install dependencies
         run: npm ci
