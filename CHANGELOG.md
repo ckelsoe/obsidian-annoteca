@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- The broken-marker notice no longer tells you to add a `-->` when the real repair is to escape a quoted opener. A comment written before the plugin escaped `<!--`, whose text quotes a marker opener, is byte for byte a marker that forgot to close, so the notice reported "no closing `-->`" and adding one closes the marker in the wrong place. When the flagged opener has another opener inside the span it hides, the open/save notice and the diagnostics report now offer both repairs: add its `-->`, or, if the text quotes another marker, escape the quoted `<!--` and `-->` (a backslash just before the `<`, and just before the `>` of a quoted `-->`, but not the `>` that closes the marker itself). The plugin still cannot tell the two apart from the text alone, so it names both rather than the one that damages a quoting note. A plain unclosed opener, with nothing quoted after it, is still told only to add the `-->`.
+- The suspected-merge notice now names both repairs instead of one, and its two surfaces agree. A marker whose body holds an unescaped `<!--` might have lost its own `-->` and merged with a following comment, or might simply quote an HTML comment and have closed correctly. The open/save notice said only to check for a missing `-->` while the block-on-delete notice said only to escape the inner `<!--`, so they contradicted each other and each was wrong for one of the two cases. Both now say the same thing: if the marker lost its `-->`, add it where the marker should end; if its text quotes an HTML comment, escape that quote's `<!--` and `-->` (a backslash just before the `<`, and just before the `>` of a quoted `-->`, but not the `>` that ends the marker itself). The escape is scoped to the quoted comment, so it never points at the marker's own closing `-->`, and escaping only the opener would silence the warning while still leaving the marker truncated at a quoted `-->`.
+
 ## [1.14.1] - 2026-08-07
 
 ### Fixed
