@@ -2171,6 +2171,44 @@ describe('parser: findMalformedMarkers sees unclosed openers', () => {
 		expect(found[0]?.start).toBe(0);
 	});
 
+	it('names both repairs when the dangling opener hides a quoted one', () => {
+		// The pre-escape quoting case above is undecidable on the parse side, so
+		// the diagnostic must not tell the user ONLY to add a `-->`: doing that
+		// closes the outer marker in the wrong place, and escaping the quoted
+		// comment is the other, opposite repair. Parse cannot choose between the
+		// two, and the open/save notice quotes only this reason, so it offers both.
+		const legacy = [
+			'<!-- annoteca/note: write it as <!-- annoteca/todo: sample --\\> like that',
+			'[id=abc12345]',
+			'-->',
+		].join('\n');
+		const found = findMalformedMarkers(legacy);
+		expect(found.map((f) => f.kind)).toEqual(['unclosed-opener']);
+		const reason = found[0]?.reason ?? '';
+		// The add repair.
+		expect(reason).toContain('Add its `-->` to close it');
+		// The escape repair: states where the backslash goes (asymmetric, so
+		// "needs escaping" alone would not be actionable)...
+		expect(reason).toContain('put a backslash just before the `<`');
+		expect(reason).toContain('just before the `>` of the quoted `-->`');
+		// ...but never points at the marker's own closing `-->`.
+		expect(reason).toContain(
+			'not before the `>` that should close this marker',
+		);
+	});
+
+	it('names only the terminator repair for a plain unclosed opener', () => {
+		// The control: nothing follows the opener, so there is no inner `<!--`
+		// to escape and offering that repair would be noise the user has to rule
+		// out on a note that only ever needed a `-->`.
+		const text = 'Prose. <!-- annoteca/todo: text and no terminator';
+		const found = findMalformedMarkers(text);
+		expect(found.map((f) => f.kind)).toEqual(['unclosed-opener']);
+		const reason = found[0]?.reason ?? '';
+		expect(reason).toContain('Add one to close it.');
+		expect(reason).not.toContain('escape');
+	});
+
 	it('says nothing about a body that quotes an opener', () => {
 		// The reason parsing can be changed at all: serialize escapes `<!--`,
 		// so a comment whose text quotes the format is no longer the same
@@ -2357,6 +2395,48 @@ describe('parser: findMalformedMarkers sees unclosed openers', () => {
 		const found = findMalformedMarkers(text);
 		expect(found.map((f) => f.kind)).toEqual(['possible-merge']);
 		expect(found[0]?.start).toBe(0);
+	});
+
+	it('names both repairs for a suspected merge', () => {
+		// The merge is undecidable from the text: the marker may have lost its
+		// `-->` (add one), or may just quote an HTML comment (escape the quoted
+		// comment). The two repairs are opposite, and the open/save notice quotes
+		// only this reason, so it must offer both rather than the one that
+		// damages the other case. The escape is scoped to the quoted comment, so
+		// it never points the user at the marker's own closing `-->`.
+		const text = [
+			'<!-- annoteca/clarify: never closed',
+			'[id=gen00001]',
+			'',
+			'Prose that is about to disappear.',
+			'',
+			'<!-- an ordinary HTML comment -->',
+		].join('\n');
+		const found = findMalformedMarkers(text);
+		expect(found.map((f) => f.kind)).toEqual(['possible-merge']);
+		const reason = found[0]?.reason ?? '';
+		expect(reason).toContain('add it where the marker should end');
+		expect(reason).toContain('put a backslash just before the `<`');
+		expect(reason).toContain('just before the `>` of the quoted `-->`');
+		expect(reason).toContain('not before the `>` that ends this marker');
+	});
+
+	it('keeps repair reasons free of literal backslashes for the JSON report', () => {
+		// "Validate marker format" writes findings through JSON.stringify, which
+		// doubles any backslash, so a reason showing `\<!--` would read as
+		// `\\<!--` in the report and tell the user to type one too many. The
+		// guidance names WHERE the backslash goes in words, so it survives the
+		// round trip unchanged. This pins that no reason reintroduces one.
+		const docs = [
+			'<!-- annoteca/note: quotes <!-- annoteca/todo: x --\\> more\n[id=aa11bb22]\n-->',
+			'Prose. <!-- annoteca/todo: text and no terminator',
+			'<!-- annoteca/clarify: never closed\n[id=cc33dd44]\n\nProse.\n\n<!-- html -->',
+		];
+		for (const doc of docs) {
+			for (const f of findMalformedMarkers(doc)) {
+				expect(f.reason).not.toContain('\\');
+			}
+		}
 	});
 
 	it('says nothing about a marker whose body mentions an HTML comment', () => {

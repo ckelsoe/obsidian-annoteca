@@ -1586,31 +1586,38 @@ describe('a blocked write is not reported as a stale transition', () => {
 	});
 });
 
-// The two damage kinds are different problems and need different instructions.
-// "Add the missing `-->`" is right for an opener that never closed and WRONG for
-// a suspected merge, where adding a terminator would close the marker early and
-// spill the rest of it into the document as visible text.
-describe('markerDamageMessage tells the user what to actually do', () => {
-	it('tells an unclosed opener to add the terminator', () => {
+// markerDamageMessage quotes the finding's reason and points at the command, and
+// adds no repair of its own. Each damage kind that reaches it carries its repair
+// in the reason itself: one repair when the text decides it, two when it cannot.
+// The once-per-note open/save notice quotes only the reason, so a second copy of
+// the guidance here would drift from it. The exact wording is pinned parser-side.
+describe('markerDamageMessage quotes the reason and points at the command', () => {
+	it('quotes the finding reason verbatim and adds the validate pointer', () => {
 		const msg = markerDamageMessage({
 			start: 0,
-			excerpt: '<!-- annoteca/todo: never closed',
-			reason: 'Marker opener has no closing `-->`.',
+			excerpt: '<!-- annoteca/todo: x',
+			reason: 'SENTINEL problem statement.',
 			kind: 'unclosed-opener',
 		});
-		expect(msg).toContain('Add the missing `-->`');
-		expect(msg).not.toContain('Escape the inner');
+		expect(msg).toContain('SENTINEL problem statement.');
+		expect(msg).toContain('Validate marker format');
 	});
 
-	it('tells a suspected merge to escape the inner opener instead', () => {
-		const msg = markerDamageMessage({
-			start: 0,
-			excerpt: '<!-- annoteca/todo: has <!-- inside',
-			reason: 'This marker contains an unescaped `<!--`.',
-			kind: 'possible-merge',
-		});
-		expect(msg).toContain('Escape the inner `<!--`');
-		expect(msg).not.toContain('Add the missing');
+	it('adds no repair of its own for either damage kind', () => {
+		// A reason with no repair in it must produce a message with no repair in
+		// it. The regression guard against reintroducing a kind-keyed fix that
+		// contradicts what the reason already says, which is what shipped before.
+		for (const kind of ['unclosed-opener', 'possible-merge'] as const) {
+			const msg = markerDamageMessage({
+				start: 0,
+				excerpt: 'x',
+				reason: 'Just the problem, stated.',
+				kind,
+			});
+			const lower = msg.toLowerCase();
+			expect(lower).not.toContain('add');
+			expect(lower).not.toContain('escape');
+		}
 	});
 });
 
