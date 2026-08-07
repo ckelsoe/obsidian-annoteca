@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.1] - 2026-08-07
+
 ### Fixed
 - Clicking a comment in the Hub now works the first time for a note in a tab you have not opened since Obsidian started. Those tabs are restored empty and filled in when you first look at them, and the plugin treated one as ready the moment it appeared rather than when the note was actually in it. It then measured against an empty note, which failed outright: the first click did nothing at all, and only a second one worked. Editing a comment from the Hub in the same tab could fail the same way, silently.
 - A reply you are part-way through writing no longer disappears when the text around the comment is retyped. Any edit that runs across the start of a comment moved the plugin's idea of where that comment was by one character, which was enough for it to conclude the comment had gone and throw the reply box away with your words in it. The comment is now found again by what it is rather than only by where it starts.
