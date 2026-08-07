@@ -239,6 +239,18 @@ export function installObsidianDomHelpers(): void {
 	): void {
 		for (const c of classes) if (c !== '') this.classList.add(c);
 	};
+	// Needed by renderStarButton, so anything that builds the comment popover
+	// (rather than only the reply composer) can be driven here at all. Still a
+	// SUBSET of the real API: this is Obsidian's own signature, narrowed to the
+	// single-class form the plugin uses.
+	Element.prototype.toggleClass = function (
+		this: Element,
+		classes: string | string[],
+		value: boolean,
+	): void {
+		for (const c of Array.isArray(classes) ? classes : [classes])
+			if (c !== '') this.classList.toggle(c, value);
+	};
 
 	// `node.win`, which Obsidian defines on every Node. The tooltip host uses
 	// it both through `ownerDocument.win` (a Document is a Node) and directly

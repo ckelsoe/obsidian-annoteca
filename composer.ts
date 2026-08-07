@@ -21,6 +21,7 @@ import {
 	nowISO,
 } from './parser';
 import { VANISHED_MESSAGE, ambiguousMessage } from './comment-service';
+import { getCategoryOrFallback } from './categories';
 import { resolveSettingsCategories } from './settings';
 import { shouldSubmitOnKeydown } from './view-utils';
 import {
@@ -89,6 +90,9 @@ export class ComposerForm {
 	private readonly editingMarkerText: string;
 	// The body textarea of the most recent render, for `focusBody`.
 	private bodyArea?: HTMLTextAreaElement;
+	// The category the form OPENED with. A save may always use it, even when
+	// the settings no longer offer it: see categoryIsSavable.
+	private readonly initialCategory: string;
 
 	constructor(
 		plugin: AnnotecaPlugin,
@@ -109,11 +113,12 @@ export class ComposerForm {
 						request.editor.posToOffset(request.editing.to),
 					)
 			: '';
+		this.initialCategory = request.scratchpad
+			? 'uncategorized'
+			: (request.editing?.comment.category ??
+				plugin.settings.defaultCategory);
 		this.state = {
-			selectedCategory: request.scratchpad
-				? 'uncategorized'
-				: (request.editing?.comment.category ??
-					plugin.settings.defaultCategory),
+			selectedCategory: this.initialCategory,
 			body: request.editing?.comment.body ?? '',
 			scratchpad: !!request.scratchpad,
 			templateValues: {},
@@ -160,6 +165,27 @@ export class ComposerForm {
 				.setDesc('Filter and group by this in the views.')
 				.addDropdown((d) => {
 					for (const c of enabled) d.addOption(c.id, c.displayName);
+					// A comment can carry a category the settings no longer
+					// offer. Without an option for it, setValue was called with
+					// an id that had never been added, so the control rendered
+					// blank: the user could not see what the comment was filed
+					// under, and changing it was the only way to make the form
+					// look complete. Labelled, so it is clear why it sits apart
+					// from the others.
+					if (
+						!enabled.some(
+							(c) => c.id === this.state.selectedCategory,
+						)
+					) {
+						const shown = getCategoryOrFallback(
+							this.state.selectedCategory,
+							enabled,
+						);
+						d.addOption(
+							this.state.selectedCategory,
+							`${shown.displayName} (not enabled)`,
+						);
+					}
 					d.setValue(this.state.selectedCategory);
 					d.onChange((v) => {
 						this.state.selectedCategory = v;
@@ -412,6 +438,38 @@ export class ComposerForm {
 		return undefined;
 	}
 
+	// Which categories a save may use: the enabled set, plus two that are valid
+	// without being offered.
+	//
+	// The category the form OPENED with, because a comment already filed under
+	// one the settings no longer offer has to stay editable. Both routes there
+	// are ordinary UI: turn off the preset that supplied the category, or use
+	// Remove on it (allowed whenever it is not the default). Refusing made
+	// editing a comment's TEXT depend on its category, and the notice named no
+	// way out, while the dropdown showed nothing because setValue was called
+	// with an id that had never been addOption'd.
+	//
+	// And `uncategorized`, which is the scratchpad sentinel rather than
+	// something the user picked. A categories list that has lost it, which a
+	// hand edit or a sync can produce, dead-ended every scratchpad capture.
+	//
+	// Every DISPLAY surface already tolerates an unknown category through
+	// getCategoryOrFallback. This gate was the only place that did not.
+	private categoryIsSavable(
+		category: string,
+		enabled: readonly { id: string }[],
+	): boolean {
+		if (category === 'uncategorized') return true;
+		// Only an EDIT is grandfathered. On a create form `initialCategory` is
+		// merely the default, so allowing it unconditionally would let a NEW
+		// comment be filed under a category that Settings disabled while the
+		// form sat open, which is the thing this gate exists to stop. An edit
+		// has an existing comment to protect; a create has nothing yet.
+		if (this.request.editing && category === this.initialCategory)
+			return true;
+		return enabled.some((c) => c.id === category);
+	}
+
 	private async submit(): Promise<void> {
 		const finalBody = this.composeFinalBody();
 		if (finalBody === '') {
@@ -421,7 +479,7 @@ export class ComposerForm {
 
 		const enabled = resolveSettingsCategories(this.plugin.settings);
 		const category = this.state.selectedCategory;
-		if (!enabled.find((c) => c.id === category)) {
+		if (!this.categoryIsSavable(category, enabled)) {
 			new Notice('Selected category is not enabled.');
 			return;
 		}
