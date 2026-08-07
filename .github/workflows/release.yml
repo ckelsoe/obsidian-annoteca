@@ -19,12 +19,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
 
       - name: Use Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
+          # No dependency cache in the release workflow: it runs with contents,
+          # id-token, and attestations write plus VT_API_KEY, so it must not
+          # restore an untrusted npm cache. CI keeps its cache; this job does not.
           node-version: "22"
-          cache: "npm"
 
       - name: Install dependencies
         run: npm ci
@@ -91,7 +95,9 @@ jobs:
           # scanned. Only when the CHANGELOG produced notes: an empty file means
           # Create release falls back to --generate-notes, and appending here would
           # both defeat that and leave a notes-only-VirusTotal release.
-          [ -s release-notes.md ] || exit 0
+          # Non-whitespace, not just -s: awk can emit a lone blank line, which -s
+          # counts as content. Same test the Create release guard uses.
+          grep -q '[^[:space:]]' release-notes.md || exit 0
           {
             printf '\n## VirusTotal\n\n'
             printf '%s' "$VT_ANALYSIS" | tr ',' '\n' | while IFS='=' read -r name url; do
@@ -110,7 +116,9 @@ jobs:
           case "$tag" in
             *-beta*|*-rc*|*-alpha*) prerelease="--prerelease" ;;
           esac
-          if [ -s release-notes.md ]; then
+          # Non-whitespace rather than -s: a lone blank line from awk is not real
+          # notes, and would otherwise take --notes-file over --generate-notes.
+          if grep -q '[^[:space:]]' release-notes.md; then
             gh release create "$tag" $prerelease \
               --title="$tag" \
               --notes-file release-notes.md \
