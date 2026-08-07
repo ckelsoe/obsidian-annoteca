@@ -71,7 +71,9 @@ Why HTML comments?
 4. When an assistant has addressed a comment, the hover popup offers **Accept**, **Revise**, or **Reject** (reject restores the original text). Otherwise resolve when done and reopen if it comes back, or use "Resolve and remove" to drop the marker instead of keeping it as history.
 5. Navigate with "Next comment" / "Previous comment", which follow your current scope across files. The active comment is highlighted in the editor, and opening the panel keeps your place in the document.
 
-Diagnostics commands cover the edge cases: find orphaned comments whose surrounding prose was deleted, detect markers that drifted, validate malformed markers, and back up or restore plugin settings.
+Diagnostics commands cover the edge cases: find orphaned comments whose surrounding prose was deleted, clear orphaned stars whose comment no longer exists anywhere in the vault, detect markers that drifted, validate malformed markers, and back up or restore plugin settings.
+
+Annoteca also warns you when a note has a broken comment marker, once per note as you open or save it. A marker that lost its closing tag hides the text after it without anything looking wrong, so the check runs on its own rather than waiting for you to go looking for it, and the notice says how to repair the marker.
 
 ## Working with AI assistants
 
