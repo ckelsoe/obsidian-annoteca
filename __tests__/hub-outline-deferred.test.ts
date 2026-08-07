@@ -113,4 +113,51 @@ describe('Outline tab: cursor heading for a deferred leaf (M12a)', () => {
 		expect(ensureCalls()).toBe(1);
 		expect(container.querySelector('.is-current')).toBeNull();
 	});
+
+	it('attempts each failed deferred path once, even when the active file alternates', async () => {
+		// The guard is per-path, not a single field: alternating between two files
+		// that both fail to load must not re-attempt either. A single-field guard
+		// would be overwritten on the switch and re-fire on the way back.
+		const leaves: Record<string, ReturnType<typeof makeDeferredLeaf>> = {
+			'a.md': makeDeferredLeaf(100),
+			'b.md': makeDeferredLeaf(100),
+		};
+		const calls: Record<string, number> = { 'a.md': 0, 'b.md': 0 };
+		let activePath = 'a.md';
+		const plugin = {
+			commentIndex: { get: () => ({ comments: [] }) },
+			findMarkdownLeafForPath: (p: string) => leaves[p],
+			ensureLeafLoadedForPath: (p: string) => {
+				calls[p] = (calls[p] ?? 0) + 1;
+				return Promise.resolve(false); // fails: the leaf stays deferred
+			},
+			navigateToComment: () => Promise.resolve(),
+			navigateToOffset: () => Promise.resolve(),
+		} as unknown as AnnotecaPlugin;
+		const app = {
+			workspace: {
+				getActiveFile: () => ({
+					path: activePath,
+					basename: activePath,
+				}),
+			},
+			metadataCache: { getFileCache: () => ({ headings: HEADINGS }) },
+		} as unknown as App;
+		const container = document.body.createDiv();
+		const renderer = new OutlineTabRenderer(plugin, app, () => undefined);
+
+		const draw = (p: string) => {
+			activePath = p;
+			container.replaceChildren();
+			renderer.render(container);
+		};
+		draw('a.md');
+		draw('b.md');
+		draw('a.md'); // back to a: must NOT re-attempt
+		draw('b.md'); // back to b: must NOT re-attempt
+		await Promise.resolve();
+
+		expect(calls['a.md']).toBe(1);
+		expect(calls['b.md']).toBe(1);
+	});
 });

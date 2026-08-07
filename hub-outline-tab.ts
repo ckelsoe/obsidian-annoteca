@@ -9,10 +9,12 @@ import type AnnotecaPlugin from './main';
 import type { Comment } from './types';
 
 export class OutlineTabRenderer {
-	// The path we have already kicked off a deferred-leaf load for, so a failed
-	// load or an in-flight one cannot re-trigger every render and loop. Cleared
-	// once the leaf resolves to a real MarkdownView (the synchronous path below).
-	private deferredAttemptedFor: string | undefined;
+	// The paths we have already kicked off a deferred-leaf load for, so a failed
+	// load or an in-flight one cannot re-trigger every render and loop. A Set, not
+	// one path: alternating between two files that each failed to load would
+	// otherwise overwrite a single field and re-attempt each on return. A path is
+	// removed once its leaf resolves to a real MarkdownView (the sync path below).
+	private readonly deferredAttemptedPaths = new Set<string>();
 
 	constructor(
 		private readonly plugin: AnnotecaPlugin,
@@ -73,7 +75,7 @@ export class OutlineTabRenderer {
 		const editorLeaf = this.plugin.findMarkdownLeafForPath(file.path);
 		let cursorBucket = -1;
 		if (editorLeaf?.view instanceof MarkdownView) {
-			this.deferredAttemptedFor = undefined;
+			this.deferredAttemptedPaths.delete(file.path);
 			const editor = editorLeaf.view.editor;
 			const offset = editor.posToOffset(editor.getCursor());
 			for (let i = 0; i < headings.length; i++) {
@@ -82,8 +84,8 @@ export class OutlineTabRenderer {
 				if (h.position.start.offset > offset) break;
 				cursorBucket = i;
 			}
-		} else if (editorLeaf && this.deferredAttemptedFor !== file.path) {
-			this.deferredAttemptedFor = file.path;
+		} else if (editorLeaf && !this.deferredAttemptedPaths.has(file.path)) {
+			this.deferredAttemptedPaths.add(file.path);
 			void this.plugin
 				.ensureLeafLoadedForPath(file.path)
 				.then((loaded) => {
