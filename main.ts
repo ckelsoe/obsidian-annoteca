@@ -63,6 +63,14 @@ import { EditorView } from '@codemirror/view';
 // editor pane (markerScrollAlign === "top"). A little breathing room reads
 // better than flush against the very first visible line.
 const TOP_SCROLL_MARGIN_PX = 60;
+
+// How long to let a just-opened editor fill before giving up on it, and how
+// often to look. `openFile` resolves BEFORE the buffer holds the file's text
+// (see waitForEditorContent), and measured in the running app the gap was three
+// animation frames. The budget is far larger than that because it is a ceiling,
+// not an expectation, and overrunning it costs a cursor at 0 rather than a hang.
+const EDITOR_LOAD_POLL_MS = 8;
+const EDITOR_LOAD_MAX_POLLS = 40;
 import {
 	VAULT_UNRESOLVED_VIEW_TYPE,
 	VaultUnresolvedView,
@@ -483,12 +491,7 @@ export default class AnnotecaPlugin extends Plugin {
 							.setTitle('Annoteca: edit comment')
 							.setIcon('pencil')
 							.onClick(() =>
-								this.openEditModal(
-									editor,
-									view,
-									file.path,
-									inside,
-								),
+								this.openEditModal(editor, view, inside),
 							),
 					);
 					if (inside.resolution) {
@@ -567,8 +570,8 @@ export default class AnnotecaPlugin extends Plugin {
 			id: 'edit-comment-at-cursor',
 			name: 'Edit comment here',
 			editorCallback: (editor: Editor, view: MarkdownView) => {
-				this.withCommentAtCursor(editor, view, (path, c) =>
-					this.openEditModal(editor, view, path, c),
+				this.withCommentAtCursor(editor, view, (_path, c) =>
+					this.openEditModal(editor, view, c),
 				);
 			},
 		});
@@ -1016,12 +1019,18 @@ export default class AnnotecaPlugin extends Plugin {
 		this.openComposer({ editor, view, filePath: path, scratchpad: true });
 	}
 
+	// The path comes from the VIEW, like every other composer opener. It used
+	// to be a parameter, which meant two sources of truth for "which file is
+	// this comment in": the caller's idea and the view's. That is the exact
+	// class of defect the Save-time file check was added for, and a caller
+	// passing a path the view has moved off would have re-opened it.
 	private openEditModal(
 		editor: Editor,
 		view: MarkdownFileInfo,
-		path: string,
 		comment: Comment,
 	): void {
+		const path = view.file?.path;
+		if (!path) return;
 		const from = editor.offsetToPos(comment.marker.start);
 		const to = editor.offsetToPos(comment.marker.end);
 		this.openComposer({
@@ -1057,15 +1066,19 @@ export default class AnnotecaPlugin extends Plugin {
 		// (or edited) marker is queryable before the vault.modify event lands.
 		const file = this.app.vault.getAbstractFileByPath(path);
 		if (file instanceof TFile) {
-			// Only trust the active editor when it is actually holding THIS
-			// file. In panel-composer mode the active view is the composer
-			// panel (or another note), and reading its buffer indexed the
-			// wrong document, so the hub selected the wrong comment.
-			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-			const content =
-				view?.file?.path === path
-					? view.editor.getValue()
-					: await this.app.vault.cachedRead(file);
+			// Ask for the content a WRITE would see, not the content the
+			// ACTIVE view happens to hold. Checking the active view was half
+			// the fix: it stopped the wrong document being indexed, but in
+			// panel-composer mode the active leaf is the composer panel, so
+			// the check never passed and this fell through to `cachedRead`.
+			// That returns the last SAVED bytes, and the marker was written
+			// through `editor.replaceRange` a millisecond earlier, so the new
+			// comment was missing from the index and the hub opened on a
+			// different one. An appended marker leaves the earlier offsets
+			// untouched, so the stale selection stayed valid and the hub never
+			// self-corrected. currentContentFor reads the open editor's buffer
+			// whether or not that editor is the active view.
+			const content = await this.comments.currentContentFor(path, file);
 			this.commentIndex.rebuild(path, content);
 		}
 		this.events.trigger('index-changed', { path });
@@ -1438,8 +1451,11 @@ export default class AnnotecaPlugin extends Plugin {
 		this.app.saveLocalStorage(this.draftKey(commentId), null);
 	}
 
-	private draftKey(commentId: string): string {
-		return `annoteca:draft:${commentId}`;
+	// The argument is a draft KEY, not always a comment id: an id-less comment
+	// has no id to key on and is identified by its own text instead (see
+	// `draftKeyFor` in decorations.ts). This only prefixes whatever it is given.
+	private draftKey(key: string): string {
+		return `annoteca:draft:${key}`;
 	}
 
 	// Edit writes the rebuilt marker through an Editor's replaceRange, so the
@@ -1460,13 +1476,15 @@ export default class AnnotecaPlugin extends Plugin {
 			return;
 		}
 		await this.app.workspace.revealLeaf(leaf);
-		if (leaf.isDeferred) await leaf.loadIfDeferred();
-		const view = leaf.view;
-		if (!(view instanceof MarkdownView)) {
+		// Must be a LOADED view: openEditModal now derives the path from
+		// view.file, and a deferred leaf hands back a view whose file is still
+		// null. Without this the notice below would turn into a silent no-op.
+		const view = await this.loadedMarkdownView(leaf, file);
+		if (!view) {
 			new Notice('Open the file to edit this comment.');
 			return;
 		}
-		this.openEditModal(view.editor, view, path, comment);
+		this.openEditModal(view.editor, view, comment);
 	}
 
 	// A markdown leaf showing `path`, including one that has never been
@@ -1474,13 +1492,89 @@ export default class AnnotecaPlugin extends Plugin {
 	// workspace holds a DeferredView, which has no `.file`, so matching on
 	// `view.file?.path` skips it and every caller then opens a duplicate tab.
 	// The view state carries the path whether or not the view has been built.
-	private findMarkdownLeafForPath(path: string): WorkspaceLeaf | null {
+	findMarkdownLeafForPath(path: string): WorkspaceLeaf | null {
 		for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
 			const statePath = (leaf.getViewState().state as { file?: string })
 				?.file;
 			if (statePath === path) return leaf;
 		}
 		return null;
+	}
+
+	// A MarkdownView for `file` whose editor actually holds that file's text.
+	//
+	// `loadIfDeferred()` is not enough on its own, and assuming it was is what
+	// made the fix for the duplicate-tab bug introduce a navigation one. It
+	// resolves as soon as the view OBJECT exists, which is before the file is
+	// in it: the real API hands back a MarkdownView with `file === null` and a
+	// zero-length document. Everything downstream then measures against an
+	// empty buffer. Opening the file explicitly is what finishes the load, and
+	// it is a no-op for a leaf already showing it.
+	//
+	// Returns null rather than an unloaded view so callers refuse visibly
+	// instead of writing or scrolling against an empty document.
+	private async loadedMarkdownView(
+		leaf: WorkspaceLeaf,
+		file: TFile,
+	): Promise<MarkdownView | null> {
+		if (leaf.isDeferred) await leaf.loadIfDeferred();
+		if (
+			leaf.view instanceof MarkdownView &&
+			leaf.view.file?.path === file.path
+		)
+			return leaf.view;
+		await leaf.openFile(file);
+		const view = leaf.view;
+		if (!(view instanceof MarkdownView)) return null;
+		if (view.file?.path !== file.path) return null;
+		await this.waitForEditorContent(view, file);
+		// Same reason: that wait is asynchronous, so re-check before handing
+		// the view back rather than letting the caller work on a dead one.
+		if (!view.containerEl.isConnected) return null;
+		return view.file?.path === file.path ? view : null;
+	}
+
+	// Wait for a just-opened editor to actually hold the file's text.
+	//
+	// `openFile` resolving is not that signal, which is the second half of the
+	// same lesson the deferred view taught. Measured in the running app against
+	// a leaf restored deferred: the moment `openFile` resolves `view.file` is
+	// already set and the buffer is still EMPTY, and it stays empty through a
+	// microtask, an animation frame and a 0 ms timeout, filling three frames
+	// later. So an offset applied straight afterwards measured against an empty
+	// document and the cursor landed at 0, which is the visible half of the
+	// defect once the RangeError is gone.
+	//
+	// Waits on the editor rather than on a fixed delay, so it costs the few
+	// milliseconds it actually takes. `stat.size` is what keeps a genuinely
+	// empty note from spending the whole budget discovering it is empty.
+	//
+	// setTimeout, not requestAnimationFrame: rAF does not fire in a hidden or
+	// background window, and an await that never resolves would hang every
+	// caller rather than degrade.
+	private async waitForEditorContent(
+		view: MarkdownView,
+		file: TFile,
+	): Promise<void> {
+		// Optional: a throw here would be another unhandled rejection in a
+		// navigation path, which is the class of bug this method exists to end.
+		// A missing stat just means polling, which is bounded anyway.
+		if (file.stat?.size === 0) return;
+		const win = view.containerEl.win;
+		for (let i = 0; i < EDITOR_LOAD_MAX_POLLS; i++) {
+			// Re-validated on EVERY pass, not once before the loop. This waits
+			// across real time, and the user can close the tab or switch it to
+			// another note inside that window; reading `editor` off a view that
+			// has been torn down throws, in a method every caller reaches with
+			// `void`. That is the same unhandled rejection this whole method
+			// exists to stop, so leaving it here would reintroduce it.
+			if (!view.containerEl.isConnected) return;
+			if (view.file?.path !== file.path) return;
+			if (view.editor.getValue().length > 0) return;
+			await new Promise((resolve) =>
+				win.setTimeout(resolve, EDITOR_LOAD_POLL_MS),
+			);
+		}
 	}
 
 	// Scope state --------------------------------------------------------
@@ -1654,14 +1748,19 @@ export default class AnnotecaPlugin extends Plugin {
 			await targetLeaf.openFile(file);
 		} else {
 			await this.app.workspace.revealLeaf(targetLeaf);
-			// Resolving the DeferredView is what gives us a real MarkdownView
-			// with an editor to move the cursor in.
-			if (targetLeaf.isDeferred) await targetLeaf.loadIfDeferred();
 		}
 
-		const view = targetLeaf.view;
-		if (!(view instanceof MarkdownView)) return;
-		const pos = view.editor.offsetToPos(offset);
+		// Resolving the DeferredView is what gives us a real MarkdownView with
+		// an editor to move the cursor in, and the file has to be IN it before
+		// any offset means anything. See loadedMarkdownView.
+		const view = await this.loadedMarkdownView(targetLeaf, file);
+		if (!view) return;
+		// Clamp, because the offset was captured from the index and the
+		// document is read now. They disagree whenever the note shrank in
+		// between, and an out-of-range offset is a wrong cursor position rather
+		// than an error worth surfacing.
+		const target = Math.min(offset, view.editor.getValue().length);
+		const pos = view.editor.offsetToPos(target);
 		view.editor.setCursor(pos);
 
 		// F-276/F-289: anchor the marker per the user's alignment preference.
@@ -1669,10 +1768,10 @@ export default class AnnotecaPlugin extends Plugin {
 		// scroll so the reading position is predictable.
 		const action = decideScrollAction(
 			this.settings.markerScrollAlign,
-			this.isOffsetVisible(view, offset),
+			this.isOffsetVisible(view, target),
 			force,
 		);
-		this.applyScrollAction(view, offset, action);
+		this.applyScrollAction(view, target, action);
 		this.app.workspace.setActiveLeaf(targetLeaf, { focus: true });
 	}
 
@@ -1708,6 +1807,14 @@ export default class AnnotecaPlugin extends Plugin {
 	private isOffsetVisible(view: MarkdownView, offset: number): boolean {
 		const cm = view.editor.cm;
 		if (!cm) return false;
+		// `coordsAtPos` THROWS RangeError for an offset past the end of the
+		// document rather than returning null, and this is evaluated eagerly as
+		// an argument to decideScrollAction, so no markerScrollAlign setting
+		// avoids it. A leaf that has only just finished loading holds a shorter
+		// document than the offset the hub captured, and every caller navigates
+		// with `void`, so the throw became an unhandled rejection that left the
+		// cursor where it was and never ran openReviewerOnComment.
+		if (offset > cm.state.doc.length) return false;
 		const coords = cm.coordsAtPos(offset);
 		if (!coords) return false;
 		const rect = cm.scrollDOM.getBoundingClientRect();

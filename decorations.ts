@@ -1307,8 +1307,11 @@ function hoverTooltipExtension(
 // those offsets (an id-less marker has nothing else to match on), so after an
 // edit above it, a frozen capture no longer matches anything: Send and every
 // lifecycle action would report the comment as vanished, for as long as the
-// surface stayed open. Closing the composer to escape that would take the typed
-// reply with it, because id-less comments get no draft either.
+// surface stayed open. Closing the composer to escape that used to take the
+// typed reply with it as well, because id-less comments got no draft at all;
+// they are keyed by their own text now (see `draftKeyFor`), so the reply
+// survives, but the ref is still what keeps the OPEN surface acting on the
+// right comment.
 interface CommentRef {
 	current: Comment;
 }
@@ -1370,6 +1373,47 @@ function openPinnedTooltip(
 //
 // Everything else (an edit anywhere else in the note, which is the case that
 // used to destroy both surfaces on every keystroke) keeps the existing DOM.
+// Which marker a pinned surface belongs to, once the document has moved.
+//
+// The exact-offset match is right whenever the change fell entirely outside the
+// marker, and mapPos is exact there. It is wrong when the change STRADDLES the
+// marker's start. Select the space and the `<` of `<!--` and retype the same
+// two characters: the document is byte-identical afterwards and the marker
+// still starts where it did, but `mapPos(start, 1)` lands one character past
+// it, the equality find misses, and the composer is torn down with whatever the
+// user had typed in it. That is unsent text, so a miss is expensive.
+//
+// So fall back, and let identity decide which fallback. An id IS an identity,
+// and it is checked for uniqueness rather than taking the first hit, because
+// copying a comment inside a note produces two markers with the same id and
+// silently picking one is how a surface ends up acting on the wrong comment.
+// If the id is gone, the comment is gone.
+//
+// An id-less comment has no identity beyond position, so containment is the
+// widening: the mapped offset drifted INSIDE the marker it belongs to. Category
+// and body must still match, because containment alone would happily hand back
+// a neighbouring marker if this one were deleted outright, and a second tie to
+// what was actually requested is the thing that makes a positional match safe.
+function resolveRemappedMarker(
+	markers: Comment[],
+	mapped: number,
+	previous: Comment,
+): Comment | undefined {
+	const exact = markers.find((c) => c.marker.start === mapped);
+	if (exact) return exact;
+	if (previous.id !== undefined) {
+		const byId = markers.filter((c) => c.id === previous.id);
+		return byId.length === 1 ? byId[0] : undefined;
+	}
+	return markers.find(
+		(c) =>
+			mapped >= c.marker.start &&
+			mapped <= c.marker.end &&
+			c.category === previous.category &&
+			c.body === previous.body,
+	);
+}
+
 function remapPinnedTooltip(
 	value: PinnedTooltip,
 	tr: Transaction,
@@ -1378,9 +1422,11 @@ function remapPinnedTooltip(
 	rebuildWhenMarkerChanges: boolean,
 ): PinnedTooltip | null {
 	const mapped = mapMarkerStart(tr, value.offset);
-	const m = tr.state
-		.field(markersField)
-		.find((c) => c.marker.start === mapped);
+	const m = resolveRemappedMarker(
+		tr.state.field(markersField),
+		mapped,
+		value.ref.current,
+	);
 	if (!m) return null;
 	// Point the ref at the comment as it stands NOW, before deciding whether to
 	// rebuild. This is what keeps a preserved surface from acting on a stale
@@ -1515,9 +1561,36 @@ function buildReplyComposerDom(
 	textarea.rows = 3;
 	textarea.placeholder = 'Write a reply…';
 
-	// Restore any draft saved for this comment. Comments without an id cannot
-	// have drafts saved against them (no stable key), so we skip that case.
-	const draftKey = m.id;
+	// Where this composer's draft is stored.
+	//
+	// An id is a real identity, so it is used whenever there is one, unchanged,
+	// so drafts written by earlier versions still load. An id-less comment has
+	// no identity beyond its position, and the old code read that as "cannot be
+	// keyed" and stored nothing at all: the draft is the only copy of an unsent
+	// reply, so those comments lost the text outright whenever anything tore the
+	// composer down. Keying on file and position gives them one.
+	//
+	// Keyed on the comment's own TEXT, not its offset. An offset is not a name:
+	// Cancel deliberately keeps the draft, so the note can be edited before the
+	// composer is reopened, and a positional key would then both lose the draft
+	// (the marker moved off it) and hand it to whichever different comment had
+	// moved onto it, where Send would post it to the wrong thread. Category and
+	// body are the same fingerprint the edit path already requires of an id-less
+	// marker, and they travel with the comment.
+	//
+	// Two byte-identical id-less comments in one note still share a key. That is
+	// the format's own irreducible ambiguity, and it costs nothing here: the
+	// draft is the same text either way.
+	//
+	// Read from `ref.current`, not the captured `m`, so it tracks the comment as
+	// it stands. Prefixed, so it can never collide with a comment id.
+	const composerPath = sourcePathFor(ctx, view);
+	const draftKeyFor = (c: Comment): string | undefined => {
+		if (c.id !== undefined) return c.id;
+		if (composerPath === '') return undefined;
+		return `idless:${composerPath}\0${c.category}\0${c.body}`;
+	};
+	let draftKey = draftKeyFor(m);
 	if (draftKey) {
 		const saved = ctx.loadDraft(draftKey);
 		if (saved.length > 0) textarea.value = saved;
@@ -1536,12 +1609,24 @@ function buildReplyComposerDom(
 	// Debounce draft saves so we don't write on every keystroke. 300ms is the
 	// sweet spot between "feels live" and "doesn't thrash localStorage".
 	let saveTimer: number | undefined;
+	// Re-key on every write, because a positional key is not stable: the marker
+	// moves whenever the document above it changes. Clearing the previous key
+	// keeps exactly one draft per composer instead of leaving a trail of them
+	// at every offset the marker has ever occupied, any of which a later
+	// composer could restore from.
+	const writeDraft = (): void => {
+		const next = draftKeyFor(ref.current);
+		if (next === undefined) return;
+		if (draftKey !== undefined && draftKey !== next)
+			ctx.clearDraft(draftKey);
+		draftKey = next;
+		ctx.saveDraft(draftKey, textarea.value);
+	};
 	const scheduleSave = (): void => {
-		if (!draftKey) return;
 		if (saveTimer !== undefined) window.clearTimeout(saveTimer);
 		saveTimer = window.setTimeout(() => {
-			ctx.saveDraft(draftKey, textarea.value);
 			saveTimer = undefined;
+			writeDraft();
 		}, 300);
 	};
 	textarea.addEventListener('input', scheduleSave);
@@ -1592,7 +1677,7 @@ function buildReplyComposerDom(
 			window.clearTimeout(saveTimer);
 			saveTimer = undefined;
 		}
-		if (draftKey) ctx.saveDraft(draftKey, textarea.value);
+		writeDraft();
 		// The write is awaited, and the composer can be dismissed across that
 		// await: Escape, Cancel, or anything that tears the tooltip down. Then
 		// release() re-enables a Send button and a textarea that are no longer
@@ -1813,10 +1898,12 @@ function clickKeepsTapPopover(view: EditorView, target: HTMLElement): boolean {
 function dismissTapPopoverOnOutsideClick(): Extension {
 	return ViewPlugin.fromClass(
 		class {
-			private readonly doc: Document;
+			private readonly view: EditorView;
+			private doc: Document;
 			private readonly onDown: (event: MouseEvent) => void;
 
 			constructor(view: EditorView) {
+				this.view = view;
 				this.doc = view.dom.ownerDocument;
 				this.onDown = (event: MouseEvent) => {
 					const target = event.target as HTMLElement | null;
@@ -1829,6 +1916,27 @@ function dismissTapPopoverOnOutsideClick(): Extension {
 					if (view.state.field(field, false) == null) return;
 					view.dispatch({ effects: setTapPopoverEffect.of(null) });
 				};
+				this.doc.addEventListener('mousedown', this.onDown, true);
+			}
+
+			// The listener is bound to ONE document, and dragging a tab into a
+			// popout moves the view's DOM to another window while keeping this
+			// plugin instance. Captured once in the constructor, the sole
+			// outside-dismiss path stayed nailed to the window the view was
+			// born in: in the popout no click dismissed the popover, and a
+			// single unrelated mousedown back in the MAIN window dismissed the
+			// popout's popover instead.
+			//
+			// Same shape and same reason as perWindowTooltipHost, which
+			// re-parents its host on every update: a view's owner document is
+			// not a constant, so anything derived from it has to be re-derived.
+			// Cheap enough to check every update, which is what makes the move
+			// self-correcting without listening for it.
+			update(): void {
+				const doc = this.view.dom.ownerDocument;
+				if (doc === this.doc) return;
+				this.doc.removeEventListener('mousedown', this.onDown, true);
+				this.doc = doc;
 				this.doc.addEventListener('mousedown', this.onDown, true);
 			}
 

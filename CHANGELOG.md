@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Clicking a comment in the Hub now works the first time for a note in a tab you have not opened since Obsidian started. Those tabs are restored empty and filled in when you first look at them, and the plugin treated one as ready the moment it appeared rather than when the note was actually in it. It then measured against an empty note, which failed outright: the first click did nothing at all, and only a second one worked. Editing a comment from the Hub in the same tab could fail the same way, silently.
+- A reply you are part-way through writing no longer disappears when the text around the comment is retyped. Any edit that runs across the start of a comment moved the plugin's idea of where that comment was by one character, which was enough for it to conclude the comment had gone and throw the reply box away with your words in it. The comment is now found again by what it is rather than only by where it starts.
+- A reply written on a comment that has no identifier is now kept if the box is closed before you send it. Those comments, which is what "Convert comments" produces, had nowhere to store a draft, so the text was simply gone; every other comment has had drafts for a long time. The draft follows the comment as the note is edited, and only one is ever kept per comment.
+- Comment popovers can be dismissed in a window you drag a tab into. The click-away listener stayed attached to the window the note started in, so in the new window nothing dismissed the popover, and a stray click back in the original window dismissed it instead.
+- The Hub no longer jumps to a different comment when you type above the one you have selected. Saving rebuilds the plugin's index, which moves every comment below the edit, and the panel was tracking the selection by position alone: it quietly switched to the first comment in the list while the editor kept highlighting the one you actually chose. A card you had expanded collapsed for the same reason. Both now follow the comment itself.
+- The Hub selects the comment you just wrote, instead of an older one. Sending from the side-panel composer read the note from disk, which had not caught up with what was just typed, so the new comment was not there to select. Because a new comment is added at the end, nothing later moved and the panel never corrected itself.
+- The Hub's scope dropdown names the file it is pinned to. A scope pinned to one note while you work in another read "This file", which was the wrong file, and the dropdown was the only place that note's name appeared at all.
+- Editing a comment whose category is no longer offered now works. Removing a category, or turning off the preset that supplied it, left every comment filed under it uneditable: Save refused with "Selected category is not enabled" and the category box showed nothing, so there was no way to see what was wrong or fix it. The category box now lists it, marked as not enabled, and Save keeps it. Editing a comment's text never reclassifies it. Capturing to the scratchpad works the same way when the settings file has lost its "uncategorized" entry.
+
 ## [1.14.0] - 2026-08-07
 
 ### Added

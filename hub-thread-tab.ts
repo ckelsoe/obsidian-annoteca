@@ -1,9 +1,9 @@
 // Thread tab renderer for the Annoteca hub. Owns the scope toolbar,
 // active-comment selection, per-session collapse state, file-group
 // rendering, and the comment card (compact + expanded) inside the
-// Thread tab. Public mutable fields `activePath` / `activeStart` are
-// updated by the parent view's event handlers; the parent calls
-// `render()` after writing them.
+// Thread tab. The parent view moves the selection through
+// `setActiveComment(path, start)` and then calls `render()`; the
+// fields behind it are read-only from outside.
 
 import { Notice, TFile, setIcon, type App } from 'obsidian';
 
@@ -51,6 +51,13 @@ interface PendingDraftSave {
 export class ThreadTabRenderer {
 	activePath: string | undefined;
 	activeStart: number | undefined;
+	// The id of the comment `activeStart` points at, learned on the render that
+	// resolved it. `activeStart` is an offset and the index is rebuilt on every
+	// autosave, so it goes stale the moment anything is typed above the
+	// selection; this is what lets the next render find the same comment again.
+	// Not public: the parent view sets the offset from an event that carries no
+	// id, so this is derived here rather than assigned from outside.
+	private activeId: string | undefined;
 	// Per-session collapse state for file groups in multi-file Thread scopes.
 	// Reset when the active file changes and autoCollapseInactiveFiles is on.
 	private collapsedFilePaths = new Set<string>();
@@ -84,6 +91,24 @@ export class ThreadTabRenderer {
 		private readonly app: App,
 		private readonly refresh: () => void,
 	) {}
+
+	// How the parent view moves the selection. It names an OFFSET, because the
+	// events it comes from (a marker clicked in the editor, the active file
+	// changing) carry nothing else.
+	//
+	// Clearing the remembered id is the point. That id belongs to the previous
+	// selection, and this is a fresh instruction: if the offset does not resolve
+	// against the current index, recovering by the old id would snap the panel
+	// back to the card the user has just moved off, which is worse than the
+	// first-card fallback it would be replacing.
+	setActiveComment(
+		path: string | undefined,
+		start: number | undefined,
+	): void {
+		this.activePath = path;
+		this.activeStart = start;
+		this.activeId = undefined;
+	}
 
 	// Unloads the current render's markdown lifetime. Called when the hub view
 	// closes; without it the last pass stays loaded after the panel is gone.
@@ -170,7 +195,7 @@ export class ThreadTabRenderer {
 	private scrollActiveCardIntoView(): void {
 		const activeKey =
 			this.activePath !== undefined && this.activeStart !== undefined
-				? this.cardKey(this.activePath, this.activeStart)
+				? `${this.activePath}\0${this.activeId ?? this.activeStart}`
 				: undefined;
 		if (
 			activeKey &&
@@ -185,20 +210,34 @@ export class ThreadTabRenderer {
 		this.lastScrolledActiveKey = activeKey;
 	}
 
-	private cardKey(path: string, start: number): string {
-		return `${path}\0${start}`;
+	// Identity first. An offset is not a stable name for a comment: the index is
+	// rebuilt on every autosave, and any edit above a comment moves it, so a key
+	// built from the offset alone named a different card afterwards. That is why
+	// a card the user had expanded with the chevron collapsed on the next
+	// autosave. Neither form below moves with the text around it.
+	//
+	// The path stays in BOTH forms. A copied comment carries a copied id, so an
+	// id alone is not unique across files, and dropping the path made one card's
+	// chevron expand and collapse another file's card with it.
+	//
+	// An id-less comment is keyed by its TEXT, for the same reason the reply
+	// draft is: its offset is not a name either. Two byte-identical id-less
+	// comments in one note share a key, which is the format's own irreducible
+	// ambiguity rather than something this can decide.
+	private cardKey(path: string, c: Comment): string {
+		return c.id !== undefined
+			? `id:${path}\0${c.id}`
+			: `txt:${path}\0${c.category}\0${c.body}`;
 	}
 
 	// Effective expand state for a card: the user's explicit chevron override if
 	// set, otherwise the default where only the active card is expanded (F-290).
 	private isCardExpanded(
 		path: string,
-		start: number,
+		c: Comment,
 		isActive: boolean,
 	): boolean {
-		return (
-			this.cardExpandOverrides.get(this.cardKey(path, start)) ?? isActive
-		);
+		return this.cardExpandOverrides.get(this.cardKey(path, c)) ?? isActive;
 	}
 
 	private buildScopedGroups(
@@ -231,18 +270,62 @@ export class ThreadTabRenderer {
 		const activeGroup = activeFilePath
 			? groups.find((g) => g.path === activeFilePath)
 			: undefined;
-		const stillValid = groups.some(
-			(g) =>
-				g.path === this.activePath &&
-				g.comments.some((c) => c.marker.start === this.activeStart),
-		);
-		if (!stillValid || this.activeStart === undefined) {
-			const def = activeGroup?.comments[0] ?? groups[0]?.comments[0];
-			const defGroup = activeGroup ?? groups[0];
-			if (def && defGroup) {
-				this.activePath = defGroup.path;
-				this.activeStart = def.marker.start;
+		const current =
+			this.activeStart === undefined
+				? undefined
+				: groups
+						.find((g) => g.path === this.activePath)
+						?.comments.find(
+							(c) => c.marker.start === this.activeStart,
+						);
+		if (current) {
+			// Learn the identity behind the offset while the two still agree.
+			this.activeId = current.id;
+			return;
+		}
+
+		// The offset no longer names a comment. Usually that is not a deleted
+		// comment at all, it is a moved one: an autosave rebuilds the index,
+		// and anything typed above the selection shifts every offset below it.
+		// Falling straight through to the default silently switched the panel
+		// to the FIRST comment in the group, while the editor's own highlight,
+		// which does remap, went on painting the one the user actually chose,
+		// so the two disagreed about what was selected.
+		//
+		// Exactly one match, because copying a comment inside a note produces
+		// two markers with the same id, and guessing between them is how a
+		// selection lands on the wrong comment.
+		if (this.activeStart !== undefined && this.activeId !== undefined) {
+			// The selected file first. Copying a comment produces two markers
+			// with the same id, and in a folder or vault scope those can sit in
+			// DIFFERENT files, each unique within its own group. Walking the
+			// groups in order would then move the selection to whichever file
+			// sorted first, which is a worse outcome than not recovering at all.
+			const hits = groups.flatMap((g) =>
+				g.comments
+					.filter((c) => c.id === this.activeId)
+					.map((c) => ({ path: g.path, comment: c })),
+			);
+			const inActive = hits.filter((h) => h.path === this.activePath);
+			const only =
+				inActive.length === 1
+					? inActive[0]
+					: hits.length === 1
+						? hits[0]
+						: undefined;
+			if (only) {
+				this.activePath = only.path;
+				this.activeStart = only.comment.marker.start;
+				return;
 			}
+		}
+
+		const def = activeGroup?.comments[0] ?? groups[0]?.comments[0];
+		const defGroup = activeGroup ?? groups[0];
+		if (def && defGroup) {
+			this.activePath = defGroup.path;
+			this.activeStart = def.marker.start;
+			this.activeId = def.id;
 		}
 	}
 
@@ -348,8 +431,11 @@ export class ThreadTabRenderer {
 			setter: () => Promise<void>;
 		}
 		const opts: ScopeOption[] = [];
+		// Keyed by the ACTIVE file, so it stops matching a file scope anchored
+		// to a different note. That mismatch is the whole signal the disabled
+		// "Pinned: <path>" entry above is built from.
 		opts.push({
-			value: 'file',
+			value: active ? `file:${active.path}` : 'file',
 			label: 'This file',
 			setter: () =>
 				active
@@ -493,8 +579,15 @@ export class ThreadTabRenderer {
 
 	private currentScopeOptionValue(state: ScopeState): string {
 		switch (state.shape.kind) {
+			// Carries the anchor, like every other kind here. Collapsing every
+			// file scope to the bare literal `file` made it match the "This
+			// file" option unconditionally, so the mismatch branch could never
+			// fire for one and describeScope's `case 'file'` was unreachable.
+			// A file scope pinned to one note while another is open then read
+			// as "This file" while listing a different file's comments, and the
+			// dropdown was the only place that file's identity appears at all.
 			case 'file':
-				return 'file';
+				return state.anchorPath ? `file:${state.anchorPath}` : 'file';
 			case 'folder':
 				return state.shape.subfolders
 					? `folder-sub:${state.anchorPath}`
@@ -515,7 +608,7 @@ export class ThreadTabRenderer {
 		isActive: boolean,
 	): void {
 		if (isActive) this.activeCardEl = card;
-		const expanded = this.isCardExpanded(path, c.marker.start, isActive);
+		const expanded = this.isCardExpanded(path, c, isActive);
 		const compact = this.renderCompactRow(card, c, path, expanded);
 
 		// Card-body click selects the card and navigates the editor to the marker
@@ -525,6 +618,11 @@ export class ThreadTabRenderer {
 		compact.addEventListener('click', () => {
 			this.activePath = path;
 			this.activeStart = c.marker.start;
+			// Set together with the offset, never left to the refresh to
+			// learn: a stale id here would let the recovery in
+			// selectActiveComment pull the selection back to the PREVIOUS
+			// comment if this offset ever failed to resolve.
+			this.activeId = c.id;
 			// Ensure the file group is expanded so the newly-active card is visible.
 			this.collapsedFilePaths.delete(path);
 			this.refresh();
@@ -557,10 +655,7 @@ export class ThreadTabRenderer {
 		setIcon(chevron, expanded ? 'chevron-down' : 'chevron-right');
 		chevron.addEventListener('click', (e) => {
 			e.stopPropagation();
-			this.cardExpandOverrides.set(
-				this.cardKey(path, c.marker.start),
-				!expanded,
-			);
+			this.cardExpandOverrides.set(this.cardKey(path, c), !expanded);
 			this.refresh();
 		});
 
@@ -607,6 +702,11 @@ export class ThreadTabRenderer {
 			e.stopPropagation();
 			this.activePath = path;
 			this.activeStart = c.marker.start;
+			// Set together with the offset, never left to the refresh to
+			// learn: a stale id here would let the recovery in
+			// selectActiveComment pull the selection back to the PREVIOUS
+			// comment if this offset ever failed to resolve.
+			this.activeId = c.id;
 			this.refresh();
 			void this.plugin.navigateToOffset(path, c.marker.start, true);
 		});

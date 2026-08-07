@@ -392,7 +392,7 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 		// content with no tab lit and no refresh on a scope change.
 		this.activeTab = normalizeHubTab(this.plugin.settings.lastHubTab);
 		const file = this.app.workspace.getActiveFile();
-		this.threadRenderer.activePath = file?.path;
+		this.threadRenderer.setActiveComment(file?.path, undefined);
 		this.scheduleRefresh();
 		// Scan the vault once so that wider scopes (folder, vault, property,
 		// tag) have populated comment data. The first refresh above shows the
@@ -403,8 +403,7 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 		this.registerEvent(
 			this.plugin.events.on('active-comment-changed', (payload) => {
 				const event = payload as { path: string; start: number };
-				this.threadRenderer.activePath = event.path;
-				this.threadRenderer.activeStart = event.start;
+				this.threadRenderer.setActiveComment(event.path, event.start);
 				// Marker clicks force the Thread tab; the user's intent is to see
 				// the comment they clicked, not whatever tab was last viewed.
 				this.activeTab = 'thread';
@@ -445,8 +444,7 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 				const f = this.app.workspace.getActiveFile();
 				if (!f) return;
 				if (f.path === this.threadRenderer.activePath) return;
-				this.threadRenderer.activePath = f.path;
-				this.threadRenderer.activeStart = undefined;
+				this.threadRenderer.setActiveComment(f.path, undefined);
 				this.scheduleRefresh();
 			}),
 		);

@@ -53,12 +53,23 @@ export class OutlineTabRenderer {
 		// that row as "current." Looks up the leaf showing this file directly
 		// rather than getActiveViewOfType, which returns null when the hub
 		// itself is the active leaf.
-		const editorLeaf = this.app.workspace
-			.getLeavesOfType('markdown')
-			.find((l) => (l.view as MarkdownView).file?.path === file.path);
+		//
+		// Shares the plugin's predicate rather than repeating `view.file?.path`,
+		// so there is one definition of "the leaf holding this note" instead of
+		// two that can drift.
+		//
+		// This does NOT fix the deferred case, and saying otherwise would be
+		// wrong: checked in the running app, a leaf restored from a saved
+		// workspace and never activated holds a view that is not a MarkdownView
+		// and has no `editor`, so the guard below skips it exactly as the old
+		// predicate did and no heading is marked. Fixing it needs an async load
+		// and a re-render, which this synchronous render cannot do without a
+		// refresh loop; the cost is one unmarked heading that corrects itself as
+		// soon as the tab is touched.
+		const editorLeaf = this.plugin.findMarkdownLeafForPath(file.path);
 		let cursorBucket = -1;
-		if (editorLeaf) {
-			const editor = (editorLeaf.view as MarkdownView).editor;
+		if (editorLeaf?.view instanceof MarkdownView) {
+			const editor = editorLeaf.view.editor;
 			const offset = editor.posToOffset(editor.getCursor());
 			for (let i = 0; i < headings.length; i++) {
 				const h = headings[i];
