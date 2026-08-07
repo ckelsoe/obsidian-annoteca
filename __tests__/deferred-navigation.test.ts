@@ -41,6 +41,7 @@ interface PluginUnderTest {
 	notifyComposerSubmitted(path: string, markerStart: number): Promise<void>;
 	editCommentFromReviewer(path: string, comment: Comment): Promise<void>;
 	isOffsetVisible(view: unknown, offset: number): boolean;
+	ensureLeafLoadedForPath(path: string): Promise<boolean>;
 }
 
 const NOTE = `Opening line. ${serialize({
@@ -293,6 +294,36 @@ describe('navigateToOffset against a leaf that is still loading', () => {
 		await plugin.navigateToOffset('notes/a.md', 9999);
 
 		expect(leaf.view.editor.cursor.offset).toBe('short'.length);
+	});
+
+	it('ensureLeafLoadedForPath answers false instead of rejecting when the load throws', async () => {
+		// The outline tab reaches this with `void ...then()` and no catch, so a
+		// rejection would be an unhandled rejection and would suppress the
+		// re-render. A failed load must resolve false.
+		const leaf = deferredLeaf('notes/a.md', NOTE);
+		leaf.openFile = () => Promise.reject(new Error('boom'));
+		const { plugin } = makePlugin([leaf]);
+
+		await expect(
+			plugin.ensureLeafLoadedForPath('notes/a.md'),
+		).resolves.toBe(false);
+	});
+
+	it('serializes concurrent navigations so they do not both load the leaf', async () => {
+		// Two rapid clicks used to interleave their openFile / loadedMarkdownView
+		// awaits and each load the same deferred leaf; the readiness wait widened
+		// that window. The single-flight guard runs the second only after the
+		// first settles, by which point the leaf is loaded and the second
+		// short-circuits, so openFile is called exactly once.
+		const leaf = deferredLeaf('notes/a.md', NOTE);
+		const { plugin } = makePlugin([leaf]);
+
+		await Promise.all([
+			plugin.navigateToOffset('notes/a.md', 3),
+			plugin.navigateToOffset('notes/a.md', 5),
+		]);
+
+		expect(leaf.openFileCalls).toBe(1);
 	});
 });
 

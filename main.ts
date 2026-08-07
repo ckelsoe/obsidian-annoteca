@@ -106,6 +106,9 @@ export default class AnnotecaPlugin extends Plugin {
 	diagnostics!: DiagnosticsService;
 	private vaultScanned = false;
 	private readonly markerDamage = new MarkerDamageReporter();
+	// Serializes navigateToOffset so two clicks in quick succession cannot
+	// interleave their openFile / loadedMarkdownView awaits. See navigateToOffset.
+	private navChain: Promise<void> = Promise.resolve();
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -1501,6 +1504,30 @@ export default class AnnotecaPlugin extends Plugin {
 		return null;
 	}
 
+	// Resolves the (possibly deferred) markdown leaf showing `path` so a later
+	// SYNCHRONOUS read of its editor sees real content. The outline tab needs
+	// this: a leaf restored from a saved workspace and never activated holds a
+	// DeferredView with no editor, so its render cannot mark the cursor heading.
+	// It loads through loadedMarkdownView, which waits for the buffer to fill
+	// (openFile resolving is not that signal), then the caller re-renders and the
+	// synchronous path finds a real MarkdownView. Resolves true once a loaded
+	// view for `path` exists, false when there is no such leaf or the load fails.
+	async ensureLeafLoadedForPath(path: string): Promise<boolean> {
+		const leaf = this.findMarkdownLeafForPath(path);
+		const file = this.app.vault.getAbstractFileByPath(path);
+		if (!leaf || !(file instanceof TFile)) return false;
+		// Never reject. The outline caller reaches this with `void ...then()`
+		// and no catch, so a rejection from loadIfDeferred/openFile would be an
+		// unhandled rejection. Answering false keeps the contract and lets the
+		// caller simply not re-render, which is the right outcome for a load
+		// that did not produce a usable view.
+		try {
+			return (await this.loadedMarkdownView(leaf, file)) !== null;
+		} catch {
+			return false;
+		}
+	}
+
 	// A MarkdownView for `file` whose editor actually holds that file's text.
 	//
 	// `loadIfDeferred()` is not enough on its own, and assuming it was is what
@@ -1716,10 +1743,30 @@ export default class AnnotecaPlugin extends Plugin {
 		if (comment) this.openReviewerOnComment(comment, path);
 	}
 
+	// Single-flight: each call runs after the previous one settles, so two rapid
+	// navigations cannot interleave their openFile / loadedMarkdownView awaits and
+	// leave the cursor from the EARLIER click winning after the later one. Every
+	// caller reaches this with `void`, and the readiness wait (loadedMarkdownView)
+	// widened the window in which a second click could land mid-flight. Chaining
+	// on the settled result (errors swallowed for the chain, surfaced to the
+	// caller) keeps the queue alive past a single failed navigation.
+	navigateToOffset(
+		path: string,
+		offset: number,
+		force = false,
+	): Promise<void> {
+		const prev = this.navChain ?? Promise.resolve();
+		const run = prev
+			.catch(() => undefined)
+			.then(() => this.navigateToOffsetInner(path, offset, force));
+		this.navChain = run.catch(() => undefined);
+		return run;
+	}
+
 	// `force` bypasses the "already visible -> don't move" short-circuit so the
 	// per-card sync button (F-291) can always re-anchor the document, even when
 	// the marker is on screen and the alignment is "minimal".
-	async navigateToOffset(
+	private async navigateToOffsetInner(
 		path: string,
 		offset: number,
 		force = false,
