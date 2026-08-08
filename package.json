@@ -1,13 +1,14 @@
 {
 	"name": "annoteca",
-	"version": "1.14.2",
+	"version": "1.14.3",
 	"description": "Categorized inline feedback comments for long-form markdown documents. Plain HTML storage, threaded AI conversations, readable by humans and any AI assistant. Works on desktop and mobile.",
 	"main": "main.js",
 	"type": "module",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
-		"lint": "eslint . --max-warnings 0 && prettier --check \"**/*.ts\" && node scripts/check-submission.mjs",
+		"typecheck:marketplace": "tsc --noEmit -p tsconfig.scan.json",
+		"lint": "eslint . --max-warnings 0 && prettier --check \"**/*.ts\" && node scripts/check-submission.mjs && npm run typecheck:marketplace",
 		"test": "jest",
 		"version": "node version-bump.mjs && git add manifest.json versions.json"
 	},

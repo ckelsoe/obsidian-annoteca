@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.3] - 2026-08-08
+
+### Fixed
+- The marketplace scorecard no longer flags the plugin's use of `String.matchAll`, `Array.flatMap`, and `String.trimStart`/`trimEnd` as untyped. The TypeScript `lib` the project declared stopped at ES2018 while the code uses these ES2019/ES2020 methods, so the developer-dashboard scan, which type-checks without the project's development dependencies, saw them as `any` and reported a batch of no-unsafe warnings across the parser, the diagnostics, the importer, and the comment hub. The `lib` now includes ES2019 and ES2020. No runtime change: these methods already run on every supported Obsidian version, and the plugin now type-checks against the scan's stricter view as part of its own lint.
+
 ## [1.14.2] - 2026-08-08
 
 ### Fixed
