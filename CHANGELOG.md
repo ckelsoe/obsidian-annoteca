@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.4] - 2026-08-08
+
+### Fixed
+- Reworked the anchor underline and resolved-comment CSS onto the `text-decoration` shorthand, clearing the marketplace scan's "partially supported" warnings on the longhand `text-decoration-line`, `-style`, and `-color` properties. No visible change: the underline still renders wavy, tinted per category, with its thin/normal/thick tiers, and resolved comments still mute their underline and strike through their icon. Verified in a browser that every case computes the same style as before. One longhand remains on purpose, `text-decoration-thickness`, because it drives the configurable underline thickness and has no shorthand form.
+
 ## [1.14.3] - 2026-08-08
 
 ### Fixed
