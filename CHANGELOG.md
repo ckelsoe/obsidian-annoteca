@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.5] - 2026-08-08
+
+### Changed
+- The anchor underline is now drawn with a bottom border instead of `text-decoration`. The marketplace scan flags any `text-decoration` that carries a color, a style, or a thickness, and the underline is all three (category-tinted, styled, and tier-thick), so no `text-decoration` form could clear the warning. A bottom border is universally supported and clears it. One trade-off: a border cannot render a wavy line, so the **Wavy** underline style is removed. Solid, Dotted, and Dashed are unchanged, and a comment previously set to Wavy now shows Solid. Category color, the thin/normal/thick tiers, and resolved dimming are all unchanged.
+- Resolved comment icons still show a strikethrough but no longer set its color explicitly, because a colored `text-decoration` is flagged the same way; the muted appearance comes from the existing resolved dimming.
+
 ## [1.14.4] - 2026-08-08
 
 ### Fixed

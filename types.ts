@@ -138,7 +138,7 @@ export interface AnnotecaSettings {
 
 	// Visual character of the anchor underline. Applies to every category;
 	// per-category urgency comes from the tier on each CategoryDefinition.
-	anchorStyle: 'solid' | 'wavy' | 'dotted' | 'dashed';
+	anchorStyle: 'solid' | 'dotted' | 'dashed';
 
 	// Baseline thickness used by the "normal" tier. "subtle" tier always
 	// renders thin, "strong" tier always renders thick, regardless of this

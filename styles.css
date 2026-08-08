@@ -91,24 +91,25 @@ settings:
 /* Anchor underline (when indicatorStyle is "underline" or "both") -----------
  *
  * Renders a category-tinted underline over the text the comment was made
- * against. The style (wavy / solid / dotted / dashed) is set globally via
- * the --annoteca-anchor-style variable on the document body. Thickness is
- * set globally via --annoteca-anchor-thickness-normal, and overridden per
- * tier by the .annoteca-anchor-tier-{subtle,strong} classes.
+ * against. The style (solid / dotted / dashed) is set globally via the
+ * --annoteca-anchor-style variable on the document body. Thickness is set
+ * globally via --annoteca-anchor-thickness-normal, and overridden per tier by
+ * the .annoteca-anchor-tier-{subtle,strong} classes.
  *
  * The underline uses --annoteca-anchor-color (its own slot) so the prose
  * text itself stays untinted; only the underline takes the category color.
  */
 
 .annoteca-anchor {
-	/* Shorthand for line/style/color (the longhands read as "partially
-	 * supported" by the marketplace scan). The shorthand resets thickness to
-	 * auto, so the thickness longhand that follows restores it; thickness has no
-	 * shorthand form, so it stays a longhand. */
-	text-decoration: underline var(--annoteca-anchor-style, wavy)
+	/* Drawn with border-bottom rather than text-decoration: the marketplace scan
+	 * flags any text-decoration that carries a color, style, or thickness (the
+	 * shorthand refactor in 1.14.4 only moved the warning, it did not clear it),
+	 * and border is universally supported. Trade-off: border-bottom cannot render
+	 * a wavy line, so the wavy style was removed; solid/dotted/dashed map across.
+	 * Order is width, style, color. */
+	border-bottom: var(--annoteca-anchor-thickness, var(--annoteca-anchor-thickness-normal, 2px))
+		var(--annoteca-anchor-style, solid)
 		var(--annoteca-anchor-color, currentColor);
-	text-decoration-thickness: var(--annoteca-anchor-thickness, var(--annoteca-anchor-thickness-normal, 2px));
-	text-underline-offset: 2px;
 	cursor: pointer;
 }
 
@@ -252,9 +253,10 @@ settings:
  *
  * Opacity is the one signal applied to every resolved decoration (icon,
  * anchor underline). The strikethrough belongs only on character-bearing
- * elements (the icon glyph) — applying it on the anchor underline turns
- * the underline into a strikethrough because a `text-decoration: line-through`
- * replaces the anchor's own `text-decoration: underline`.
+ * elements (the icon glyph); the anchor's underline is a border, so it is not
+ * struck through. The strikethrough is a bare `text-decoration: line-through`
+ * with no color, because a colored text-decoration is flagged by the
+ * marketplace scan; the muted look comes from the resolved opacity below.
  *
  * --annoteca-resolved-opacity is set on body from main.ts based on the
  * resolvedBrightness setting. "normal" = 0.5, "bright" = 0.85.
@@ -264,7 +266,7 @@ settings:
 }
 
 .annoteca-icon.annoteca-resolved {
-	text-decoration: line-through var(--text-muted);
+	text-decoration: line-through;
 }
 
 /* Addressed sub-state (F-270): an edit is applied and pending review. A ring

@@ -143,6 +143,7 @@ These are enforced by CI and the Obsidian marketplace review — violating them 
 
 - No inline `style` attributes anywhere. All styles go in `styles.css`.
 - No `!important` in `styles.css`. Raise selector specificity instead.
+- Use only CSS features the developer-dashboard scan accepts. It warns on partially-supported features (Chromium 87+) that `npm run lint` never shows. For `text-decoration` the trigger is the **color / style / thickness** sub-features, longhand OR shorthand: a bare `text-decoration: underline` is fine, but a color, a `wavy` style, or a thickness flags either way. Folding longhands into the shorthand does NOT clear it (it moved the warning to the shorthand lines on 1.14.4). A styled underline (colored/wavy/thick) cannot use `text-decoration` and be clean — use `border-bottom` (universally supported, but cannot render wavy) or accept the warning (below the 1.13.0 minAppVersion). Also `inset` (use `top`/`right`/`bottom`/`left`) and `aspect-ratio`. This class cannot be verified locally; only the hosted scan confirms. Grep `styles.css` before a release.
 
 ### ESLint
 
