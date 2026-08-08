@@ -63,7 +63,7 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 	markerReplyCount: true,
 	renderMarkdownBodies: true,
 
-	anchorStyle: 'wavy',
+	anchorStyle: 'solid',
 	anchorThickness: 'medium',
 	resolvedBrightness: 'normal',
 
@@ -401,7 +401,7 @@ const SETTING_VALIDATORS: {
 	markerClickAction: oneOf('panel', 'popover'),
 	markerReplyCount: bool,
 	renderMarkdownBodies: bool,
-	anchorStyle: oneOf('solid', 'wavy', 'dotted', 'dashed'),
+	anchorStyle: oneOf('solid', 'dotted', 'dashed'),
 	anchorThickness: oneOf('thin', 'medium', 'thick'),
 	resolvedBrightness: oneOf('normal', 'bright'),
 	resolvedDisplay: oneOf('dim', 'hide'),
@@ -664,7 +664,6 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 							type: 'dropdown',
 							key: 'anchorStyle',
 							options: {
-								wavy: 'Wavy',
 								solid: 'Solid',
 								dotted: 'Dotted',
 								dashed: 'Dashed',

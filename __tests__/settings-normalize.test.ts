@@ -515,6 +515,16 @@ describe('normalizeSettings: enum strings', () => {
 			'thread',
 		);
 	});
+
+	it('migrates the removed "wavy" anchor style to solid', () => {
+		// Wavy was dropped when the underline moved from text-decoration to
+		// border-bottom, which cannot render a wavy line. A data.json that still
+		// holds 'wavy' must land on the default; leaving it would write an
+		// invalid border-bottom-style and drop the underline entirely.
+		expect(normalizeSettings({ anchorStyle: 'wavy' }).anchorStyle).toBe(
+			'solid',
+		);
+	});
 });
 
 describe('normalizeSettings: authorTag', () => {
