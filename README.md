@@ -83,12 +83,17 @@ To teach an assistant the format, run **Export AI skill**. It writes a skill fil
 
 ## Settings overview
 
-- **Categories**: edit the list, browse presets, set per-category icon, color, and underline tier.
-- **Indicators**: marker icon and underline style, size, thickness, default visibility, reply count on markers, whether comments render as Markdown, resolved-comment display and brightness, reading view indicator, composer location, and whether jumping to a comment centers it or scrolls the minimum needed.
-- **Resolution**: delete-on-resolve toggle.
-- **Metadata**: author tag for your comments, plus collaborators and their colors for multi-party threads.
-- **AI integration**: skill export destination, export button, and an out-of-date indicator.
-- **Diagnostics**: debug logging.
+Settings are grouped in the order they appear in the tab:
+
+- **Categories**: edit the category list, browse and save presets, and set each category's icon, color, and underline tier. Pick the default category, and turn on the index-entry preset for print indexing.
+- **Editor indicators**: how comments look in the editor. Indicator style (icon, underline, both, or hidden) and size; the hover preview and its delay; what a click or tap does (open the side panel or a popover); whether bodies render as Markdown; the reply count on markers; underline style and thickness; and whether comments show when a file opens.
+- **Resolved comments**: whether resolved comments are dimmed or hidden, how strongly they dim, and whether resolving deletes the marker instead of keeping it as history.
+- **Composer**: where the comment form opens (modal or side panel), whether Enter sends or adds a line break, and the floating comment button on selected text.
+- **Reading view**: the indicator that stands in for comments where markers are invisible: a note banner, per-section badges, both, or off.
+- **Panel and navigation**: whether the hub collapses files you are not editing, and where a marker lands when you jump to a comment (top, center, or minimal scroll).
+- **Authors**: your author tag, plus collaborators each with a color so a multi-party thread is easy to scan.
+- **AI integration**: where the exported skill file is written, the export button, and the out-of-date indicator that appears after an update changes the guidance.
+- **Diagnostics**: debug logging and where the log is written.
 
 ## Installation
 
