@@ -101,10 +101,13 @@ settings:
  */
 
 .annoteca-anchor {
-	text-decoration-line: underline;
-	text-decoration-style: var(--annoteca-anchor-style, wavy);
+	/* Shorthand for line/style/color (the longhands read as "partially
+	 * supported" by the marketplace scan). The shorthand resets thickness to
+	 * auto, so the thickness longhand that follows restores it; thickness has no
+	 * shorthand form, so it stays a longhand. */
+	text-decoration: underline var(--annoteca-anchor-style, wavy)
+		var(--annoteca-anchor-color, currentColor);
 	text-decoration-thickness: var(--annoteca-anchor-thickness, var(--annoteca-anchor-thickness-normal, 2px));
-	text-decoration-color: var(--annoteca-anchor-color, currentColor);
 	text-underline-offset: 2px;
 	cursor: pointer;
 }
@@ -119,7 +122,6 @@ settings:
 
 .annoteca-anchor.annoteca-resolved {
 	opacity: 0.55;
-	text-decoration-color: var(--text-muted);
 }
 
 /* Per-category color slot for the underline. Mirrors the .annoteca-cat-X
@@ -135,6 +137,11 @@ settings:
 .annoteca-anchor.annoteca-cat-verse-needed { --annoteca-anchor-color: var(--annoteca-color-verse-needed, var(--color-cyan)); }
 .annoteca-anchor.annoteca-cat-meditation { --annoteca-anchor-color: var(--annoteca-color-meditation, var(--color-pink)); }
 .annoteca-anchor.annoteca-cat-index-entry { --annoteca-anchor-color: var(--text-accent); }
+
+/* Resolved anchors mute the underline regardless of category. Writes the color
+ * slot (not the longhand) so the base shorthand picks it up, placed AFTER the
+ * category rules so it wins their equal-specificity cascade. */
+.annoteca-anchor.annoteca-resolved { --annoteca-anchor-color: var(--text-muted); }
 
 /* Active-comment highlight (F-276): the comment whose thread is open in the
  * side panel. A soft theme-aware background keeps the commented passage and its
@@ -246,8 +253,8 @@ settings:
  * Opacity is the one signal applied to every resolved decoration (icon,
  * anchor underline). The strikethrough belongs only on character-bearing
  * elements (the icon glyph) — applying it on the anchor underline turns
- * the underline into a strikethrough because `text-decoration` shorthand
- * overrides the longhand `text-decoration-line: underline`.
+ * the underline into a strikethrough because a `text-decoration: line-through`
+ * replaces the anchor's own `text-decoration: underline`.
  *
  * --annoteca-resolved-opacity is set on body from main.ts based on the
  * resolvedBrightness setting. "normal" = 0.5, "bright" = 0.85.
@@ -257,8 +264,7 @@ settings:
 }
 
 .annoteca-icon.annoteca-resolved {
-	text-decoration: line-through;
-	text-decoration-color: var(--text-muted);
+	text-decoration: line-through var(--text-muted);
 }
 
 /* Addressed sub-state (F-270): an edit is applied and pending review. A ring
