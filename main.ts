@@ -97,6 +97,10 @@ import { formatScripture } from './scripture';
 import { computeScopeFileSet, type ScopeFile } from './scope';
 import { CommentService, fileGoneMessage } from './comment-service';
 import { DiagnosticsService } from './diagnostics-service';
+import {
+	applyFrontmatterSummary,
+	type FrontmatterSummaryOptions,
+} from './frontmatter-summary';
 
 export default class AnnotecaPlugin extends Plugin {
 	settings!: AnnotecaSettings;
@@ -106,6 +110,14 @@ export default class AnnotecaPlugin extends Plugin {
 	diagnostics!: DiagnosticsService;
 	private vaultScanned = false;
 	private readonly markerDamage = new MarkerDamageReporter();
+	// #39: per-path debounce timers for the frontmatter-summary writer.
+	private readonly frontmatterTimers = new Map<string, number>();
+	// Paths whose last frontmatter write failed, so a malformed-YAML note is
+	// logged once rather than on every edit.
+	private readonly frontmatterFailedPaths = new Set<string>();
+	// Paths with a frontmatter write in flight, so a second timer for the same
+	// path cannot start an overlapping write (single-flight).
+	private readonly frontmatterInFlight = new Set<string>();
 	// Serializes navigateToOffset so two clicks in quick succession cannot
 	// interleave their openFile / loadedMarkdownView awaits. See navigateToOffset.
 	private navChain: Promise<void> = Promise.resolve();
@@ -336,7 +348,14 @@ export default class AnnotecaPlugin extends Plugin {
 
 	onunload(): void {
 		// Obsidian disposes registered commands, views, events, and editor
-		// extensions automatically. Nothing custom to clean up.
+		// extensions automatically. The only custom resource is the
+		// frontmatter-summary debounce timers.
+		for (const timer of this.frontmatterTimers.values()) {
+			window.clearTimeout(timer);
+		}
+		this.frontmatterTimers.clear();
+		this.frontmatterInFlight.clear();
+		this.frontmatterFailedPaths.clear();
 	}
 
 	async loadSettings(): Promise<void> {
@@ -428,6 +447,8 @@ export default class AnnotecaPlugin extends Plugin {
 				if (file instanceof TFile) {
 					this.commentIndex.rename(oldPath, file.path);
 					this.markerDamage.rename(oldPath, file.path);
+					this.rekeyFrontmatterTimer(oldPath, file);
+					this.frontmatterFailedPaths.delete(oldPath);
 					this.events.trigger('index-changed');
 				}
 			}),
@@ -437,6 +458,8 @@ export default class AnnotecaPlugin extends Plugin {
 				if (file instanceof TFile) {
 					this.commentIndex.remove(file.path);
 					this.markerDamage.forget(file.path);
+					this.cancelFrontmatterTimer(file.path);
+					this.frontmatterFailedPaths.delete(file.path);
 					this.events.trigger('index-changed');
 				}
 			}),
@@ -939,6 +962,70 @@ export default class AnnotecaPlugin extends Plugin {
 		);
 		if (notice !== undefined) new Notice(notice);
 		this.events.trigger('index-changed', { path: file.path });
+		this.scheduleFrontmatterSummary(file);
+	}
+
+	// #39: schedule a frontmatter-summary update for `file`, debounced per path so
+	// a burst of edits produces one write. Off unless the setting is on. The writer
+	// is a no-op when the note is unmanaged or already matches, so this cannot loop
+	// through the modify event it will itself trigger.
+	private scheduleFrontmatterSummary(file: TFile): void {
+		if (!this.settings.frontmatterSummary) return;
+		const path = file.path;
+		this.cancelFrontmatterTimer(path);
+		const timer = window.setTimeout(() => {
+			this.frontmatterTimers.delete(path);
+			if (this.frontmatterInFlight.has(path)) {
+				// A write for this path is already running; re-arm and let it
+				// settle rather than overlapping two writes on the same file.
+				this.scheduleFrontmatterSummary(file);
+				return;
+			}
+			const idx = this.commentIndex.get(path);
+			if (!idx) return;
+			const opts: FrontmatterSummaryOptions = {
+				fileclassProperty: this.settings.frontmatterFileclassProperty,
+				includeOldestOpen: this.settings.frontmatterOldestOpen,
+				includeCategories: this.settings.frontmatterOpenCategories,
+			};
+			this.frontmatterInFlight.add(path);
+			void applyFrontmatterSummary(this.app, file, idx.comments, opts)
+				.then(() => {
+					this.frontmatterFailedPaths.delete(path);
+				})
+				.catch((err: unknown) => {
+					// Malformed YAML or a failed write. Log once per path, never
+					// Notice: this is a background writer that fires on every edit.
+					if (!this.frontmatterFailedPaths.has(path)) {
+						this.frontmatterFailedPaths.add(path);
+						console.error(
+							`Annoteca: frontmatter summary write failed for ${path}`,
+							err,
+						);
+					}
+				})
+				.finally(() => {
+					this.frontmatterInFlight.delete(path);
+				});
+		}, 800);
+		this.frontmatterTimers.set(path, timer);
+	}
+
+	private cancelFrontmatterTimer(path: string): void {
+		const existing = this.frontmatterTimers.get(path);
+		if (existing !== undefined) {
+			window.clearTimeout(existing);
+			this.frontmatterTimers.delete(path);
+		}
+	}
+
+	// A rename within the debounce window would leave the pending timer keyed on
+	// the old path, where the index no longer has the note. Move it to the new
+	// path so the queued update still lands and pairs the right comments.
+	private rekeyFrontmatterTimer(oldPath: string, file: TFile): void {
+		if (!this.frontmatterTimers.has(oldPath)) return;
+		this.cancelFrontmatterTimer(oldPath);
+		this.scheduleFrontmatterSummary(file);
 	}
 
 	async scanVaultIfNeeded(): Promise<void> {

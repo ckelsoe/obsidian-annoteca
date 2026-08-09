@@ -98,6 +98,11 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 	indicatorSize: 'medium',
 	skillExportTarget: 'claude',
 	readingViewIndicator: 'banner',
+
+	frontmatterSummary: false,
+	frontmatterFileclassProperty: 'fileclass',
+	frontmatterOldestOpen: true,
+	frontmatterOpenCategories: true,
 };
 
 // data.json is user-editable, and it also arrives over sync and out of a
@@ -429,6 +434,10 @@ const SETTING_VALIDATORS: {
 	exportedSkillVersion: num,
 	skillStaleNoticeShownFor: num,
 	readingViewIndicator: oneOf('off', 'banner', 'per-section', 'both'),
+	frontmatterSummary: bool,
+	frontmatterFileclassProperty: str,
+	frontmatterOldestOpen: bool,
+	frontmatterOpenCategories: bool,
 };
 
 // The single ingress for anything read out of data.json or a backup file.
@@ -854,6 +863,45 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 						},
 					},
 					this.customBlock((host) => this.renderSkillExport(host)),
+				],
+			},
+			{
+				type: 'group',
+				heading: 'Frontmatter summary (Bases)',
+				items: [
+					{
+						name: 'Maintain frontmatter summary',
+						desc: "Write the note's open-comment count to its frontmatter so an Obsidian Base can filter and sort notes by review status. Off by default, because it makes Annoteca write frontmatter. Existing notes update only as their comments change.",
+						control: {
+							type: 'toggle',
+							key: 'frontmatterSummary',
+						},
+					},
+					{
+						name: 'Fileclass property',
+						desc: "Property that tags a note as an Annoteca note. 'annoteca' is merged in without removing values you already have.",
+						control: {
+							type: 'text',
+							key: 'frontmatterFileclassProperty',
+							placeholder: 'fileclass',
+						},
+					},
+					{
+						name: 'Include oldest-open date',
+						desc: 'Also write annoteca_oldest_open, the date of the oldest open comment, so a Base can sort by staleness.',
+						control: {
+							type: 'toggle',
+							key: 'frontmatterOldestOpen',
+						},
+					},
+					{
+						name: 'Include open categories',
+						desc: 'Also write annoteca_categories, the categories present among the open comments, so a Base can filter by category.',
+						control: {
+							type: 'toggle',
+							key: 'frontmatterOpenCategories',
+						},
+					},
 				],
 			},
 			{
