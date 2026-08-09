@@ -253,6 +253,21 @@ export interface AnnotecaSettings {
 	// "both"        → banner and badges
 	// "off"         → nothing rendered
 	readingViewIndicator: 'off' | 'banner' | 'per-section' | 'both';
+
+	// #39: maintain a derived summary of the note's comment state in its
+	// frontmatter, so Obsidian Bases (and Dataview, and AI work-queues) can filter
+	// and sort notes by review status. Off by default: it makes the plugin write
+	// frontmatter to notes, which it otherwise never does.
+	frontmatterSummary: boolean;
+	// Opt-in: also write a class-tag property (off by default). The Base dashboard
+	// does not need it; it is a Metadata Menu convenience.
+	frontmatterClassTag: boolean;
+	// Name of the class-tag property. Defaults to `fileclass`, the convention the
+	// Fileclass plugin and Metadata Menu read; configurable for other aliases.
+	frontmatterFileclassProperty: string;
+	// Optional extras written alongside the always-on open count.
+	frontmatterOldestOpen: boolean;
+	frontmatterOpenCategories: boolean;
 }
 
 // Discriminated union for scope shapes. The shape determines what set of

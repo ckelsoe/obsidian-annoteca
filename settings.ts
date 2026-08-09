@@ -37,6 +37,7 @@ import {
 	createIconPicker,
 } from './ui-helpers';
 import { supportsDragAndDrop } from './platform';
+import { isReservedProperty } from './frontmatter-summary';
 
 // Community discussion for this plugin. This must stay a never-expiring
 // discord.gg invite. A discord.com/channels/... deep link only resolves for
@@ -98,6 +99,12 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 	indicatorSize: 'medium',
 	skillExportTarget: 'claude',
 	readingViewIndicator: 'banner',
+
+	frontmatterSummary: false,
+	frontmatterClassTag: false,
+	frontmatterFileclassProperty: 'fileclass',
+	frontmatterOldestOpen: true,
+	frontmatterOpenCategories: true,
 };
 
 // data.json is user-editable, and it also arrives over sync and out of a
@@ -429,6 +436,14 @@ const SETTING_VALIDATORS: {
 	exportedSkillVersion: num,
 	skillStaleNoticeShownFor: num,
 	readingViewIndicator: oneOf('off', 'banner', 'per-section', 'both'),
+	frontmatterSummary: bool,
+	frontmatterClassTag: bool,
+	frontmatterFileclassProperty: (raw: unknown) => {
+		const s = str(raw);
+		return s !== undefined && !isReservedProperty(s) ? s : undefined;
+	},
+	frontmatterOldestOpen: bool,
+	frontmatterOpenCategories: bool,
 };
 
 // The single ingress for anything read out of data.json or a backup file.
@@ -854,6 +869,62 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 						},
 					},
 					this.customBlock((host) => this.renderSkillExport(host)),
+				],
+			},
+			{
+				type: 'group',
+				heading: 'Frontmatter summary (Bases)',
+				items: [
+					{
+						name: 'Maintain frontmatter summary',
+						desc: "Write the note's open-comment count to its frontmatter so an Obsidian Base can filter and sort notes by review status. Off by default, because it makes Annoteca write frontmatter. Existing notes update only as their comments change.",
+						control: {
+							type: 'toggle',
+							key: 'frontmatterSummary',
+						},
+					},
+					{
+						name: 'Include oldest-open date',
+						desc: 'Also write annoteca_oldest_open, the date of the oldest open comment, so a Base can sort by staleness.',
+						control: {
+							type: 'toggle',
+							key: 'frontmatterOldestOpen',
+						},
+					},
+					{
+						name: 'Include open categories',
+						desc: 'Also write annoteca_categories, the categories present among the open comments, so a Base can filter by category.',
+						control: {
+							type: 'toggle',
+							key: 'frontmatterOpenCategories',
+						},
+					},
+					{
+						name: 'Tag notes with a class property',
+						desc: 'Also write a property that classes each note as an Annoteca note. Off by default; the Base dashboard does not need it. Mainly useful with the Fileclass or Metadata Menu plugin.',
+						control: {
+							type: 'toggle',
+							key: 'frontmatterClassTag',
+						},
+					},
+					{
+						name: 'Class property name',
+						desc: 'Property used by the class tag above. Defaults to fileclass, the property the Fileclass plugin and Metadata Menu read. Change it only if your setup uses a different alias. The value annoteca is merged in without removing values you already have.',
+						control: {
+							type: 'text',
+							key: 'frontmatterFileclassProperty',
+							placeholder: 'fileclass',
+							validate: (value: unknown) => {
+								const v =
+									typeof value === 'string'
+										? value.trim()
+										: '';
+								return v && isReservedProperty(v)
+									? 'That name is used by the summary itself. Choose another property.'
+									: undefined;
+							},
+						},
+					},
 				],
 			},
 			{
