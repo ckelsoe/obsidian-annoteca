@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.15.0] - 2026-08-09
 
 ### Added
 - An optional frontmatter summary for Obsidian Bases. Turn on "Maintain frontmatter summary" in settings and Annoteca keeps a small, derived summary of each note's review state in its frontmatter: `annoteca_open`, the number of open comments (an addressed comment awaiting Accept, Revise, or Reject still counts as open), and optionally `annoteca_oldest_open`, the oldest open comment's date for sorting by staleness, and `annoteca_categories`, the categories present among the open comments. An optional class tag (off by default) can additionally write a `fileclass: annoteca` property for the Fileclass plugin (or Metadata Menu), merged without dropping values already there; the property name is configurable. The comments stay in the note; the frontmatter is a summary the plugin maintains as your comments change. An Obsidian Base can then filter and sort notes by review status, for example `annoteca_open > 0` grouped by folder, as a cross-project queue. Off by default, because it makes the plugin write frontmatter; your existing frontmatter is preserved.
