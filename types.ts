@@ -259,8 +259,11 @@ export interface AnnotecaSettings {
 	// and sort notes by review status. Off by default: it makes the plugin write
 	// frontmatter to notes, which it otherwise never does.
 	frontmatterSummary: boolean;
-	// Property name that tags a note's class (the Metadata Menu convention).
-	// 'annoteca' is merged into it without clobbering existing values.
+	// Opt-in: also write a class-tag property (off by default). The Base dashboard
+	// does not need it; it is a Metadata Menu convenience.
+	frontmatterClassTag: boolean;
+	// Name of the class-tag property. Defaults to `fileclass`, the convention the
+	// Fileclass plugin and Metadata Menu read; configurable for other aliases.
 	frontmatterFileclassProperty: string;
 	// Optional extras written alongside the always-on open count.
 	frontmatterOldestOpen: boolean;

@@ -100,6 +100,7 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 	readingViewIndicator: 'banner',
 
 	frontmatterSummary: false,
+	frontmatterClassTag: false,
 	frontmatterFileclassProperty: 'fileclass',
 	frontmatterOldestOpen: true,
 	frontmatterOpenCategories: true,
@@ -435,6 +436,7 @@ const SETTING_VALIDATORS: {
 	skillStaleNoticeShownFor: num,
 	readingViewIndicator: oneOf('off', 'banner', 'per-section', 'both'),
 	frontmatterSummary: bool,
+	frontmatterClassTag: bool,
 	frontmatterFileclassProperty: str,
 	frontmatterOldestOpen: bool,
 	frontmatterOpenCategories: bool,
@@ -878,15 +880,6 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 						},
 					},
 					{
-						name: 'Fileclass property',
-						desc: "Property that tags a note as an Annoteca note. 'annoteca' is merged in without removing values you already have.",
-						control: {
-							type: 'text',
-							key: 'frontmatterFileclassProperty',
-							placeholder: 'fileclass',
-						},
-					},
-					{
 						name: 'Include oldest-open date',
 						desc: 'Also write annoteca_oldest_open, the date of the oldest open comment, so a Base can sort by staleness.',
 						control: {
@@ -900,6 +893,23 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 						control: {
 							type: 'toggle',
 							key: 'frontmatterOpenCategories',
+						},
+					},
+					{
+						name: 'Tag notes with a class property',
+						desc: 'Also write a property that classes each note as an Annoteca note. Off by default; the Base dashboard does not need it. Mainly useful with the Fileclass or Metadata Menu plugin.',
+						control: {
+							type: 'toggle',
+							key: 'frontmatterClassTag',
+						},
+					},
+					{
+						name: 'Class property name',
+						desc: 'Property used by the class tag above. Defaults to fileclass, the property the Fileclass plugin and Metadata Menu read. Change it only if your setup uses a different alias. The value annoteca is merged in without removing values you already have.',
+						control: {
+							type: 'text',
+							key: 'frontmatterFileclassProperty',
+							placeholder: 'fileclass',
 						},
 					},
 				],

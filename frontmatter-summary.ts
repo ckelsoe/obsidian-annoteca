@@ -15,14 +15,20 @@ export const FM_OPEN = 'annoteca_open';
 export const FM_OLDEST_OPEN = 'annoteca_oldest_open';
 export const FM_CATEGORIES = 'annoteca_categories';
 export const FILECLASS_VALUE = 'annoteca';
+// The class tag is opt-in, and its consumers are the Fileclass plugin and its
+// predecessor Metadata Menu (same author), which read a `fileclass` property, so
+// that is the default. Configurable for setups that use a different alias.
 export const DEFAULT_FILECLASS_PROPERTY = 'fileclass';
 
 export interface FrontmatterSummaryOptions {
-	// Property that tags a note's class (the Metadata Menu convention).
-	// Configurable; 'fileclass' by default.
-	fileclassProperty: string;
 	includeOldestOpen: boolean;
 	includeCategories: boolean;
+	// Opt-in: also write a class-tag property. The Base dashboard does not need
+	// it; it is a convenience for Metadata Menu users. Off by default.
+	writeClassTag: boolean;
+	// Name of the class-tag property when writeClassTag is on. Defaults to
+	// `fileclass`, read by the Fileclass plugin and Metadata Menu; configurable.
+	fileclassProperty: string;
 }
 
 export interface DesiredSummary {
@@ -100,13 +106,15 @@ function arraysEqual(a: readonly string[], b: unknown): boolean {
 	return true;
 }
 
-// True when the note's frontmatter already reflects the desired summary and the
-// fileclass already carries the tag, so there is nothing to write. This is the
-// guard that stops a write from looping through the modify event.
+// True when the note's frontmatter already reflects the desired summary, and,
+// when the class tag is enabled, already carries it, so there is nothing to
+// write. When the class tag is off it plays no part. This is the guard that
+// stops a write from looping through the modify event.
 export function frontmatterMatches(
 	fm: Record<string, unknown>,
 	desired: DesiredSummary,
 	fileclassProperty: string,
+	writeClassTag = true,
 ): boolean {
 	if (fm[FM_OPEN] !== desired.open) return false;
 
@@ -124,11 +132,15 @@ export function frontmatterMatches(
 		return false;
 	}
 
-	// Fileclass is satisfied when a merge would change nothing: either the tag is
-	// already present, or the value is a shape mergeFileclass deliberately leaves
-	// alone (a number or object, or a property name that collides with a reserved
-	// annoteca_* key). Aligning this guard with the merge is what stops a note
-	// whose fileclass can never take the tag from looping a write every tick.
+	// When the class tag is off, its property is not written, so it plays no part
+	// in whether a note already matches.
+	if (!writeClassTag) return true;
+
+	// The class tag is satisfied when a merge would change nothing: either the tag
+	// is already present, or the value is a shape mergeFileclass deliberately
+	// leaves alone (a number or object, or a property name that collides with a
+	// reserved annoteca_* key). Aligning this guard with the merge is what stops a
+	// note whose property can never take the tag from looping a write every tick.
 	return !mergeFileclass(fm[fileclassProperty]).changed;
 }
 
@@ -163,7 +175,7 @@ export async function applyFrontmatterSummary(
 	if (!isManagedNote(comments.length > 0, fm, property)) return;
 
 	const desired = computeSummary(comments, opts);
-	if (frontmatterMatches(fm, desired, property)) return;
+	if (frontmatterMatches(fm, desired, property, opts.writeClassTag)) return;
 
 	await app.fileManager.processFrontMatter(
 		file,
@@ -182,8 +194,10 @@ export async function applyFrontmatterSummary(
 				delete front[FM_CATEGORIES];
 			}
 
-			const merged = mergeFileclass(front[property]);
-			if (merged.changed) front[property] = merged.value;
+			if (opts.writeClassTag) {
+				const merged = mergeFileclass(front[property]);
+				if (merged.changed) front[property] = merged.value;
+			}
 		},
 	);
 }

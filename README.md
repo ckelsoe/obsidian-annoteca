@@ -22,7 +22,7 @@ Annoteca is built for revision work on long documents: book manuscripts, theses,
 - **Read the whole document's comments at once.** "Toggle inline comment bodies" prints each comment beside the passage it is about, so a chapter's feedback reads in a single pass instead of one hover at a time. Bodies are trimmed to a single line and disappear again on the next press.
 - **Import what you already have.** Commands convert Obsidian `%%comments%%` and plain HTML comments into Annoteca markers, with a backup confirmation first.
 - **AI-ready by design.** The file is the API: any assistant that can read and edit markdown can read and write Annoteca comments. An "Export AI skill" command writes a skill file into your vault that teaches the assistant the format and your category vocabulary. The exported skill is versioned, so the plugin tells you when it has gone out of date after an update and should be re-exported.
-- **Bases-ready summary (optional).** Turn on a setting and Annoteca keeps a small summary of each note's review state in the note's frontmatter: the number of open comments, and optionally the oldest open date and the categories in play, plus a configurable `fileclass` tag. An Obsidian Base can then filter and sort your notes by review status, for example every note with open comments across a project, as a work queue. Off by default; the comments stay in the note and your existing frontmatter is preserved.
+- **Bases-ready summary (optional).** Turn on a setting and Annoteca keeps a small summary of each note's review state in the note's frontmatter: the number of open comments, and optionally the oldest open date and the categories in play. An Obsidian Base can then filter and sort your notes by review status, for example every note with open comments across a project, as a work queue. Off by default; the comments stay in the note and your existing frontmatter is preserved.
 
 ## How it works
 
@@ -94,7 +94,7 @@ Settings are grouped in the order they appear in the tab:
 - **Panel and navigation**: whether the hub collapses files you are not editing, and where a marker lands when you jump to a comment (top, center, or minimal scroll).
 - **Authors**: your author tag, plus collaborators each with a color so a multi-party thread is easy to scan.
 - **AI integration**: where the exported skill file is written, the export button, and the out-of-date indicator that appears after an update changes the guidance.
-- **Frontmatter summary (Bases)**: maintain a Bases-friendly summary of each note's open comments in its frontmatter, set the fileclass property name, and choose whether to include the oldest-open date and the open categories.
+- **Frontmatter summary (Bases)**: maintain a Bases-friendly summary of each note's open comments in its frontmatter, choose whether to include the oldest-open date and the open categories, and an optional class tag (off by default, mainly for Fileclass or Metadata Menu users) with its property name.
 - **Diagnostics**: debug logging and where the log is written.
 
 ## Installation

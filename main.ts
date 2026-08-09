@@ -984,9 +984,10 @@ export default class AnnotecaPlugin extends Plugin {
 			const idx = this.commentIndex.get(path);
 			if (!idx) return;
 			const opts: FrontmatterSummaryOptions = {
-				fileclassProperty: this.settings.frontmatterFileclassProperty,
 				includeOldestOpen: this.settings.frontmatterOldestOpen,
 				includeCategories: this.settings.frontmatterOpenCategories,
+				writeClassTag: this.settings.frontmatterClassTag,
+				fileclassProperty: this.settings.frontmatterFileclassProperty,
 			};
 			this.frontmatterInFlight.add(path);
 			void applyFrontmatterSummary(this.app, file, idx.comments, opts)

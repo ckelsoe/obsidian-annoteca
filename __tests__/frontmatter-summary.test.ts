@@ -5,14 +5,16 @@ import {
 	fileclassHasAnnoteca,
 	frontmatterMatches,
 	isManagedNote,
+	DEFAULT_FILECLASS_PROPERTY,
 	type FrontmatterSummaryOptions,
 	type DesiredSummary,
 } from '../frontmatter-summary';
 
 const OPTS: FrontmatterSummaryOptions = {
-	fileclassProperty: 'fileclass',
 	includeOldestOpen: true,
 	includeCategories: true,
+	writeClassTag: true,
+	fileclassProperty: 'fileclass',
 };
 
 function mk(over: Partial<Comment>): Comment {
@@ -229,6 +231,22 @@ describe('frontmatterMatches', () => {
 		).toBe(true);
 	});
 
+	it('ignores the class property when the class tag is opt-out', () => {
+		// writeClassTag=false: the class property is not written, so its absence
+		// must not force a rewrite.
+		const noClass = {
+			annoteca_open: 2,
+			annoteca_oldest_open: '2026-05-20',
+			annoteca_categories: ['source', 'tone'],
+		};
+		expect(frontmatterMatches(noClass, desired, 'fileclass', false)).toBe(
+			true,
+		);
+		expect(frontmatterMatches(noClass, desired, 'fileclass', true)).toBe(
+			false,
+		);
+	});
+
 	it('requires the oldest date to be absent when none is desired', () => {
 		const desiredNoDate: DesiredSummary = { open: 0 };
 		expect(
@@ -249,6 +267,12 @@ describe('frontmatterMatches', () => {
 				'fileclass',
 			),
 		).toBe(false);
+	});
+});
+
+describe('defaults', () => {
+	it('defaults the class property to fileclass', () => {
+		expect(DEFAULT_FILECLASS_PROPERTY).toBe('fileclass');
 	});
 });
 
