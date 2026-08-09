@@ -118,6 +118,9 @@ export default class AnnotecaPlugin extends Plugin {
 	// Files with a frontmatter write in flight, keyed by TFile so a rename during
 	// a write cannot let a second write start for the same file (single-flight).
 	private readonly frontmatterInFlight = new Set<TFile>();
+	// Set on unload so a write scheduled just before teardown does not mutate a
+	// note after the plugin is gone.
+	private unloaded = false;
 	// Serializes navigateToOffset so two clicks in quick succession cannot
 	// interleave their openFile / loadedMarkdownView awaits. See navigateToOffset.
 	private navChain: Promise<void> = Promise.resolve();
@@ -350,6 +353,7 @@ export default class AnnotecaPlugin extends Plugin {
 		// Obsidian disposes registered commands, views, events, and editor
 		// extensions automatically. The only custom resource is the
 		// frontmatter-summary debounce timers.
+		this.unloaded = true;
 		for (const timer of this.frontmatterTimers.values()) {
 			window.clearTimeout(timer);
 		}
@@ -975,6 +979,7 @@ export default class AnnotecaPlugin extends Plugin {
 		this.cancelFrontmatterTimer(path);
 		const timer = window.setTimeout(() => {
 			this.frontmatterTimers.delete(path);
+			if (this.unloaded) return;
 			// The setting can be turned off during the debounce window.
 			if (!this.settings.frontmatterSummary) return;
 			// Keyed by the TFile, not the path, so a rename during a write cannot
@@ -994,7 +999,13 @@ export default class AnnotecaPlugin extends Plugin {
 				fileclassProperty: this.settings.frontmatterFileclassProperty,
 			};
 			this.frontmatterInFlight.add(file);
-			void applyFrontmatterSummary(this.app, file, idx.comments, opts)
+			void applyFrontmatterSummary(
+				this.app,
+				file,
+				idx.comments,
+				opts,
+				() => !this.unloaded,
+			)
 				.then(() => {
 					this.frontmatterFailedPaths.delete(file.path);
 				})

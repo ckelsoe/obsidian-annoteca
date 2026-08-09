@@ -438,7 +438,10 @@ const SETTING_VALIDATORS: {
 	readingViewIndicator: oneOf('off', 'banner', 'per-section', 'both'),
 	frontmatterSummary: bool,
 	frontmatterClassTag: bool,
-	frontmatterFileclassProperty: str,
+	frontmatterFileclassProperty: (raw: unknown) => {
+		const s = str(raw);
+		return s !== undefined && !isReservedProperty(s) ? s : undefined;
+	},
 	frontmatterOldestOpen: bool,
 	frontmatterOpenCategories: bool,
 };

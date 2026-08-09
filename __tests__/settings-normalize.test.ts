@@ -769,3 +769,27 @@ describe('AnnotecaSettingTab.setControlValue: the other authorTag ingress', () =
 		expect(settings.authorTag).toBe('');
 	});
 });
+
+describe('normalizeSettings: frontmatter class property', () => {
+	it('rejects a reserved managed field name, so a persisted value cannot bypass validation', () => {
+		for (const reserved of [
+			'annoteca_open',
+			'annoteca_oldest_open',
+			'annoteca_categories',
+		]) {
+			const s = normalizeSettings({
+				frontmatterFileclassProperty: reserved,
+			});
+			expect(s.frontmatterFileclassProperty).toBe(
+				DEFAULT_SETTINGS.frontmatterFileclassProperty,
+			);
+		}
+	});
+
+	it('keeps a valid property name', () => {
+		const s = normalizeSettings({
+			frontmatterFileclassProperty: 'fileClass',
+		});
+		expect(s.frontmatterFileclassProperty).toBe('fileClass');
+	});
+});

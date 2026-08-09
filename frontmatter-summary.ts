@@ -175,6 +175,7 @@ export async function applyFrontmatterSummary(
 	file: TFile,
 	comments: readonly Comment[],
 	opts: FrontmatterSummaryOptions,
+	shouldContinue?: () => boolean,
 ): Promise<void> {
 	const property =
 		opts.fileclassProperty.trim() || DEFAULT_FILECLASS_PROPERTY;
@@ -188,6 +189,10 @@ export async function applyFrontmatterSummary(
 
 	const desired = computeSummary(comments, opts);
 	if (frontmatterMatches(fm, desired, property, writeClassTag)) return;
+
+	// Bail if the caller (the plugin) has been unloaded since this write was
+	// scheduled; do not mutate a note after teardown.
+	if (shouldContinue && !shouldContinue()) return;
 
 	await app.fileManager.processFrontMatter(
 		file,
