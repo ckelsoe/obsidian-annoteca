@@ -5,6 +5,7 @@ import {
 	fileclassHasAnnoteca,
 	frontmatterMatches,
 	isManagedNote,
+	isReservedProperty,
 	DEFAULT_FILECLASS_PROPERTY,
 	type FrontmatterSummaryOptions,
 	type DesiredSummary,
@@ -273,6 +274,15 @@ describe('frontmatterMatches', () => {
 describe('defaults', () => {
 	it('defaults the class property to fileclass', () => {
 		expect(DEFAULT_FILECLASS_PROPERTY).toBe('fileclass');
+	});
+});
+
+describe('isReservedProperty', () => {
+	it('reserves the managed summary fields, so the class tag cannot collide', () => {
+		expect(isReservedProperty('annoteca_open')).toBe(true);
+		expect(isReservedProperty('annoteca_oldest_open')).toBe(true);
+		expect(isReservedProperty('annoteca_categories')).toBe(true);
+		expect(isReservedProperty('fileclass')).toBe(false);
 	});
 });
 

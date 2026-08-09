@@ -37,6 +37,7 @@ import {
 	createIconPicker,
 } from './ui-helpers';
 import { supportsDragAndDrop } from './platform';
+import { isReservedProperty } from './frontmatter-summary';
 
 // Community discussion for this plugin. This must stay a never-expiring
 // discord.gg invite. A discord.com/channels/... deep link only resolves for
@@ -910,6 +911,15 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 							type: 'text',
 							key: 'frontmatterFileclassProperty',
 							placeholder: 'fileclass',
+							validate: (value: unknown) => {
+								const v =
+									typeof value === 'string'
+										? value.trim()
+										: '';
+								return v && isReservedProperty(v)
+									? 'That name is used by the summary itself. Choose another property.'
+									: undefined;
+							},
 						},
 					},
 				],

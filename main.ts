@@ -115,9 +115,9 @@ export default class AnnotecaPlugin extends Plugin {
 	// Paths whose last frontmatter write failed, so a malformed-YAML note is
 	// logged once rather than on every edit.
 	private readonly frontmatterFailedPaths = new Set<string>();
-	// Paths with a frontmatter write in flight, so a second timer for the same
-	// path cannot start an overlapping write (single-flight).
-	private readonly frontmatterInFlight = new Set<string>();
+	// Files with a frontmatter write in flight, keyed by TFile so a rename during
+	// a write cannot let a second write start for the same file (single-flight).
+	private readonly frontmatterInFlight = new Set<TFile>();
 	// Serializes navigateToOffset so two clicks in quick succession cannot
 	// interleave their openFile / loadedMarkdownView awaits. See navigateToOffset.
 	private navChain: Promise<void> = Promise.resolve();
@@ -975,13 +975,17 @@ export default class AnnotecaPlugin extends Plugin {
 		this.cancelFrontmatterTimer(path);
 		const timer = window.setTimeout(() => {
 			this.frontmatterTimers.delete(path);
-			if (this.frontmatterInFlight.has(path)) {
-				// A write for this path is already running; re-arm and let it
-				// settle rather than overlapping two writes on the same file.
+			// The setting can be turned off during the debounce window.
+			if (!this.settings.frontmatterSummary) return;
+			// Keyed by the TFile, not the path, so a rename during a write cannot
+			// let a second write start for the same file.
+			if (this.frontmatterInFlight.has(file)) {
+				// Already running for this file; re-arm and let it settle rather
+				// than overlapping two writes.
 				this.scheduleFrontmatterSummary(file);
 				return;
 			}
-			const idx = this.commentIndex.get(path);
+			const idx = this.commentIndex.get(file.path);
 			if (!idx) return;
 			const opts: FrontmatterSummaryOptions = {
 				includeOldestOpen: this.settings.frontmatterOldestOpen,
@@ -989,24 +993,24 @@ export default class AnnotecaPlugin extends Plugin {
 				writeClassTag: this.settings.frontmatterClassTag,
 				fileclassProperty: this.settings.frontmatterFileclassProperty,
 			};
-			this.frontmatterInFlight.add(path);
+			this.frontmatterInFlight.add(file);
 			void applyFrontmatterSummary(this.app, file, idx.comments, opts)
 				.then(() => {
-					this.frontmatterFailedPaths.delete(path);
+					this.frontmatterFailedPaths.delete(file.path);
 				})
 				.catch((err: unknown) => {
-					// Malformed YAML or a failed write. Log once per path, never
+					// Malformed YAML or a failed write. Log once per file, never
 					// Notice: this is a background writer that fires on every edit.
-					if (!this.frontmatterFailedPaths.has(path)) {
-						this.frontmatterFailedPaths.add(path);
+					if (!this.frontmatterFailedPaths.has(file.path)) {
+						this.frontmatterFailedPaths.add(file.path);
 						console.error(
-							`Annoteca: frontmatter summary write failed for ${path}`,
+							`Annoteca: frontmatter summary write failed for ${file.path}`,
 							err,
 						);
 					}
 				})
 				.finally(() => {
-					this.frontmatterInFlight.delete(path);
+					this.frontmatterInFlight.delete(file);
 				});
 		}, 800);
 		this.frontmatterTimers.set(path, timer);

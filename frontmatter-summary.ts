@@ -20,6 +20,15 @@ export const FILECLASS_VALUE = 'annoteca';
 // that is the default. Configurable for setups that use a different alias.
 export const DEFAULT_FILECLASS_PROPERTY = 'fileclass';
 
+// The class-tag property must not collide with a managed summary field, or the
+// write would fight itself (append `annoteca` to a value the summary also owns)
+// and loop every tick. These three names are reserved.
+export function isReservedProperty(name: string): boolean {
+	return (
+		name === FM_OPEN || name === FM_OLDEST_OPEN || name === FM_CATEGORIES
+	);
+}
+
 export interface FrontmatterSummaryOptions {
 	includeOldestOpen: boolean;
 	includeCategories: boolean;
@@ -169,13 +178,16 @@ export async function applyFrontmatterSummary(
 ): Promise<void> {
 	const property =
 		opts.fileclassProperty.trim() || DEFAULT_FILECLASS_PROPERTY;
+	// Never let the class tag point at a managed summary field; that would make
+	// the write fight itself and loop.
+	const writeClassTag = opts.writeClassTag && !isReservedProperty(property);
 	const cache = app.metadataCache.getFileCache(file);
 	const fm = (cache?.frontmatter ?? {}) as Record<string, unknown>;
 
 	if (!isManagedNote(comments.length > 0, fm, property)) return;
 
 	const desired = computeSummary(comments, opts);
-	if (frontmatterMatches(fm, desired, property, opts.writeClassTag)) return;
+	if (frontmatterMatches(fm, desired, property, writeClassTag)) return;
 
 	await app.fileManager.processFrontMatter(
 		file,
@@ -194,7 +206,7 @@ export async function applyFrontmatterSummary(
 				delete front[FM_CATEGORIES];
 			}
 
-			if (opts.writeClassTag) {
+			if (writeClassTag) {
 				const merged = mergeFileclass(front[property]);
 				if (merged.changed) front[property] = merged.value;
 			}
