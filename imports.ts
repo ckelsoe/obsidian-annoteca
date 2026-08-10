@@ -21,7 +21,12 @@ const HTML_COMMENT_RE = /<!--([\s\S]*?)-->/g;
 // pattern used to write that as an absolute /\s{0,3}/, so a fence legally
 // nested in a list item at four or more columns was not recognised as a fence
 // at all and bulk convert rewrote the samples inside it.
-const FENCE_LINE_RE = /^([ \t]*)(`{3,}|~{3,})(.*)$/;
+// The fence run is matched inside a lookahead and then consumed via the `\2`
+// backreference. That makes the run atomic: `` `{3,} `` grabs the whole run once
+// and never gives characters back to the trailing `.*`, so the two quantifiers
+// cannot backtrack against each other (the character class of `.` overlaps the
+// fence char). Capture groups are unchanged: 1 = indent, 2 = fence run, 3 = rest.
+const FENCE_LINE_RE = /^([ \t]*)(?=(`{3,}|~{3,}))\2(.*)$/;
 
 // The block-quote markers opening a line, each with the one space of content it
 // is allowed to swallow. What follows is the quote's CONTENT, and every indent

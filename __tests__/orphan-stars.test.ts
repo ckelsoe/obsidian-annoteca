@@ -44,16 +44,18 @@ interface PluginUnderTest {
 const noteWith = (id: string) =>
 	`Prose. ${serialize({ id, category: 'clarify', body: 'why?' })}`;
 
+// Minimal in-memory TFile stand-in shared by the harnesses and cases below.
+const tfile = (path: string): TFile => {
+	const f = new TFile();
+	Object.assign(f, { path, extension: 'md' });
+	return f;
+};
+
 // A vault whose file list can grow after the latch is set, which is the whole
 // point: sync, another device, or an assistant writing a note.
 function makeHarness(initial: Record<string, string>) {
 	const files = new Map<string, string>(Object.entries(initial));
 	const saved: string[][] = [];
-	const tfile = (path: string): TFile => {
-		const f = new TFile();
-		Object.assign(f, { path, extension: 'md' });
-		return f;
-	};
 	const plugin = Object.create(
 		AnnotecaPlugin.prototype,
 	) as unknown as PluginUnderTest;
@@ -218,11 +220,6 @@ describe('runDriftCheck against a stale index', () => {
 	it('keeps the snapshot of a comment in a note that arrived after the scan', async () => {
 		const files = new Map<string, string>([['welcome.md', 'nothing here']]);
 		const reads: string[] = [];
-		const tfile = (path: string): TFile => {
-			const f = new TFile();
-			Object.assign(f, { path, extension: 'md' });
-			return f;
-		};
 		const plugin = Object.create(
 			AnnotecaPlugin.prototype,
 		) as unknown as DriftPlugin;
@@ -288,11 +285,6 @@ describe('runDriftCheck against a stale index', () => {
 describe('indexUnseenFiles content source', () => {
 	it('indexes an unseen note from the editor buffer when one holds it', async () => {
 		const files = new Map<string, string>([['welcome.md', 'nothing here']]);
-		const tfile = (path: string): TFile => {
-			const f = new TFile();
-			Object.assign(f, { path, extension: 'md' });
-			return f;
-		};
 		const editorText = noteWith('typed001');
 		const plugin = Object.create(
 			AnnotecaPlugin.prototype,

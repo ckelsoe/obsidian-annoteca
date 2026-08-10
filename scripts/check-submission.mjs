@@ -29,16 +29,27 @@ const ESLINT_DIRECTIVE = /(?:\/\/|\/\*)\s*eslint-(?:disable|enable)(?:-next-line
 
 // Regex lookbehind. `(?<=` and `(?<!` are a PARSE error in JavaScriptCore before
 // iOS 16.4, not a runtime one: an affected phone fails to load the plugin at all
-// rather than mis-handling one note. This plugin is not desktop-only and esbuild
-// targets es2018, which does not downlevel lookbehind, so one written in source
-// ships verbatim. One nearly did, in the importer's code-span scanner, and
-// nothing in the toolchain would have caught it.
+// rather than mis-handling one note. Plugins that are not desktop-only ship to
+// those devices, and esbuild targets es2018, which does not downlevel lookbehind,
+// so one written in source ships verbatim. eslint-plugin-obsidianmd has a
+// regex-lookbehind rule, but it is not in the `recommended` preset this repo
+// uses, so nothing else in the lint chain catches it; this scan does.
 //
 // Named capture groups are `(?<name>` and are fine, so only the two lookbehind
 // forms match.
 const LOOKBEHIND = /\(\?<[=!]/;
 const LOOKBEHIND_WHY =
 	"regex lookbehind is a parse error in JavaScriptCore before iOS 16.4, so the plugin will not load at all on those devices. Rewrite the pattern as a scan.";
+
+// Type-asserting to Window (`as Window` or `as unknown as Window`) silences the
+// type system around a global instead of using Obsidian's activeWindow /
+// activeDocument or proper typing. A past PR had exactly this assertion approved
+// by an AI reviewer even though the repo bans it; the dashboard scan cannot see
+// it, so encode it here as a deterministic gate. Comment lines are blanked
+// (uses `code`), so the ban documented in a comment is not itself flagged.
+const WINDOW_ASSERT = /\bas\s+(?:unknown\s+as\s+)?Window\b/;
+const WINDOW_ASSERT_WHY =
+	"do not type-assert to Window (`as Window`); use Obsidian's activeWindow / activeDocument or proper typing instead.";
 
 function* walkCode(dir) {
 	for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -52,10 +63,9 @@ function* walkCode(dir) {
 }
 
 // Comments blanked, line numbers preserved, the same trick the styles.css check
-// below uses. The two eslint rules above READ comments and so want the raw line;
-// the lookbehind rule must not, or it flags the comment in imports.ts that
-// explains why lookbehind is banned, which is the one place in this repo
-// guaranteed to quote the syntax.
+// below uses. The two eslint-directive rules above READ comments and so want the
+// raw line; the lookbehind and Window-assertion scans must not, or they flag a
+// comment that quotes the banned syntax to explain the ban (e.g. this file).
 function withoutComments(source) {
 	return source
 		.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "))
@@ -77,6 +87,9 @@ for (const file of walkCode(".")) {
 		}
 		if (LOOKBEHIND.test(code[index] ?? "")) {
 			findings.push(`${where}: ${LOOKBEHIND_WHY}`);
+		}
+		if (WINDOW_ASSERT.test(code[index] ?? "")) {
+			findings.push(`${where}: ${WINDOW_ASSERT_WHY}`);
 		}
 	});
 }
@@ -102,13 +115,14 @@ try {
 
 // The BUILT bundle, when there is one, must also be free of lookbehind.
 //
-// Opportunistic, and deliberately NOT the primary check. `npm run lint` runs
-// before `npm run build` both in CI and in the release flow, and `main.js` is
-// gitignored, so on a fresh checkout there is no bundle to read and this finds
-// nothing. Making it the only guard would have shipped a check that never ran.
-// The source scan above is what actually holds; this adds the one thing sources
-// cannot show, which is a DEPENDENCY that inlines a lookbehind into the bundle,
-// and it fires locally and on any lint run after a build.
+// Opportunistic, and deliberately NOT the primary check: `main.js` is gitignored,
+// so it is absent on a fresh checkout. In CI `npm run lint` runs before
+// `npm run build`, and the release flow does not run lint at all, so in current
+// automation this branch finds nothing; it fires only when lint runs after a
+// build (e.g. locally). The source scan above is the guard that actually holds in
+// CI; this adds the one thing sources cannot show, a DEPENDENCY that inlines a
+// lookbehind into the bundle. Making automation scan the built bundle would mean
+// reordering the workflows to run this after the build (a fleet-wide change).
 try {
 	const bundle = readFileSync("main.js", "utf8");
 	bundle.split(/\r?\n/).forEach((line, index) => {
