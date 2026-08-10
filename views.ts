@@ -4,18 +4,10 @@ import type AnnotecaPlugin from './main';
 import type { LocatedComment, CategoryDefinition } from './types';
 import { getCategoryOrFallback } from './categories';
 import { resolveSettingsCategories } from './settings';
-import {
-	extractIndexTerm,
-	bucketCommentsByHeading,
-	type HeadingShape,
-	type HeadingBucket,
-} from './view-utils';
+import { extractIndexTerm } from './view-utils';
 import { ThreadTabRenderer } from './hub-thread-tab';
 import { OutlineTabRenderer } from './hub-outline-tab';
 import { StarredTabRenderer } from './hub-starred-tab';
-
-export { extractIndexTerm, bucketCommentsByHeading };
-export type { HeadingShape, HeadingBucket };
 
 export const VAULT_UNRESOLVED_VIEW_TYPE = 'annoteca-vault-unresolved-view';
 export const INDEX_VIEW_TYPE = 'annoteca-index-view';
@@ -45,8 +37,26 @@ abstract class AnnotecaBaseView extends ItemView {
 		this.plugin = plugin;
 	}
 
-	async onClose(): Promise<void> {
+	onClose(): Promise<void> {
 		this.contentEl.empty();
+		return Promise.resolve();
+	}
+}
+
+// The two index-backed list views (vault-unresolved and index-entry) open
+// identically: populate the vault index once, render, then re-render on every
+// later index change. The shared onOpen lives here so the concrete views differ
+// only in how they render; the panel views open differently and extend
+// AnnotecaBaseView directly instead.
+abstract class IndexBackedListView extends AnnotecaBaseView {
+	protected abstract refresh(): void;
+
+	async onOpen(): Promise<void> {
+		await this.plugin.scanVaultIfNeeded();
+		this.refresh();
+		this.registerEvent(
+			this.plugin.events.on('index-changed', () => this.refresh()),
+		);
 	}
 }
 
@@ -58,7 +68,7 @@ interface VaultFilters {
 	state: 'open' | 'resolved' | 'all';
 }
 
-export class VaultUnresolvedView extends AnnotecaBaseView {
+export class VaultUnresolvedView extends IndexBackedListView {
 	private filters: VaultFilters = {
 		pathQuery: '',
 		categories: new Set(),
@@ -75,15 +85,7 @@ export class VaultUnresolvedView extends AnnotecaBaseView {
 		return 'list-checks';
 	}
 
-	async onOpen(): Promise<void> {
-		await this.plugin.scanVaultIfNeeded();
-		this.refresh();
-		this.registerEvent(
-			this.plugin.events.on('index-changed', () => this.refresh()),
-		);
-	}
-
-	private refresh(): void {
+	protected refresh(): void {
 		const container = this.contentEl;
 		container.empty();
 		container.addClass('annoteca-view-root');
@@ -207,7 +209,7 @@ export class VaultUnresolvedView extends AnnotecaBaseView {
 
 // Index entry view (F-260) -----------------------------------------------------
 
-export class IndexEntryView extends AnnotecaBaseView {
+export class IndexEntryView extends IndexBackedListView {
 	getViewType(): string {
 		return INDEX_VIEW_TYPE;
 	}
@@ -218,15 +220,7 @@ export class IndexEntryView extends AnnotecaBaseView {
 		return 'list';
 	}
 
-	async onOpen(): Promise<void> {
-		await this.plugin.scanVaultIfNeeded();
-		this.refresh();
-		this.registerEvent(
-			this.plugin.events.on('index-changed', () => this.refresh()),
-		);
-	}
-
-	private refresh(): void {
+	protected refresh(): void {
 		const container = this.contentEl;
 		container.empty();
 		container.addClass('annoteca-view-root');
@@ -304,8 +298,9 @@ export class ComposerPanelView extends AnnotecaBaseView {
 		this.refresh();
 	}
 
-	async onOpen(): Promise<void> {
+	onOpen(): Promise<void> {
 		this.refresh();
+		return Promise.resolve();
 	}
 
 	private refresh(): void {
@@ -374,7 +369,7 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 		return 'message-square';
 	}
 
-	async onOpen(): Promise<void> {
+	onOpen(): Promise<void> {
 		// Normalized here rather than only at the switch that renders it. The
 		// stored value reaches three other places (the tab strip's active
 		// marker, and the starred-changed and scope-changed refresh guards), so
@@ -438,6 +433,7 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 				this.scheduleRefresh();
 			}),
 		);
+		return Promise.resolve();
 	}
 
 	async onClose(): Promise<void> {

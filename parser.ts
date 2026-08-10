@@ -344,9 +344,6 @@ function unescapeTerminator(text: string): string {
 // blast radius: a marker written before this encoding whose body legitimately
 // held `\<!--` reads back with one backslash fewer. Encode and decode are
 // inverses, so the FILE is a fixed point and nothing walks further on each pass.
-const OPENER_RUN_RE = /(\\*)<!--/g;
-const ESCAPED_OPENER_RUN_RE = /(\\+)<!--/g;
-
 // Exported because the same escape is needed at a SECOND boundary, for the same
 // reason in a different medium. Storage escapes `<!--` so the marker's own
 // terminator cannot be claimed by a nested comment; rendering has to escape it
@@ -361,17 +358,17 @@ const ESCAPED_OPENER_RUN_RE = /(\\+)<!--/g;
 // own escape, so the run rule works unchanged here: text that already held
 // `\<!--` renders as `\<!--`.
 export function escapeOpener(text: string): string {
-	return text.replace(
-		OPENER_RUN_RE,
-		(_match, slashes: string) => `\\${slashes}<!--`,
-	);
+	// Add one backslash before every opener. The guard backslashes form a
+	// contiguous run, so inserting the new one immediately before `<!--` yields
+	// the same run as prefixing the existing run would, without the quadratic
+	// backtracking a `(\\*)<!--` capture has on a long backslash run.
+	return text.replace(/<!--/g, '\\<!--');
 }
 
 function unescapeOpener(text: string): string {
-	return text.replace(
-		ESCAPED_OPENER_RUN_RE,
-		(_match, slashes: string) => `${slashes.slice(1)}<!--`,
-	);
+	// The mirror of escapeOpener: drop the one backslash adjacent to the opener.
+	// Same contiguous-run reasoning, so a fixed `\<!--` match is exact and linear.
+	return text.replace(/\\<!--/g, '<!--');
 }
 
 // Put a guard back on any `<!--` that lost one, and touch nothing else.
@@ -398,7 +395,10 @@ function unescapeOpener(text: string): string {
 // definition, so a character inside it differing is not the same class of
 // problem as a marker that will not parse.
 function reguardOpeners(text: string): string {
-	return text.replace(OPENER_RUN_RE, (match, slashes: string) =>
+	// Only fill a gap: add a backslash to an opener that has none, and leave an
+	// already-guarded opener untouched. One optional backslash is enough to tell
+	// the two apart, without the `(\\*)` capture's backtracking on a long run.
+	return text.replace(/(\\?)<!--/g, (match: string, slashes: string) =>
 		slashes.length > 0 ? match : `\\${match}`,
 	);
 }
@@ -665,8 +665,10 @@ interface FenceBlock {
 function findOriginalFences(inner: string): FenceBlock[] {
 	const out: FenceBlock[] = [];
 	for (const match of inner.matchAll(ORIGINAL_FENCE_RE)) {
+		// match.index is always present for matchAll results; only the optional
+		// capture group can be undefined, so that is the one thing to guard.
 		const content = match[2];
-		if (content === undefined || match.index === undefined) continue;
+		if (content === undefined) continue;
 		out.push({
 			start: match.index,
 			end: match.index + match[0].length,
@@ -1289,8 +1291,7 @@ export function nowISO(now: Date = new Date()): string {
 // 'malformed' blocks nothing, because a marker whose category cannot be read
 // closes itself and removing something else cannot make it worse. See
 // findRemovalBlocker.
-export type MalformedMarkerKind =
-	'malformed' | 'unclosed-opener' | 'possible-merge';
+type MalformedMarkerKind = 'malformed' | 'unclosed-opener' | 'possible-merge';
 
 export interface MalformedMarker {
 	start: number;

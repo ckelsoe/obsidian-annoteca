@@ -482,7 +482,7 @@ export default class AnnotecaPlugin extends Plugin {
 		this.registerEvent(
 			this.app.workspace.on(
 				'editor-menu',
-				(menu: Menu, editor: Editor, view: MarkdownView) => {
+				(menu: Menu, editor: Editor, view: MarkdownFileInfo) => {
 					menu.addSeparator();
 					if (editor.getSelection().length > 0) {
 						menu.addItem((item) =>
@@ -581,25 +581,25 @@ export default class AnnotecaPlugin extends Plugin {
 		this.addCommand({
 			id: 'add-comment-at-cursor',
 			name: 'Add comment here',
-			editorCallback: (editor: Editor, view: MarkdownView) =>
+			editorCallback: (editor: Editor, view: MarkdownFileInfo) =>
 				this.openModalAtCursor(editor, view),
 		});
 		this.addCommand({
 			id: 'add-comment-for-selection',
 			name: 'Add comment for selection',
-			editorCallback: (editor: Editor, view: MarkdownView) =>
+			editorCallback: (editor: Editor, view: MarkdownFileInfo) =>
 				this.openModalForSelection(editor, view),
 		});
 		this.addCommand({
 			id: 'add-scratchpad-comment',
 			name: 'Add scratchpad comment',
-			editorCallback: (editor: Editor, view: MarkdownView) =>
+			editorCallback: (editor: Editor, view: MarkdownFileInfo) =>
 				this.openScratchpadModal(editor, view),
 		});
 		this.addCommand({
 			id: 'edit-comment-at-cursor',
 			name: 'Edit comment here',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
+			editorCallback: (editor: Editor, view: MarkdownFileInfo) => {
 				this.withCommentAtCursor(editor, view, (_path, c) =>
 					this.openEditModal(editor, view, c),
 				);
@@ -608,7 +608,7 @@ export default class AnnotecaPlugin extends Plugin {
 		this.addCommand({
 			id: 'delete-comment-at-cursor',
 			name: 'Delete comment here',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
+			editorCallback: (editor: Editor, view: MarkdownFileInfo) => {
 				this.withCommentAtCursor(editor, view, (path, c) => {
 					void this.deleteComment(path, c);
 				});
@@ -617,7 +617,7 @@ export default class AnnotecaPlugin extends Plugin {
 		this.addCommand({
 			id: 'resolve-comment-at-cursor',
 			name: 'Resolve comment here',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
+			editorCallback: (editor: Editor, view: MarkdownFileInfo) => {
 				this.withCommentAtCursor(editor, view, (path, c) => {
 					void this.resolveComment(path, c);
 				});
@@ -626,7 +626,7 @@ export default class AnnotecaPlugin extends Plugin {
 		this.addCommand({
 			id: 'resolve-and-remove-comment-at-cursor',
 			name: 'Resolve and remove comment here',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
+			editorCallback: (editor: Editor, view: MarkdownFileInfo) => {
 				this.withCommentAtCursor(editor, view, (path, c) => {
 					void this.resolveAndRemoveComment(path, c);
 				});
@@ -638,7 +638,7 @@ export default class AnnotecaPlugin extends Plugin {
 		this.addCommand({
 			id: 'accept-addressed-at-cursor',
 			name: 'Accept addressed edit here',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
+			editorCallback: (editor: Editor, view: MarkdownFileInfo) => {
 				this.withAddressedCommentAtCursor(editor, view, (path, c) => {
 					void this.acceptAddressedFromPanel(path, c);
 				});
@@ -647,7 +647,7 @@ export default class AnnotecaPlugin extends Plugin {
 		this.addCommand({
 			id: 'revise-addressed-at-cursor',
 			name: 'Revise addressed edit here',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
+			editorCallback: (editor: Editor, view: MarkdownFileInfo) => {
 				this.withAddressedCommentAtCursor(editor, view, (path, c) => {
 					void this.reviseAddressedFromPanel(path, c);
 				});
@@ -656,7 +656,7 @@ export default class AnnotecaPlugin extends Plugin {
 		this.addCommand({
 			id: 'reject-addressed-at-cursor',
 			name: 'Reject addressed edit here',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
+			editorCallback: (editor: Editor, view: MarkdownFileInfo) => {
 				this.withAddressedCommentAtCursor(editor, view, (path, c) => {
 					void this.rejectAddressedFromPanel(path, c);
 				});
@@ -665,7 +665,7 @@ export default class AnnotecaPlugin extends Plugin {
 		this.addCommand({
 			id: 'delete-all-resolved-in-file',
 			name: 'Delete all resolved comments in this file',
-			editorCallback: (_editor: Editor, view: MarkdownView) => {
+			editorCallback: (_editor: Editor, view: MarkdownFileInfo) => {
 				const file = view.file;
 				if (!file) return;
 				void (async () => {
@@ -705,7 +705,7 @@ export default class AnnotecaPlugin extends Plugin {
 		this.addCommand({
 			id: 'reopen-comment-at-cursor',
 			name: 'Reopen resolved comment here',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
+			editorCallback: (editor: Editor, view: MarkdownFileInfo) => {
 				this.withCommentAtCursor(editor, view, (path, c) => {
 					void this.reopenComment(path, c);
 				});
@@ -714,7 +714,7 @@ export default class AnnotecaPlugin extends Plugin {
 		this.addCommand({
 			id: 'reply-to-comment-at-cursor',
 			name: 'Reply to comment here',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
+			editorCallback: (editor: Editor, view: MarkdownFileInfo) => {
 				this.withCommentAtCursor(editor, view, (path, c) =>
 					this.openReviewerOnComment(c, path),
 				);
@@ -723,14 +723,14 @@ export default class AnnotecaPlugin extends Plugin {
 		this.addCommand({
 			id: 'next-comment',
 			name: 'Next comment',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
+			editorCallback: (editor: Editor, view: MarkdownFileInfo) => {
 				void this.jumpToAdjacentComment(editor, view, 'next', false);
 			},
 		});
 		this.addCommand({
 			id: 'previous-comment',
 			name: 'Previous comment',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
+			editorCallback: (editor: Editor, view: MarkdownFileInfo) => {
 				void this.jumpToAdjacentComment(
 					editor,
 					view,
@@ -742,14 +742,14 @@ export default class AnnotecaPlugin extends Plugin {
 		this.addCommand({
 			id: 'next-unresolved-comment',
 			name: 'Next unresolved comment',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
+			editorCallback: (editor: Editor, view: MarkdownFileInfo) => {
 				void this.jumpToAdjacentComment(editor, view, 'next', true);
 			},
 		});
 		this.addCommand({
 			id: 'previous-unresolved-comment',
 			name: 'Previous unresolved comment',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
+			editorCallback: (editor: Editor, view: MarkdownFileInfo) => {
 				void this.jumpToAdjacentComment(editor, view, 'previous', true);
 			},
 		});
@@ -860,7 +860,7 @@ export default class AnnotecaPlugin extends Plugin {
 		this.addCommand({
 			id: 'format-scripture-references',
 			name: 'Format scripture references in current file',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
+			editorCallback: (editor: Editor, view: MarkdownFileInfo) => {
 				const file = view.file;
 				if (!file) return;
 				const text = editor.getValue();
@@ -1114,9 +1114,11 @@ export default class AnnotecaPlugin extends Plugin {
 		editor: Editor,
 		view: MarkdownFileInfo,
 	): void {
-		const path = view.file?.path;
-		if (!path) return;
-		this.openComposer({ editor, view, filePath: path });
+		// Same entry as the cursor opener: the composer modal reads the editor's
+		// selection itself, so "for selection" and "here" build an identical
+		// request. Kept as a named method so the command and menu wiring stay
+		// self-documenting.
+		this.openModalAtCursor(editor, view);
 	}
 
 	private openScratchpadModal(editor: Editor, view: MarkdownFileInfo): void {
@@ -1973,7 +1975,7 @@ export default class AnnotecaPlugin extends Plugin {
 
 	private async jumpToAdjacentComment(
 		editor: Editor,
-		view: MarkdownView,
+		view: MarkdownFileInfo,
 		direction: 'next' | 'previous',
 		unresolvedOnly: boolean,
 	): Promise<void> {
@@ -2331,7 +2333,7 @@ export default class AnnotecaPlugin extends Plugin {
 
 	private withCommentAtCursor(
 		editor: Editor,
-		view: MarkdownView,
+		view: MarkdownFileInfo,
 		handler: (path: string, c: Comment) => void,
 	): void {
 		const file = view.file;
@@ -2360,7 +2362,7 @@ export default class AnnotecaPlugin extends Plugin {
 	// broken binding.
 	private withAddressedCommentAtCursor(
 		editor: Editor,
-		view: MarkdownView,
+		view: MarkdownFileInfo,
 		handler: (path: string, c: Comment) => void,
 	): void {
 		this.withCommentAtCursor(editor, view, (path, c) => {

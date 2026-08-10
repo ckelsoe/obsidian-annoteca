@@ -61,7 +61,7 @@ export interface LocatedComment {
 	comment: Comment;
 }
 
-export type AnchorTier = 'subtle' | 'normal' | 'strong';
+type AnchorTier = 'subtle' | 'normal' | 'strong';
 
 export interface CategoryDefinition {
 	id: string; // dash-separated lowercase, matches parser rule

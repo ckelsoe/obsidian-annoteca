@@ -11,10 +11,10 @@
 import type { App, TFile } from 'obsidian';
 import type { Comment } from './types';
 
-export const FM_OPEN = 'annoteca_open';
-export const FM_OLDEST_OPEN = 'annoteca_oldest_open';
-export const FM_CATEGORIES = 'annoteca_categories';
-export const FILECLASS_VALUE = 'annoteca';
+const FM_OPEN = 'annoteca_open';
+const FM_OLDEST_OPEN = 'annoteca_oldest_open';
+const FM_CATEGORIES = 'annoteca_categories';
+const FILECLASS_VALUE = 'annoteca';
 // The class tag is opt-in, and its consumers are the Fileclass plugin and its
 // predecessor Metadata Menu (same author), which read a `fileclass` property, so
 // that is the default. Configurable for setups that use a different alias.

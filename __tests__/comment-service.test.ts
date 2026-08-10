@@ -122,6 +122,15 @@ function firstComment(content: string) {
 	return c;
 }
 
+// Like firstComment but without the single-comment assertion: the damaged-marker
+// blocks below parse fixtures that may hold more than one marker, so they take
+// the first parsed comment and leave the count to the assertions in each case.
+const target = (content: string) => {
+	const c = parseAll(content)[0];
+	if (!c) throw new Error('no comment parsed');
+	return c;
+};
+
 describe('resolveComment with delete-on-resolve off', () => {
 	it('keeps the marker and appends a [resolved ...] line', async () => {
 		const h = makeHarness(false);
@@ -1440,12 +1449,6 @@ describe('destructive verbs refuse a note with an unclosed opener', () => {
 		'Outro paragraph.',
 	].join('\n');
 
-	const target = (content: string) => {
-		const c = parseAll(content)[0];
-		if (!c) throw new Error('no comment parsed');
-		return c;
-	};
-
 	it('refuses to delete, and says why', async () => {
 		const h = makeHarnessWith(DAMAGED);
 		await h.service.deleteComment('note.md', target(h.content));
@@ -1549,12 +1552,6 @@ describe('a blocked write is not reported as a stale transition', () => {
 		'[id=bbbbbbbb]',
 		'-->',
 	].join('\n');
-
-	const target = (content: string) => {
-		const c = parseAll(content)[0];
-		if (!c) throw new Error('no comment parsed');
-		return c;
-	};
 
 	it('resolve with delete-on-resolve says nothing about being already resolved', async () => {
 		const h = makeHarnessWith(DAMAGED, true);

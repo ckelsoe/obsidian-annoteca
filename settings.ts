@@ -20,6 +20,7 @@ import type {
 import {
 	DEFAULT_CATEGORIES,
 	DEFAULT_PRESETS,
+	INDEX_ENTRY_CATEGORY,
 	isValidCategoryName,
 	resolveEnabledCategories,
 	reorderCategories,
@@ -364,7 +365,7 @@ function validDriftSnapshots(
 // A value that already satisfies the grammar is returned untouched, so this
 // never rewrites a tag as it is being typed; only input `validate` should have
 // refused gets repaired.
-export function repairAuthorTag(raw: string): string {
+function repairAuthorTag(raw: string): string {
 	// Empty is a legitimate stored value: it is what "no tag set" looks like,
 	// and sanitizing it would invent the token "user" for someone who never
 	// asked for one. isAuthorToken deliberately answers only the grammar
@@ -534,12 +535,10 @@ export function resolveSettingsCategories(
 		s.enableScholarlyPreset,
 	);
 	if (s.enableIndexEntryPreset && !base.find((c) => c.id === 'index-entry')) {
-		base.push({
-			id: 'index-entry',
-			displayName: 'Index entry',
-			icon: 'list',
-			color: 'var(--text-accent)',
-		});
+		// A fresh copy, not the shared constant: the category editor mutates
+		// these objects in place (displayName/icon/color), which would otherwise
+		// corrupt the module-level definition for the rest of the session.
+		base.push({ ...INDEX_ENTRY_CATEGORY });
 	}
 	return base;
 }

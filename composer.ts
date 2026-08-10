@@ -35,7 +35,7 @@ import { createStackedRow } from './ui-helpers';
 // file. Deliberately not VANISHED_MESSAGE: nothing has moved or been deleted,
 // and "reopen the note" is the wrong instruction when the note is fine and the
 // TAB is what changed.
-export function wrongFileMessage(path: string): string {
+function wrongFileMessage(path: string): string {
 	return `That tab no longer shows ${path}, so nothing was saved. Open the note again and retry.`;
 }
 
@@ -248,7 +248,7 @@ export class ComposerForm {
 				)
 			) {
 				e.preventDefault();
-				void this.submit();
+				this.submit();
 			}
 		});
 
@@ -470,7 +470,7 @@ export class ComposerForm {
 		return enabled.some((c) => c.id === category);
 	}
 
-	private async submit(): Promise<void> {
+	private submit(): void {
 		const finalBody = this.composeFinalBody();
 		if (finalBody === '') {
 			new Notice('Comment body is empty.');
