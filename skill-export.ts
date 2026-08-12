@@ -31,7 +31,15 @@ export type SkillExportTarget = 'claude' | 'agent' | 'both';
 // the skill said nothing about either, so an assistant following it wrote a
 // marker that splits in two, or a body line that the next read absorbs and the
 // next write deletes.
-export const SKILL_SCHEMA_VERSION = 6;
+// 7 = the vault-level review queue. Through v6 the skill only described a single
+// note's markers, so an assistant asked to work every open comment in the vault
+// had no recipe: it would scan directories, re-scan for markers and the fileclass
+// tag, or try to read a Bases `.base` file as if it listed the matching notes (a
+// `.base` is a live query, not a stored list). v7 documents the frontmatter
+// summary (`annoteca_open` and friends) as the machine-readable index and the one
+// scan that builds the queue from it. An assistant on v6 does not know to prefer
+// it, so existing exports are flagged stale.
+export const SKILL_SCHEMA_VERSION = 7;
 
 const SKILL_VERSION_RE = /^annoteca-skill-version:\s*(\d+)\s*$/m;
 
@@ -188,6 +196,24 @@ It landed as a shock.
 \`\`\`
 --> The discovery reframed the passage entirely.
 \`\`\`\`
+
+## Working a queue of notes across the vault
+
+Annoteca can project each note's open-comment count into that note's frontmatter, so a whole vault of review work is filterable without opening files. It is opt-in, so it may be off. When on, a note that has open comments carries:
+
+- \`annoteca_open\`: the number of open comments (open counts addressed comments too; they still need the reviewer).
+- \`annoteca_oldest_open\`: the date of the oldest open comment. Optional, may be absent.
+- \`annoteca_categories\`: the categories present among the open comments. Optional, may be absent.
+
+These names are fixed. To find every note that needs review, read the frontmatter; do not try to read a \`.base\` file as the list. A \`.base\` is a live Obsidian query, not a stored list of notes, so from outside Obsidian there is nothing in it to follow. Build the queue yourself by scanning frontmatter, for example:
+
+\`\`\`
+rg -l '^annoteca_open: [1-9][0-9]*$' --glob '*.md' .
+\`\`\`
+
+That single scan is the whole queue: \`annoteca_open\` greater than zero. A note with \`annoteca_open: 0\` is done, so skip it, and you do not also need to scan markers or the optional \`fileclass\` tag to find work. Work oldest-first with \`annoteca_oldest_open\`, or narrow by \`annoteca_categories\`, then handle each matching note's markers with the rules above. Only if no note carries \`annoteca_open\` at all (the feature is off) fall back to the marker regex at the top of this file, treating any marker with no \`[resolved ...]\` line as open.
+
+Do not write \`annoteca_open\` or the other summary fields yourself. They are regenerated from the markers whenever a comment changes; edit the markers and the counts follow. Writing them by hand is overwritten, and editing them in place of the markers corrupts the queue.
 
 ## Categories in this vault
 

@@ -103,6 +103,31 @@ describe('buildSkillMarkdown', () => {
 		expect(parseSkillVersion(skill)).toBe(SKILL_SCHEMA_VERSION);
 	});
 
+	it('teaches working a vault-wide queue from frontmatter, not from a .base', () => {
+		// The v7 addition. An assistant asked to work every open comment in the
+		// vault must scan the frontmatter summary, not read a Bases `.base` file
+		// as if it listed the matching notes: a `.base` is a live query with no
+		// links to follow, which is what sent one agent scanning directories.
+		expect(skill).toContain('Working a queue of notes across the vault');
+		// Explicit `.` path: ripgrep reads from stdin when no path is given and
+		// stdin is not a TTY, so an agent running this non-interactively would
+		// hang. The path makes it search the filesystem.
+		expect(skill).toContain(
+			"rg -l '^annoteca_open: [1-9][0-9]*$' --glob '*.md' .",
+		);
+		expect(skill).toContain('is a live Obsidian query, not a stored list');
+		// The three summary property names, matching frontmatter-summary.ts.
+		expect(skill).toContain('`annoteca_open`');
+		expect(skill).toContain('`annoteca_oldest_open`');
+		expect(skill).toContain('`annoteca_categories`');
+		// The fallback when the opt-in feature is off, and the guardrail that the
+		// summary is a projection the assistant must not hand-edit.
+		expect(skill).toContain(
+			'fall back to the marker regex at the top of this file',
+		);
+		expect(skill).toContain('Do not write `annoteca_open`');
+	});
+
 	it('teaches both halves of the wrapper escape, not just `-->`', () => {
 		// An assistant writing a marker by hand hits the opener case without
 		// trying: quoting the marker syntax inside a comment body is exactly
