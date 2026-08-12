@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- The exported AI skill (now version 7) teaches an assistant to work a vault-wide review queue from the frontmatter summary. With the "Maintain frontmatter summary" setting on, the assistant finds every note needing review by scanning frontmatter for `annoteca_open > 0`, rather than reading a Bases `.base` file (a live query, not a list of notes) or scanning directories. Re-export the skill to pick this up; the plugin flags an older exported skill as out of date.
+
 ## [1.15.0] - 2026-08-09
 
 ### Added
