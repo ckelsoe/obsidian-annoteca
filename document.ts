@@ -78,6 +78,45 @@ function merge(marker: Comment, stored: StoredComment): Comment {
 	};
 }
 
+// What a mutation needs to persist a change to a comment stored in eof mode: the
+// merged full comment (the state a transition must act on, not the lean marker's
+// empty shell), the comment's own store entry, and every store entry in file
+// order so the persist funnel can rebuild the whole region while touching only
+// this one.
+export interface EofTarget {
+	full: Comment;
+	entry: LocatedStoreEntry;
+	// File order, orphans included. A mutation rebuilds the region from this list
+	// with only `entry` replaced or dropped, so a stranded entry another marker no
+	// longer points at is preserved for diagnostics rather than swept by an
+	// unrelated write.
+	allEntries: LocatedStoreEntry[];
+}
+
+// Decide, for one comment the caller has already found fresh in the current text,
+// whether it is stored in eof mode, and if so hand back the store context a write
+// needs. `rawMarker` is that comment exactly as parseAll read it, so its inline
+// content (or absence of it) is what the leanness test reads.
+//
+// Returns undefined — meaning "stored inline, use the marker path" — when the
+// marker has no id, still carries inline content, or has no store entry to join
+// (a dangling lean marker, left to the inline path until diagnostics adopts it).
+// Only re-parses the store; the caller already parsed the markers to identify
+// `rawMarker`, so this adds one cheap scan, not a second full document parse.
+export function resolveEofTarget(
+	content: string,
+	rawMarker: Comment,
+): EofTarget | undefined {
+	if (rawMarker.id === undefined) return undefined;
+	if (!isLeanMarker(rawMarker)) return undefined;
+	const allEntries = parseStore(content);
+	// First-wins on a duplicate id, matching the marker walk and parseDocument's
+	// own join; the write path never emits a duplicate.
+	const entry = allEntries.find((e) => e.comment.id === rawMarker.id);
+	if (entry === undefined) return undefined;
+	return { full: merge(rawMarker, entry.comment), entry, allEntries };
+}
+
 export function parseDocument(content: string): ParsedDocument {
 	const markers = parseAll(content);
 	const storeEntries = parseStore(content);

@@ -8,8 +8,15 @@ import {
 	markerDamageMessage,
 	VANISHED_MESSAGE,
 } from '../comment-service';
-import { parseAll } from '../parser';
+import { parseAll, serializeLeanMarker } from '../parser';
 import { convertAllComments } from '../imports';
+import {
+	parseStore,
+	scanStoreEntries,
+	writeStoreRegion,
+	type StoredComment,
+} from '../store';
+import { parseDocument } from '../document';
 
 beforeEach(() => {
 	noticeLog.length = 0;
@@ -1687,5 +1694,180 @@ describe('the damage guard is scoped to the region, not the note', () => {
 		await h.service.deleteComment('note.md', byId(h.content, 'eeeeeeee'));
 		expect(h.content).toBe(inside);
 		expect(noticeLog.join(' ')).toContain('Validate marker format');
+	});
+});
+
+// The persist funnel routing a mutation to the end-of-file store when the target
+// is stored in eof mode (issue #48, Unit 2). Every case runs the closed-file
+// (vault.process) path; the editor path shares applySplices and is hand-verified
+// via CDP. The invariant under test throughout: the inline marker stays LEAN
+// (category + id, byte-for-byte), and the mutation lands in the store region.
+describe('eof-mode persistence', () => {
+	const EOF_ID = 'a1b2c3d4';
+	const LEAN = serializeLeanMarker('clarify', EOF_ID);
+	const BASE: StoredComment = {
+		id: EOF_ID,
+		category: 'clarify',
+		body: 'which products?',
+		replies: [],
+	};
+
+	// A one-comment eof note: a lean marker inline, its content in the EOF store.
+	function eofNote(entry: StoredComment = BASE, applied = ''): string {
+		const prose = `Prose under review. ${serializeLeanMarker(
+			entry.category,
+			entry.id,
+		)}${applied}`;
+		return writeStoreRegion(prose, [entry]);
+	}
+
+	// The merged full comment a surface would hand the service, resolved the same
+	// way parseDocument merges a lean marker with its store entry.
+	function docComment(content: string, index = 0) {
+		const c = parseDocument(content).comments[index];
+		if (!c) throw new Error(`no comment at ${index}`);
+		return c;
+	}
+
+	it('appendReply writes to the store entry and leaves the lean marker verbatim', async () => {
+		const h = makeHarnessWith(eofNote());
+		const ok = await h.service.appendReply(
+			'note.md',
+			docComment(h.content),
+			{
+				author: 'ai',
+				date: '2026-01-02',
+				body: 'hello',
+			},
+		);
+		expect(ok).toBe(true);
+		// Marker untouched; no inline reply line sprouted in the prose.
+		expect(h.content).toContain(LEAN);
+		expect(h.content).not.toContain('[reply');
+		expect(docComment(h.content).replies.map((r) => r.body)).toEqual([
+			'hello',
+		]);
+	});
+
+	it('appendReply appends to the STORED thread, not the lean marker empty one', async () => {
+		const seeded: StoredComment = {
+			...BASE,
+			replies: [{ author: 'ai', date: '2026-01-01', body: 'first' }],
+		};
+		const h = makeHarnessWith(eofNote(seeded));
+		await h.service.appendReply('note.md', docComment(h.content), {
+			author: 'charles',
+			date: '2026-01-02',
+			body: 'second',
+		});
+		// The pre-existing reply survives: the funnel resolved the full comment
+		// from the store, not the lean marker whose replies are empty.
+		expect(docComment(h.content).replies.map((r) => r.body)).toEqual([
+			'first',
+			'second',
+		]);
+	});
+
+	it('resolveComment records the resolution in the store, not inline', async () => {
+		const h = makeHarnessWith(eofNote());
+		await h.service.resolveComment('note.md', docComment(h.content));
+		expect(h.content).toContain(LEAN);
+		expect(h.content).not.toContain('[resolved');
+		expect(docComment(h.content).resolution?.author).toBe('charles');
+	});
+
+	it('deleteComment removes the lean marker AND drops its store entry', async () => {
+		const h = makeHarnessWith(eofNote());
+		await h.service.deleteComment('note.md', docComment(h.content));
+		expect(h.content).not.toContain('annoteca/clarify');
+		expect(parseStore(h.content)).toHaveLength(0);
+		expect(h.content).toContain('Prose under review.');
+	});
+
+	it('accept with delete-on-resolve reads the store addressed state and removes the comment', async () => {
+		// The pre-fix bug this locks: the destructive-accept guard checked
+		// `Boolean(c.addressed)` on the lean marker, which is always false in eof
+		// mode, so accept always declined. It must read the merged state.
+		const addressed: StoredComment = {
+			...BASE,
+			addressed: { author: 'ai', date: '2026-01-02', note: 'fixed' },
+		};
+		const h = makeHarnessWith(eofNote(addressed), true);
+		expect(docComment(h.content).addressed?.note).toBe('fixed');
+		await h.service.acceptAddressed('note.md', docComment(h.content));
+		expect(parseStore(h.content)).toHaveLength(0);
+		expect(h.content).not.toContain('annoteca/clarify');
+	});
+
+	it('rejectAddressed reverts the prose and clears addressed in the store', async () => {
+		const original = 'the original wording';
+		const rejectable: StoredComment = {
+			...BASE,
+			addressed: {
+				author: 'ai',
+				date: '2026-01-02',
+				note: 'n',
+				original,
+			},
+		};
+		const h = makeHarnessWith(eofNote(rejectable, ' applied wording'));
+		await h.service.rejectAddressed('note.md', docComment(h.content));
+		// Prose reverted to the stored original; marker still lean.
+		expect(h.content).toContain(`${LEAN} ${original}`);
+		expect(h.content).toContain(LEAN);
+		expect(docComment(h.content).addressed).toBeUndefined();
+	});
+
+	it('delete-all-resolved drops resolved lean markers and their store entries', async () => {
+		const resolved: StoredComment = {
+			...BASE,
+			id: 'res00000',
+			resolution: { author: 'charles', date: '2026-01-01', note: '' },
+		};
+		const open: StoredComment = { ...BASE, id: 'open0000', body: 'open' };
+		const prose = `A ${serializeLeanMarker(
+			'clarify',
+			'res00000',
+		)} B ${serializeLeanMarker('clarify', 'open0000')}`;
+		const h = makeHarnessWith(writeStoreRegion(prose, [resolved, open]));
+		const removed = await h.service.deleteAllResolvedInFile('note.md');
+		expect(removed).toBe(1);
+		expect(parseStore(h.content).map((e) => e.comment.id)).toEqual([
+			'open0000',
+		]);
+		expect(h.content).not.toContain('res00000');
+	});
+
+	it('preserves an orphaned store entry that an unrelated mutation must not sweep', async () => {
+		// A lean marker for EOF_ID plus a stranded entry whose marker is gone. A
+		// reply to the live comment must rewrite only its own entry and leave the
+		// orphan in place for diagnostics.
+		const orphan: StoredComment = {
+			...BASE,
+			id: 'orphan00',
+			body: 'stranded',
+		};
+		const prose = `Prose. ${LEAN}`;
+		const h = makeHarnessWith(writeStoreRegion(prose, [BASE, orphan]));
+		await h.service.appendReply('note.md', docComment(h.content), {
+			author: 'ai',
+			date: '2026-01-02',
+			body: 'hi',
+		});
+		const ids = parseStore(h.content)
+			.map((e) => e.comment.id)
+			.sort();
+		expect(ids).toEqual(['a1b2c3d4', 'orphan00']);
+	});
+
+	it('leaves the inline path untouched: a reply makes no store region', async () => {
+		const h = makeHarness(false);
+		await h.service.appendReply('note.md', firstComment(h.content), {
+			author: 'ai',
+			date: '2026-01-02',
+			body: 'x',
+		});
+		expect(scanStoreEntries(h.content)).toHaveLength(0);
+		expect(h.content).toContain('[reply');
 	});
 });
