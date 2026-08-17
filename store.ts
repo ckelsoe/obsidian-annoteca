@@ -333,3 +333,49 @@ export function parseStore(content: string): LocatedStoreEntry[] {
 	}
 	return out;
 }
+
+// Replace a document's entire end-of-file store region with exactly `entries`, in
+// the given order. This is the one write-side primitive the eof persist funnel
+// uses: a mutation recomputes the full desired entry set and calls this, so the
+// region is always a clean rebuild rather than a series of surgical per-entry
+// edits.
+//
+// IDEMPOTENT BY CONSTRUCTION, which is what stops the modify-event write loop and
+// keeps git from churning. Every store block is stripped wherever it sits, the
+// trailing whitespace the region owned is trimmed, and the region is re-emitted at
+// EOF in one fixed shape, so writeStoreRegion(writeStoreRegion(x, e), e) equals
+// writeStoreRegion(x, e). Stripping blocks from anywhere also relocates a
+// hand-moved entry back to the EOF region rather than leaving it stranded mid
+// prose.
+//
+// The caller invokes this only when maintaining an eof-mode file. As a guard, a
+// no-op (no existing blocks and no entries) returns the content untouched, so a
+// stray call on a plain inline file cannot normalize its trailing whitespace.
+export function writeStoreRegion(
+	content: string,
+	entries: readonly StoredComment[],
+): string {
+	const blocks = scanStoreEntries(content);
+	if (blocks.length === 0 && entries.length === 0) return content;
+
+	// Remove every store block back to front, so an earlier block's range is not
+	// shifted by a later block's removal.
+	let prose = content;
+	for (let i = blocks.length - 1; i >= 0; i--) {
+		const block = blocks[i];
+		if (block === undefined) continue;
+		prose = prose.slice(0, block.start) + prose.slice(block.end);
+	}
+	// The region always followed the prose, so after the blocks are gone every
+	// trailing character is whitespace the region owned. Trimming it is what makes
+	// the rebuild a fixed point. trimEnd() rather than a `\s+$` regex, which the
+	// scorecard flags as super-linear backtracking; the two strip the same
+	// trailing whitespace here.
+	prose = prose.trimEnd();
+
+	if (entries.length === 0) {
+		return prose === '' ? '' : `${prose}\n`;
+	}
+	const region = entries.map(encodeStoreEntry).join('\n\n');
+	return prose === '' ? `${region}\n` : `${prose}\n\n${region}\n`;
+}
