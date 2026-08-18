@@ -22,6 +22,7 @@ import type { Comment, StorageMode } from './types';
 import { parseAll } from './parser';
 import {
 	parseStore,
+	toStored,
 	type LocatedStoreEntry,
 	type StoredComment,
 } from './store';
@@ -115,6 +116,21 @@ export function resolveEofTarget(
 	const entry = allEntries.find((e) => e.comment.id === rawMarker.id);
 	if (entry === undefined) return undefined;
 	return { full: merge(rawMarker, entry.comment), entry, allEntries };
+}
+
+// The store entry set after applying a change to an eof comment: every existing
+// entry kept in file order, with only the target's replaced. The id comes from
+// the entry, not `next`, so a transition can never move an entry to a new key.
+// A mutation rebuilds the whole region from this list (writeStoreRegion), so
+// orphaned entries other markers no longer point at are preserved rather than
+// swept by an unrelated write.
+export function storeEntriesWith(
+	eof: EofTarget,
+	next: Comment,
+): StoredComment[] {
+	return eof.allEntries.map((e) =>
+		e === eof.entry ? toStored(eof.entry.comment.id, next) : e.comment,
+	);
 }
 
 export function parseDocument(content: string): ParsedDocument {

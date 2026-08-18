@@ -39,7 +39,13 @@
 // file is untouched. A single fenced JSON block holding all comments would fail
 // atomically instead.
 
-import type { AnchorText, Addressed, Reply, Resolution } from './types';
+import type {
+	AnchorText,
+	Addressed,
+	Comment,
+	Reply,
+	Resolution,
+} from './types';
 
 // Schema version stamped into every entry. The marker format deliberately has NO
 // version sentinel (see parser.ts's escapeTerminator note: adding one there is a
@@ -378,4 +384,67 @@ export function writeStoreRegion(
 	}
 	const region = entries.map(encodeStoreEntry).join('\n\n');
 	return prose === '' ? `${region}\n` : `${prose}\n\n${region}\n`;
+}
+
+// ---- write helpers shared by the persist funnel and the composer ----------
+
+// A full comment reduced to its persistable store shape. `id` is passed
+// explicitly (it is the store's REQUIRED join key and is always known on the eof
+// path) so an entry can never be emitted without one. Empty unknownLines are
+// dropped to undefined, matching encodeStoreEntry's omit-when-absent rule.
+export function toStored(id: string, c: Comment): StoredComment {
+	return {
+		id,
+		category: c.category,
+		body: c.body,
+		date: c.date,
+		author: c.author,
+		anchor: c.anchor,
+		replies: c.replies,
+		addressed: c.addressed,
+		resolution: c.resolution,
+		unknownLines: c.unknownLines.length > 0 ? c.unknownLines : undefined,
+	};
+}
+
+// A minimal edit as a single contiguous replacement range.
+export interface SpliceRange {
+	from: number;
+	to: number;
+	insert: string;
+}
+
+// The single splice that turns `before` into `after`: shared prefix and suffix
+// trimmed to the smallest changed run. Every store write touches one contiguous
+// region that sits after all prose (a mutated entry, a dropped one, or a new one
+// appended at EOF), so one minimal splice always suffices: the editor path never
+// rewrites untouched prose or collapses unrelated undo history, and a
+// marker-deletion or marker-recategorize splice stays disjoint from it. Returns
+// undefined when nothing changed. charCodeAt comparison keeps this linear; no
+// regex, so no scorecard super-linear-backtracking risk.
+export function diffToSplice(
+	before: string,
+	after: string,
+): SpliceRange | undefined {
+	if (before === after) return undefined;
+	let prefix = 0;
+	const shortest = Math.min(before.length, after.length);
+	while (
+		prefix < shortest &&
+		before.charCodeAt(prefix) === after.charCodeAt(prefix)
+	)
+		prefix++;
+	let suffix = 0;
+	const rest = Math.min(before.length - prefix, after.length - prefix);
+	while (
+		suffix < rest &&
+		before.charCodeAt(before.length - 1 - suffix) ===
+			after.charCodeAt(after.length - 1 - suffix)
+	)
+		suffix++;
+	return {
+		from: prefix,
+		to: before.length - suffix,
+		insert: after.slice(prefix, after.length - suffix),
+	};
 }

@@ -28,8 +28,18 @@ import {
 	nowISO,
 	type MalformedMarker,
 } from './parser';
-import { parseDocument, resolveEofTarget, type EofTarget } from './document';
-import { parseStore, writeStoreRegion, type StoredComment } from './store';
+import {
+	parseDocument,
+	resolveEofTarget,
+	storeEntriesWith,
+	type EofTarget,
+} from './document';
+import {
+	parseStore,
+	writeStoreRegion,
+	diffToSplice,
+	type SpliceRange,
+} from './store';
 
 // What a lifecycle write actually did. Three outcomes rather than a boolean,
 // because the caller's message differs: "declined" means the transition looked
@@ -52,12 +62,6 @@ type FreshLookup =
 	| { kind: 'found'; comment: Comment }
 	| { kind: 'missing' }
 	| { kind: 'ambiguous'; id: string };
-
-interface SpliceRange {
-	from: number;
-	to: number;
-	insert: string;
-}
 
 // The two "this action's target is not there any more" messages, exported so the
 // composer's edit path can refuse in the same words. It re-resolves its own
@@ -516,9 +520,9 @@ export class CommentService {
 		// held the addressed line — so only the store region and the prose change.
 		const splices: SpliceRange[] = [];
 		if (eof) {
-			const storeSplice = this.diffToSplice(
+			const storeSplice = diffToSplice(
 				content,
-				writeStoreRegion(content, this.storeEntriesWith(eof, reopened)),
+				writeStoreRegion(content, storeEntriesWith(eof, reopened)),
 			);
 			if (storeSplice) splices.push(storeSplice);
 		} else {
@@ -650,7 +654,7 @@ export class CommentService {
 			.filter((e) => !resolvedIds.has(e.comment.id))
 			.map((e) => e.comment);
 		if (remaining.length !== allEntries.length) {
-			const storeSplice = this.diffToSplice(
+			const storeSplice = diffToSplice(
 				content,
 				writeStoreRegion(content, remaining),
 			);
@@ -721,9 +725,9 @@ export class CommentService {
 			if (!next) return 'declined';
 			const newContent = writeStoreRegion(
 				content,
-				this.storeEntriesWith(eof, next),
+				storeEntriesWith(eof, next),
 			);
-			const splice = this.diffToSplice(content, newContent);
+			const splice = diffToSplice(content, newContent);
 			// A transition whose store bytes did not change is already persisted;
 			// report success rather than a phantom refusal.
 			if (!splice) return 'written';
@@ -1040,73 +1044,9 @@ export class CommentService {
 	// preserved original live in one end-of-file store region. So a mutation does
 	// not rewrite the marker — it recomputes the store region and rewrites only the
 	// part that changed. The read half (deciding a comment is eof and merging it)
-	// is resolveEofTarget in document.ts; this side only writes.
-
-	// A full comment reduced to its persistable store shape. `id` is passed
-	// explicitly (it is the store's REQUIRED join key and is always known on the
-	// eof path) so an entry can never be emitted without one. Empty unknownLines
-	// are dropped to undefined, matching encodeStoreEntry's omit-when-absent rule.
-	private toStored(id: string, c: Comment): StoredComment {
-		return {
-			id,
-			category: c.category,
-			body: c.body,
-			date: c.date,
-			author: c.author,
-			anchor: c.anchor,
-			replies: c.replies,
-			addressed: c.addressed,
-			resolution: c.resolution,
-			unknownLines:
-				c.unknownLines.length > 0 ? c.unknownLines : undefined,
-		};
-	}
-
-	// The store entry set after applying this comment's change: every existing
-	// entry kept in file order, with only the target's replaced. The id comes from
-	// the entry, not `next`, so a transition can never move an entry to a new key.
-	private storeEntriesWith(eof: EofTarget, next: Comment): StoredComment[] {
-		return eof.allEntries.map((e) =>
-			e === eof.entry
-				? this.toStored(eof.entry.comment.id, next)
-				: e.comment,
-		);
-	}
-
-	// The single splice that turns `before` into `after`: shared prefix and suffix
-	// trimmed to the smallest changed run. Every store write touches one contiguous
-	// region that sits after all prose (the mutated entry, or a dropped one), so
-	// one minimal splice always suffices — the editor path never rewrites untouched
-	// prose or collapses unrelated undo history, and the marker-deletion splice a
-	// removal also carries stays disjoint from it. Returns undefined when nothing
-	// changed. charCodeAt comparison keeps this linear; no regex, so no scorecard
-	// super-linear-backtracking risk.
-	private diffToSplice(
-		before: string,
-		after: string,
-	): SpliceRange | undefined {
-		if (before === after) return undefined;
-		let prefix = 0;
-		const shortest = Math.min(before.length, after.length);
-		while (
-			prefix < shortest &&
-			before.charCodeAt(prefix) === after.charCodeAt(prefix)
-		)
-			prefix++;
-		let suffix = 0;
-		const rest = Math.min(before.length - prefix, after.length - prefix);
-		while (
-			suffix < rest &&
-			before.charCodeAt(before.length - 1 - suffix) ===
-				after.charCodeAt(after.length - 1 - suffix)
-		)
-			suffix++;
-		return {
-			from: prefix,
-			to: before.length - suffix,
-			insert: after.slice(prefix, after.length - suffix),
-		};
-	}
+	// is resolveEofTarget in document.ts; this side only writes. The pure pieces
+	// (toStored, storeEntriesWith, diffToSplice) live in store.ts and document.ts
+	// so the composer shares them; this service only orchestrates them.
 
 	// The splices that remove one comment: its marker from the prose, plus — in eof
 	// mode — its store entry dropped from the region. Two disjoint edits (the
@@ -1126,7 +1066,7 @@ export class CommentService {
 		const remaining = eof.allEntries
 			.filter((e) => e !== eof.entry)
 			.map((e) => e.comment);
-		const storeSplice = this.diffToSplice(
+		const storeSplice = diffToSplice(
 			content,
 			writeStoreRegion(content, remaining),
 		);
