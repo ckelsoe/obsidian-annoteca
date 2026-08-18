@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.0] - 2026-08-18
+
+### Added
+- An optional "keep prose clean" storage mode that moves each comment's body, thread, and history to a store at the end of the file, leaving only a small category-and-id marker where the comment sits. Choose it under Settings, "Comment storage": "Inline, with the text" (the default, unchanged) keeps the whole comment in the marker at the passage; "At the end of the note" moves the details to an end-of-file store, so the prose stays readable for long-form writing, publishing, or handing a file to an AI. It is a default for new comments only: a note keeps whatever style it already has (one note never mixes the two), and changing the setting never rewrites existing notes. A per-note `annoteca_storage: inline` or `annoteca_storage: eof` frontmatter property overrides the default for a single note. Two convert commands move an existing note between the styles, one for the current note (a single undo step) and one for the whole vault (backup-first). Reading view, the editor decorations, the hub, the counts, and the frontmatter summary all show and count end-of-file comments correctly; the orphan diagnostic surfaces a store entry whose marker was deleted or a lean marker whose entry was deleted; and the exported AI skill (now version 7) teaches the new format.
+
+### Changed
+- Clearer wording for the "Index-entry preset" setting. It now shows a marker example and explains that on export to PDF the bundled Pandoc filter turns each index-entry comment into a LaTeX index entry, with a sub-entry form.
+
 ## [1.15.0] - 2026-08-09
 
 ### Added
