@@ -18,7 +18,7 @@
 // untouched. What makes it "lean" is the absence of any inline heavy content, not
 // a new marker shape.
 
-import type { Comment } from './types';
+import type { Comment, StorageMode } from './types';
 import { parseAll } from './parser';
 import {
 	parseStore,
@@ -151,4 +151,59 @@ export function parseDocument(content: string): ParsedDocument {
 		(entry) => !mergedEntries.has(entry),
 	);
 	return { comments, orphanedStore };
+}
+
+// STORAGE-MODE RESOLUTION FOR NEW WORK (issue #48, §5.2.1 of the design).
+//
+// The mode setting is a default for NEW comments, never a vault-wide rewrite. A
+// note's own on-disk format always wins for that note, so one note never mixes
+// styles and changing the default (or a per-note override) rewrites nothing that
+// already exists. Moving an existing note between modes is the deliberate,
+// backup-first convert command, not a side effect of a setting change.
+
+// What format a note's comments are ALREADY stored in. `empty` means the note has
+// no comments yet, so its mode is not yet decided and the desired mode applies.
+type NoteStorageState = 'inline' | 'eof' | 'empty';
+
+// A note is in eof mode iff at least one lean marker is joined to a store entry.
+// An inline marker (one that still carries content) does not count, and neither
+// does an orphaned store entry (no marker points at it): both are handled by the
+// inline path. A dangling lean marker (no entry to join) is not eof either: it is
+// a degenerate empty-bodied inline marker, left to the inline path until
+// diagnostics adopts it. With no markers at all, the note has no comments, so the
+// desired mode is free to apply even if stranded store entries remain.
+function classifyNoteStorage(content: string): NoteStorageState {
+	const markers = parseAll(content);
+	if (markers.length === 0) return 'empty';
+	const storeIds = new Set(parseStore(content).map((e) => e.comment.id));
+	const hasEof = markers.some(
+		(m) => m.id !== undefined && isLeanMarker(m) && storeIds.has(m.id),
+	);
+	return hasEof ? 'eof' : 'inline';
+}
+
+// Parse a per-note `annoteca_storage` frontmatter override. The value is
+// user-reachable (a hand edit, a template, sync), so it is vetted rather than
+// trusted: anything that is not a currently-supported mode string, including the
+// designed-but-unshipped `hybrid`, returns undefined and falls back to the global
+// default, which is forward-safe (a value becomes honored the release its mode
+// ships).
+export function coerceStorageMode(value: unknown): StorageMode | undefined {
+	return value === 'inline' || value === 'eof' ? value : undefined;
+}
+
+// Decide the storage mode for a comment about to be ADDED to `content`. The order
+// is the design's: the note's current on-disk format wins; only when the note has
+// no comments yet does the desired mode apply, a per-note override first, then the
+// global default. Pure over the document text and the two desired-mode inputs, so
+// the composer resolves the override (from frontmatter) and the default (from
+// settings) and hands both in.
+export function resolveStorageModeForNewComment(
+	content: string,
+	override: StorageMode | undefined,
+	globalDefault: StorageMode,
+): StorageMode {
+	const current = classifyNoteStorage(content);
+	if (current !== 'empty') return current;
+	return override ?? globalDefault;
 }

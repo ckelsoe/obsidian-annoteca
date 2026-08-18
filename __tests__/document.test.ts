@@ -1,4 +1,8 @@
-import { parseDocument } from '../document';
+import {
+	parseDocument,
+	coerceStorageMode,
+	resolveStorageModeForNewComment,
+} from '../document';
 import { parseAll, serialize } from '../parser';
 import { encodeStoreEntry, type StoredComment } from '../store';
 
@@ -179,5 +183,93 @@ describe('document: mixed inline and eof comments in one file', () => {
 			'eof comment',
 		]);
 		expect(comments.map((c) => c.id)).toEqual(['inline01', 'eof00001']);
+	});
+});
+
+describe('document: coerceStorageMode vets the frontmatter override', () => {
+	it('accepts the two shipped modes', () => {
+		expect(coerceStorageMode('inline')).toBe('inline');
+		expect(coerceStorageMode('eof')).toBe('eof');
+	});
+
+	it('rejects the unshipped and the malformed to undefined', () => {
+		// hybrid is designed but not shipped, so it is not honored yet; anything
+		// non-string is a bad hand edit. Both fall back to the global default.
+		expect(coerceStorageMode('hybrid')).toBeUndefined();
+		expect(coerceStorageMode('EOF')).toBeUndefined();
+		expect(coerceStorageMode('')).toBeUndefined();
+		expect(coerceStorageMode(true)).toBeUndefined();
+		expect(coerceStorageMode(undefined)).toBeUndefined();
+		expect(coerceStorageMode(['eof'])).toBeUndefined();
+	});
+});
+
+describe('document: resolveStorageModeForNewComment', () => {
+	const inlineComment = serialize({
+		id: 'inln0001',
+		category: 'tone',
+		body: 'inline body',
+	});
+	const eofEntry: StoredComment = {
+		id: 'eof00001',
+		category: 'clarify',
+		body: 'eof body',
+		replies: [],
+	};
+	const eofDoc = [
+		`Prose. ${leanMarker('clarify', 'eof00001')}`,
+		'',
+		encodeStoreEntry(eofEntry),
+	].join('\n');
+
+	it("uses the note's own format over the desired mode when it has comments", () => {
+		// An inline note stays inline even when the default and override both say
+		// eof, and vice versa: current on-disk format wins, so a note never mixes.
+		expect(
+			resolveStorageModeForNewComment(
+				`A. ${inlineComment}`,
+				'eof',
+				'eof',
+			),
+		).toBe('inline');
+		expect(
+			resolveStorageModeForNewComment(eofDoc, 'inline', 'inline'),
+		).toBe('eof');
+	});
+
+	it('uses the per-note override on a note with no comments yet', () => {
+		expect(
+			resolveStorageModeForNewComment('Just prose.', 'eof', 'inline'),
+		).toBe('eof');
+		expect(
+			resolveStorageModeForNewComment('Just prose.', 'inline', 'eof'),
+		).toBe('inline');
+	});
+
+	it('falls back to the global default when there is no override', () => {
+		expect(
+			resolveStorageModeForNewComment('Just prose.', undefined, 'eof'),
+		).toBe('eof');
+		expect(
+			resolveStorageModeForNewComment('Just prose.', undefined, 'inline'),
+		).toBe('inline');
+	});
+
+	it('treats a dangling lean marker as inline, not eof', () => {
+		// A lean marker with no store entry to join is a degenerate empty-bodied
+		// inline marker, so the note counts as having inline comments.
+		const dangling = `Prose. ${leanMarker('clarify', 'ghost000')}`;
+		expect(resolveStorageModeForNewComment(dangling, 'eof', 'eof')).toBe(
+			'inline',
+		);
+	});
+
+	it('treats a note with only an orphaned store entry as empty', () => {
+		// The marker was deleted but its entry was stranded: no live comment, so the
+		// desired mode is free to apply to the next comment added.
+		const orphanOnly = `Prose with no markers.\n\n${encodeStoreEntry(eofEntry)}`;
+		expect(
+			resolveStorageModeForNewComment(orphanOnly, undefined, 'eof'),
+		).toBe('eof');
 	});
 });

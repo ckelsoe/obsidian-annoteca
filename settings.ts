@@ -72,6 +72,8 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 	resolvedDisplay: 'dim',
 	deleteOnResolve: false,
 
+	storageMode: 'inline',
+
 	composerLocation: 'panel',
 	selectionPopup: false,
 	submitCommentOnEnter: true,
@@ -414,6 +416,7 @@ const SETTING_VALIDATORS: {
 	resolvedBrightness: oneOf('normal', 'bright'),
 	resolvedDisplay: oneOf('dim', 'hide'),
 	deleteOnResolve: bool,
+	storageMode: oneOf('inline', 'eof'),
 	enableAuthorTag: bool,
 	authorTag: validAuthorTag,
 	authorStyles: validAuthorStyles,
@@ -594,6 +597,24 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 					},
 					this.customBlock((host) => this.renderCategoryList(host)),
 					this.customBlock((host) => this.renderAddCategory(host)),
+				],
+			},
+			{
+				type: 'group',
+				heading: 'Comment storage',
+				items: [
+					{
+						name: 'Where new comments are stored',
+						desc: "Keep comments inline puts everything in the marker at the passage (the default). Keep prose clean leaves only a small category and id marker in the text and moves the body, replies and history to a store at the end of the file, so the prose stays readable for long-form writing, publishing or feeding a file to an AI. This is a default for new comments only: a note always keeps whatever format it already uses, so one note never mixes styles, and changing this never rewrites existing notes. Set annoteca_storage in a note's frontmatter to override the default for that note. Use the convert command to move an existing note between modes.",
+						control: {
+							type: 'dropdown',
+							key: 'storageMode',
+							options: {
+								inline: 'Keep comments inline',
+								eof: 'Keep prose clean (store at end of file)',
+							},
+						},
+					},
 				],
 			},
 			{
