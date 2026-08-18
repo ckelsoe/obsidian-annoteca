@@ -2,7 +2,8 @@
 // Owners call rebuild(path, content) on file events; queries are read-only.
 
 import type { Comment, LocatedComment } from './types';
-import { findMalformedMarkers, parseAll, type MalformedMarker } from './parser';
+import { findMalformedMarkers, type MalformedMarker } from './parser';
+import { parseDocument } from './document';
 
 export interface FileIndex {
 	path: string;
@@ -10,7 +11,7 @@ export interface FileIndex {
 	// Marker damage found in the same pass that produced `comments`.
 	//
 	// Computed here rather than on demand because it is the answer to a question
-	// the index is uniquely placed to ask: parseAll has just told us which
+	// the index is uniquely placed to ask: parsing has just told us which
 	// markers this file HAS, and the interesting problems are the ones that
 	// change that answer without changing anything a reader can see. The
 	// diagnostic existed before this and was reachable only from a command
@@ -43,7 +44,13 @@ export class CommentIndex {
 	rebuild(path: string, content: string): FileIndex {
 		const idx: FileIndex = {
 			path,
-			comments: parseAll(content),
+			// parseDocument, not parseAll: an eof comment's body, thread and
+			// resolution live in the store, so a lean marker read alone always
+			// looks like an empty, open comment. Merging here is what makes the
+			// counts, the Hub and the frontmatter summary reflect eof comments.
+			// A file with no store entries parses identically to parseAll, so
+			// inline notes are unaffected.
+			comments: parseDocument(content).comments,
 			malformed: findMalformedMarkers(content),
 			parsedAt: Date.now(),
 		};

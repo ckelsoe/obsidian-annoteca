@@ -40,6 +40,7 @@ import {
 import type { Comment } from './types';
 import type { AnnotecaSettings, CategoryDefinition } from './types';
 import { parseAll } from './parser';
+import { parseDocument } from './document';
 import {
 	planActiveCommentDecorations,
 	resolveAnchorRangeInWindows,
@@ -319,7 +320,7 @@ export function refreshDecorationsEverywhere(): void {
 const markerStateField = (_ctx: DecorationContext) =>
 	StateField.define<Comment[]>({
 		create(state) {
-			return parseAll(state.doc.toString());
+			return parseDocument(state.doc.toString()).comments;
 		},
 		update(value, tr: Transaction) {
 			// The parsed markers depend on the document and nothing else. This
@@ -328,7 +329,7 @@ const markerStateField = (_ctx: DecorationContext) =>
 			// were handled here when it did nothing at all. Visibility is
 			// `hideAllField`'s job.
 			if (!tr.docChanged) return value;
-			return parseAll(tr.state.doc.toString());
+			return parseDocument(tr.state.doc.toString()).comments;
 		},
 	});
 
