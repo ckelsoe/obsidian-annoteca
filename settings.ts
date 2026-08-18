@@ -605,13 +605,13 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 				items: [
 					{
 						name: 'Where new comments are stored',
-						desc: "Keep comments inline puts everything in the marker at the passage (the default). Keep prose clean leaves only a small category and id marker in the text and moves the body, replies and history to a store at the end of the file, so the prose stays readable for long-form writing, publishing or feeding a file to an AI. This is a default for new comments only: a note always keeps whatever format it already uses, so one note never mixes styles, and changing this never rewrites existing notes. Set annoteca_storage in a note's frontmatter to override the default for that note. Use the convert command to move an existing note between modes.",
+						desc: "Every comment leaves a marker in your text. This sets where the rest of the comment (its body, replies, and history) is kept, for new comments. Inline keeps the whole comment in the marker right at the passage; best for short margin notes. At the end of the note shrinks the marker to a small category-and-id tag and moves the details to a block at the bottom of the note, so the passage stays readable; best for long-form writing, publishing, or handing a file to an AI. This is a default for new comments only: a note keeps whatever style it already has (one note never mixes the two), and changing it never rewrites existing notes. Use the convert command to switch an existing note, or add annoteca_storage: inline or annoteca_storage: eof to a note's frontmatter to override the default for that note.",
 						control: {
 							type: 'dropdown',
 							key: 'storageMode',
 							options: {
-								inline: 'Keep comments inline',
-								eof: 'Keep prose clean (store at end of file)',
+								inline: 'Inline, with the text',
+								eof: 'At the end of the note',
 							},
 						},
 					},
