@@ -946,14 +946,20 @@ export default class AnnotecaPlugin extends Plugin {
 		this.addCommand({
 			id: 'convert-note-to-eof-storage',
 			name: 'Convert this note to end-of-file comment storage',
-			editorCallback: (_editor: Editor, view: MarkdownFileInfo) =>
-				this.convertCurrentNoteStorage(view, true),
+			editorCallback: (_editor: Editor, view: MarkdownFileInfo) => {
+				this.runGuarded('Storage conversion', () =>
+					this.convertCurrentNoteStorage(view, true),
+				);
+			},
 		});
 		this.addCommand({
 			id: 'convert-note-to-inline-storage',
 			name: 'Convert this note to inline comment storage',
-			editorCallback: (_editor: Editor, view: MarkdownFileInfo) =>
-				this.convertCurrentNoteStorage(view, false),
+			editorCallback: (_editor: Editor, view: MarkdownFileInfo) => {
+				this.runGuarded('Storage conversion', () =>
+					this.convertCurrentNoteStorage(view, false),
+				);
+			},
 		});
 		this.addCommand({
 			id: 'convert-vault-to-eof-storage',

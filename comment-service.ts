@@ -1120,6 +1120,27 @@ export class CommentService {
 
 		// Apply in reverse so earlier splices do not shift later offsets.
 		const sorted = [...splices].sort((a, b) => a.from - b.from);
+
+		// Refuse rather than corrupt if two ranges overlap. The eof paths pair a
+		// marker splice in the prose with a store-region splice; the store splice
+		// normally lands at or after the marker, since writeStoreRegion never
+		// changes bytes before the marker. But on a note whose store blocks have
+		// been hand-moved out of the EOF region, stripping a block ahead of the
+		// marker makes the store splice reach back into the marker's range.
+		// Applying overlapping ranges back to front interleaves them and mangles
+		// the text; refusing is recoverable, the corruption is not. Adjacent ranges
+		// (one ends exactly where the next begins) do not overlap and are allowed.
+		for (let i = 1; i < sorted.length; i++) {
+			const prev = sorted[i - 1];
+			const cur = sorted[i];
+			if (prev && cur && prev.to > cur.from) {
+				new Notice(
+					'Annoteca did not change this note: its comment store has an unexpected layout, with a store block outside the region at the end of the file. Move the store blocks back to the end of the file and try again.',
+				);
+				return false;
+			}
+		}
+
 		const spliced = (source: string): string => {
 			let out = source;
 			for (let i = sorted.length - 1; i >= 0; i--) {

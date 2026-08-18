@@ -364,6 +364,17 @@ export function writeStoreRegion(
 	const blocks = scanStoreEntries(content);
 	if (blocks.length === 0 && entries.length === 0) return content;
 
+	// Blocks this version cannot decode (a hand edit, a sync conflict, an entry
+	// from a future schema) are carried through the rebuild VERBATIM rather than
+	// dropped. The rule is keyed on decode failure, not on absence from `entries`:
+	// an intentional delete still removes a decodable entry, while a quarantined
+	// one is preserved. Dropping them here would delete a stranded entry's body,
+	// thread and history on an unrelated write to the same note, which is the
+	// opposite of the failure-isolation contract this file promises.
+	const carried = blocks
+		.filter((b) => decodeStoreEntry(b.json) === undefined)
+		.map((b) => content.slice(b.start, b.end));
+
 	// Remove every store block back to front, so an earlier block's range is not
 	// shifted by a later block's removal.
 	let prose = content;
@@ -379,11 +390,15 @@ export function writeStoreRegion(
 	// trailing whitespace here.
 	prose = prose.trimEnd();
 
-	if (entries.length === 0) {
+	// Decodable entries first (current, ordered by the caller), then any carried
+	// undecodable blocks. This is a fixed point: a carried block still fails to
+	// decode on the next scan and is carried again in the same place.
+	const region = [...entries.map(encodeStoreEntry), ...carried];
+	if (region.length === 0) {
 		return prose === '' ? '' : `${prose}\n`;
 	}
-	const region = entries.map(encodeStoreEntry).join('\n\n');
-	return prose === '' ? `${region}\n` : `${prose}\n\n${region}\n`;
+	const joined = region.join('\n\n');
+	return prose === '' ? `${joined}\n` : `${prose}\n\n${joined}\n`;
 }
 
 // ---- write helpers shared by the persist funnel and the composer ----------

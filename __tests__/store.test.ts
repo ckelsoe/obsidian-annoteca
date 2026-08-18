@@ -3,6 +3,7 @@ import {
 	encodeStoreEntry,
 	parseStore,
 	scanStoreEntries,
+	writeStoreRegion,
 	STORE_SCHEMA_VERSION,
 	type StoredComment,
 } from '../store';
@@ -171,7 +172,7 @@ describe('store: HTML-comment delimiter hazards', () => {
 	});
 
 	it('preserves a literal backslash-u sequence in the text unchanged', () => {
-		// A body that literally contains the 6 characters > must not be
+		// A body that literally contains the 6 characters `>` must not be
 		// confused with the escape the encoder emits for a real `>`.
 		const body = 'literal escape text \\u003e stays';
 		const c: StoredComment = {
@@ -454,5 +455,51 @@ describe('store: encode/decode is lossless (seeded fuzz)', () => {
 				throw new Error(`${context}\ndecoded undefined`);
 			expect(out).toEqual(input);
 		}
+	});
+});
+
+describe('store: writeStoreRegion preserves undecodable blocks', () => {
+	const good: StoredComment = {
+		id: 'good0001',
+		category: 'clarify',
+		body: 'keep me',
+		replies: [],
+	};
+	const malformedBlock = '<!-- annoteca:store\n{ not valid json\n-->';
+
+	it('carries a malformed block through a rewrite instead of dropping it', () => {
+		// A note with one decodable entry and one hand-corrupted block. Rewriting
+		// the region for an unrelated reason must not delete the corrupted block,
+		// or its body, thread and history leave the file on the next edit.
+		const content = `Prose. <!-- annoteca/clarify: [id=good0001] -->\n\n${encodeStoreEntry(
+			good,
+		)}\n\n${malformedBlock}\n`;
+		const out = writeStoreRegion(content, [good]);
+		expect(out).toContain('not valid json');
+		expect(parseStore(out).map((e) => e.comment.id)).toEqual(['good0001']);
+	});
+
+	it('is a fixed point over a carried malformed block', () => {
+		const content = `Prose.\n\n${malformedBlock}\n`;
+		const once = writeStoreRegion(content, []);
+		expect(once).toContain('not valid json');
+		expect(writeStoreRegion(once, [])).toBe(once);
+	});
+
+	it('still removes a decodable entry the caller dropped', () => {
+		// The preservation rule is keyed on decode failure, not on absence from
+		// `entries`, so an intentional delete of a valid entry still works.
+		const drop: StoredComment = {
+			id: 'drop0001',
+			category: 'cut',
+			body: 'go',
+			replies: [],
+		};
+		const content = `Prose.\n\n${encodeStoreEntry(good)}\n\n${encodeStoreEntry(
+			drop,
+		)}\n`;
+		const out = writeStoreRegion(content, [good]);
+		expect(parseStore(out).map((e) => e.comment.id)).toEqual(['good0001']);
+		expect(out).not.toContain('drop0001');
 	});
 });
