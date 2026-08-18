@@ -2,9 +2,16 @@ import {
 	parseDocument,
 	coerceStorageMode,
 	resolveStorageModeForNewComment,
+	convertFileToEof,
+	convertFileToInline,
 } from '../document';
 import { parseAll, serialize } from '../parser';
-import { encodeStoreEntry, type StoredComment } from '../store';
+import {
+	encodeStoreEntry,
+	parseStore,
+	writeStoreRegion,
+	type StoredComment,
+} from '../store';
 
 // A lean marker is a normal marker with an empty body and an id line. Built by
 // hand here so the tests pin the exact on-disk shape the write path must emit.
@@ -271,5 +278,132 @@ describe('document: resolveStorageModeForNewComment', () => {
 		expect(
 			resolveStorageModeForNewComment(orphanOnly, undefined, 'eof'),
 		).toBe('eof');
+	});
+});
+
+describe('document: convertFileToEof', () => {
+	it('moves an inline comment to a lean marker plus a store entry', () => {
+		const inline = serialize({
+			id: 'conv0001',
+			category: 'clarify',
+			body: 'which products?',
+		});
+		const { updated, converted } = convertFileToEof(`Prose. ${inline}`);
+		expect(converted).toBe(1);
+		// The passage now carries a lean marker (empty body), and the content is
+		// in the store, reconstructed by parseDocument.
+		expect(parseAll(updated)[0]?.body).toBe('');
+		expect(updated).toContain('annoteca:store');
+		const merged = parseDocument(updated).comments;
+		expect(merged[0]?.id).toBe('conv0001');
+		expect(merged[0]?.body).toBe('which products?');
+	});
+
+	it('assigns an id to an id-less inline comment', () => {
+		const inline = serialize({ category: 'tone', body: 'soften this' });
+		const { updated, converted } = convertFileToEof(`Prose. ${inline}`);
+		expect(converted).toBe(1);
+		const merged = parseDocument(updated).comments;
+		expect(merged[0]?.id).toBeDefined();
+		expect(merged[0]?.body).toBe('soften this');
+	});
+
+	it('leaves a note with no inline comments unchanged', () => {
+		const content = writeStoreRegion(
+			`Prose. <!-- annoteca/clarify: [id=already00] -->`,
+			[
+				{
+					id: 'already00',
+					category: 'clarify',
+					body: 'eof',
+					replies: [],
+				},
+			],
+		);
+		const { updated, converted } = convertFileToEof(content);
+		expect(converted).toBe(0);
+		expect(updated).toBe(content);
+	});
+
+	it('preserves existing store entries when converting a mixed note', () => {
+		const inline = serialize({
+			id: 'inline00',
+			category: 'tone',
+			body: 'inline one',
+		});
+		const content = writeStoreRegion(
+			`A. ${inline}\n\nB. <!-- annoteca/clarify: [id=eofexist] -->`,
+			[
+				{
+					id: 'eofexist',
+					category: 'clarify',
+					body: 'eof one',
+					replies: [],
+				},
+			],
+		);
+		const { updated, converted } = convertFileToEof(content);
+		expect(converted).toBe(1);
+		const bodies = parseStore(updated)
+			.map((e) => e.comment.body)
+			.sort();
+		expect(bodies).toEqual(['eof one', 'inline one']);
+	});
+});
+
+describe('document: convertFileToInline', () => {
+	const entry: StoredComment = {
+		id: 'back0001',
+		category: 'clarify',
+		body: 'which products?',
+		replies: [],
+	};
+
+	it('moves an eof comment back inline and drops the store region', () => {
+		const content = writeStoreRegion(
+			`Prose. <!-- annoteca/clarify: [id=back0001] -->`,
+			[entry],
+		);
+		const { updated, converted } = convertFileToInline(content);
+		expect(converted).toBe(1);
+		expect(updated).not.toContain('annoteca:store');
+		const c = parseAll(updated)[0];
+		expect(c?.id).toBe('back0001');
+		expect(c?.body).toBe('which products?');
+	});
+
+	it('keeps an orphaned store entry rather than dropping it', () => {
+		const content = writeStoreRegion(
+			`Prose. <!-- annoteca/clarify: [id=back0001] -->`,
+			[entry, { ...entry, id: 'orphan00', body: 'stranded' }],
+		);
+		const { updated, converted } = convertFileToInline(content);
+		expect(converted).toBe(1);
+		// The joined entry inlined; the orphan stays in the store.
+		const remaining = parseStore(updated);
+		expect(remaining.map((e) => e.comment.id)).toEqual(['orphan00']);
+	});
+
+	it('leaves a dangling lean marker untouched', () => {
+		const content = `Prose. <!-- annoteca/clarify: [id=nostore0] -->`;
+		const { updated, converted } = convertFileToInline(content);
+		expect(converted).toBe(0);
+		expect(updated).toBe(content);
+	});
+
+	it('round-trips a simple inline comment through eof and back', () => {
+		const original = `Prose. ${serialize({
+			id: 'round001',
+			category: 'clarify',
+			body: 'a single-line body',
+		})}`;
+		const toEof = convertFileToEof(original).updated;
+		const back = convertFileToInline(toEof).updated;
+		const before = parseAll(original)[0];
+		const after = parseAll(back)[0];
+		expect(after?.id).toBe(before?.id);
+		expect(after?.category).toBe(before?.category);
+		expect(after?.body).toBe(before?.body);
+		expect(back).not.toContain('annoteca:store');
 	});
 });

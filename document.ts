@@ -19,10 +19,11 @@
 // a new marker shape.
 
 import type { Comment, StorageMode } from './types';
-import { parseAll } from './parser';
+import { parseAll, serialize, serializeLeanMarker, generateId } from './parser';
 import {
 	parseStore,
 	toStored,
+	writeStoreRegion,
 	type LocatedStoreEntry,
 	type StoredComment,
 } from './store';
@@ -222,4 +223,126 @@ export function resolveStorageModeForNewComment(
 	const current = classifyNoteStorage(content);
 	if (current !== 'empty') return current;
 	return override ?? globalDefault;
+}
+
+// CONVERT A NOTE BETWEEN STORAGE MODES (issue #48, §5.5 of the design).
+//
+// An explicit, backup-first operation, never a silent rewrite: flipping the
+// setting changes new work only, and moving what already exists is these two
+// functions, driven by the convert commands. Both are pure content-to-content
+// transforms returning the new text and how many comments moved, so the command
+// layer can pre-filter (skip a file that would not change) and apply the write
+// through the same editor/vault path the importer uses.
+
+interface ConvertEdit {
+	start: number;
+	end: number;
+	text: string;
+}
+
+export interface StorageConvertResult {
+	updated: string;
+	converted: number;
+}
+
+// Apply marker-text replacements back to front, so an earlier edit never shifts a
+// later edit's offsets. `edits` are in ascending file order.
+function applyMarkerEdits(
+	content: string,
+	edits: readonly ConvertEdit[],
+): string {
+	let out = content;
+	for (let i = edits.length - 1; i >= 0; i--) {
+		const e = edits[i];
+		if (e === undefined) continue;
+		out = out.slice(0, e.start) + e.text + out.slice(e.end);
+	}
+	return out;
+}
+
+// Inline to eof. Every inline comment (a marker that still carries content)
+// becomes a lean category+id marker plus a store entry; a marker with no id is
+// given one, unique against every id already in the file. Lean markers (already
+// eof, or dangling) are left untouched, and existing store entries are preserved.
+export function convertFileToEof(content: string): StorageConvertResult {
+	const markers = parseAll(content);
+	const storeEntries = parseStore(content);
+	const used = new Set<string>();
+	for (const m of markers) if (m.id !== undefined) used.add(m.id);
+	for (const e of storeEntries) used.add(e.comment.id);
+
+	const freshId = (): string => {
+		let id = generateId();
+		while (used.has(id)) id = generateId();
+		used.add(id);
+		return id;
+	};
+
+	const newEntries: StoredComment[] = [];
+	const edits: ConvertEdit[] = [];
+	for (const m of markers) {
+		if (isLeanMarker(m)) continue;
+		// A marker with no id, or one whose id already backs a store entry (the
+		// degenerate inline-wins-over-a-stray-entry case), needs a fresh id so the
+		// new entry cannot collide with an existing one.
+		const id =
+			m.id === undefined ||
+			storeEntries.some((e) => e.comment.id === m.id)
+				? freshId()
+				: m.id;
+		newEntries.push(toStored(id, { ...m, id }));
+		edits.push({
+			start: m.marker.start,
+			end: m.marker.end,
+			text: serializeLeanMarker(m.category, id),
+		});
+	}
+	if (edits.length === 0) return { updated: content, converted: 0 };
+	const prose = applyMarkerEdits(content, edits);
+	const updated = writeStoreRegion(prose, [
+		...storeEntries.map((e) => e.comment),
+		...newEntries,
+	]);
+	return { updated, converted: edits.length };
+}
+
+// Eof to inline. Every lean marker joined to a store entry is rewritten as a full
+// inline marker carrying the merged content, and the store region is dropped.
+// Orphaned entries (no marker points at them) are kept in the region rather than
+// silently discarded, so the convert never loses data diagnostics could recover.
+// The inline marker format is lossy by contract (it collapses newlines in inline
+// fields and caps the anchor), which is the cost of asking for today's format.
+export function convertFileToInline(content: string): StorageConvertResult {
+	const markers = parseAll(content);
+	const storeEntries = parseStore(content);
+	const storeById = new Map<string, StoredComment>();
+	for (const e of storeEntries) {
+		if (!storeById.has(e.comment.id))
+			storeById.set(e.comment.id, e.comment);
+	}
+
+	// Tracked by entry identity, not id, so a duplicate entry that was not the
+	// merge candidate stays in the region as an orphan rather than being dropped.
+	const consumed = new Set<StoredComment>();
+	const edits: ConvertEdit[] = [];
+	for (const m of markers) {
+		if (!isLeanMarker(m) || m.id === undefined) continue;
+		const stored = storeById.get(m.id);
+		if (stored === undefined) continue; // dangling lean marker: leave as-is
+		consumed.add(stored);
+		edits.push({
+			start: m.marker.start,
+			end: m.marker.end,
+			text: serialize(merge(m, stored)),
+		});
+	}
+	if (edits.length === 0) return { updated: content, converted: 0 };
+	const prose = applyMarkerEdits(content, edits);
+	const remaining = storeEntries
+		.filter((e) => !consumed.has(e.comment))
+		.map((e) => e.comment);
+	return {
+		updated: writeStoreRegion(prose, remaining),
+		converted: edits.length,
+	};
 }
