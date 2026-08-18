@@ -35,7 +35,7 @@ beforeEach(() => {
 // Obsidian hands the SAME Editor object back after a leaf switches file: the
 // buffer changes under it and the view starts naming the other note. That pair
 // of moves is the whole of the wrong-file defect.
-function makeEditor(initial: string, path = 'note.md') {
+function makeEditor(initial: string, path = 'note.md', selection = '') {
 	let content = initial;
 	let showing: string | null = path;
 	const posToOffset = (pos: EditorPosition): number => {
@@ -52,7 +52,7 @@ function makeEditor(initial: string, path = 'note.md') {
 	};
 	const editor = {
 		getValue: () => content,
-		getSelection: () => '',
+		getSelection: () => selection,
 		getCursor: () => offsetToPos(0),
 		posToOffset,
 		offsetToPos,
@@ -664,6 +664,28 @@ describe('composer: eof storage mode', () => {
 		expect(merged).toHaveLength(1);
 		expect(merged[0]?.body).toBe('which products?');
 		expect(merged[0]?.id).toBe(markers[0]?.id);
+	});
+
+	it('create over a selection stores the anchor in the store entry', async () => {
+		// A begin-placed marker with a leading space, exactly like the inline path,
+		// and the selected text captured as the anchor, which lives in the store
+		// entry (not the lean marker) in eof mode.
+		const host = makeEditor(
+			'Pricing needs revisiting.',
+			'note.md',
+			'Pricing',
+		);
+		const { form, closed } = openCreateWith(host, eofPlugin('eof'));
+
+		form.state.selectedCategory = 'clarify';
+		form.state.body = 'which products?';
+		await form.submit();
+
+		expect(closed()).toBe(true);
+		expect(parseAll(host.content)[0]?.body).toBe('');
+		const merged = parseDocument(host.content).comments;
+		expect(merged[0]?.body).toBe('which products?');
+		expect(merged[0]?.anchor?.text).toBe('Pricing');
 	});
 
 	it('edit changes the store body and keeps the marker byte-for-byte lean', async () => {
