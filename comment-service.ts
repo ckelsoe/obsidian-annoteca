@@ -28,6 +28,18 @@ import {
 	nowISO,
 	type MalformedMarker,
 } from './parser';
+import {
+	parseDocument,
+	resolveEofTarget,
+	storeEntriesWith,
+	type EofTarget,
+} from './document';
+import {
+	parseStore,
+	writeStoreRegion,
+	diffToSplice,
+	type SpliceRange,
+} from './store';
 
 // What a lifecycle write actually did. Three outcomes rather than a boolean,
 // because the caller's message differs: "declined" means the transition looked
@@ -50,12 +62,6 @@ type FreshLookup =
 	| { kind: 'found'; comment: Comment }
 	| { kind: 'missing' }
 	| { kind: 'ambiguous'; id: string };
-
-interface SpliceRange {
-	from: number;
-	to: number;
-	insert: string;
-}
 
 // The two "this action's target is not there any more" messages, exported so the
 // composer's edit path can refuse in the same words. It re-resolves its own
@@ -191,14 +197,19 @@ export class CommentService {
 		if (!current) {
 			return 'missing';
 		}
-		if (stillApplies && !stillApplies(current)) return 'declined';
+		// Freshness is checked against the FULL comment. In eof mode `current` is
+		// the lean marker, whose resolution and addressed state live in the store,
+		// so a stillApplies predicate reading it directly would always see "open"
+		// and "not addressed" and mis-decide the destructive accept/resolve guard.
+		const eof = resolveEofTarget(content, current);
+		const full = eof ? eof.full : current;
+		if (stillApplies && !stillApplies(full)) return 'declined';
 		// 'blocked', not 'declined'. refusesForDamage has already said what is
 		// wrong; a caller that read this as a stale transition would follow it
 		// with "Already resolved." about a comment that is still open.
 		if (this.refusesForDamage(content, [current.marker])) return 'blocked';
-		const { start, end } = current.marker;
-		const splice = this.buildDeleteSplice(content, start, end);
-		const wrote = await this.applySplices(path, file, [splice], content);
+		const splices = this.buildRemovalSplices(content, current, eof);
+		const wrote = await this.applySplices(path, file, splices, content);
 		if (!wrote) return 'missing';
 		new Notice('Resolved and removed.');
 		return 'written';
@@ -250,9 +261,11 @@ export class CommentService {
 			return;
 		}
 		if (this.refusesForDamage(content, [current.marker])) return;
-		const { start, end } = current.marker;
-		const splice = this.buildDeleteSplice(content, start, end);
-		const wrote = await this.applySplices(path, file, [splice], content);
+		// In eof mode a delete removes the lean marker AND drops its store entry;
+		// buildRemovalSplices returns both edits (and just the marker inline).
+		const eof = resolveEofTarget(content, current);
+		const splices = this.buildRemovalSplices(content, current, eof);
+		const wrote = await this.applySplices(path, file, splices, content);
 		if (!wrote) return;
 		new Notice('Deleted.');
 	}
@@ -469,16 +482,19 @@ export class CommentService {
 		if (!current) {
 			return;
 		}
-		// Everything from here reads `current`, never the caller's `comment`
-		// (#12). Re-resolving only the OFFSETS fixed where the write lands; the
-		// marker it wrote was still rebuilt from the snapshot, so a reply that
-		// arrived after the card rendered was dropped by the revert.
-		//
-		// The original prose comes from `current.addressed` too. If the addressed
-		// state is gone, someone accepted or revised this edit in the meantime and
-		// there is nothing left to revert; splicing the snapshot's stored original
-		// over the current line would overwrite prose the user has moved on from.
-		const currentAddressed = current.addressed;
+		// Everything from here reads the FULL comment, never the caller's `comment`
+		// (#12). In eof mode the addressed state and its preserved original live in
+		// the store, so `current` (the lean marker) has neither; resolveEofTarget
+		// merges them back. Re-resolving only the OFFSETS fixed where the write
+		// lands; the state it acts on must be the live one too, or a reply that
+		// arrived after the card rendered is dropped by the revert.
+		const eof = resolveEofTarget(content, current);
+		const full = eof ? eof.full : current;
+		// If the addressed state is gone, someone accepted or revised this edit in
+		// the meantime and there is nothing left to revert; splicing the snapshot's
+		// stored original over the current line would overwrite prose the user has
+		// moved on from.
+		const currentAddressed = full.addressed;
 		if (!currentAddressed || currentAddressed.original === undefined) {
 			new Notice('This edit is no longer awaiting review.');
 			return;
@@ -496,32 +512,44 @@ export class CommentService {
 			content.charAt(markerEnd) === ' ' ? markerEnd + 1 : markerEnd;
 		const lineEnd = this.endOfLine(content, proseStart);
 
-		const reopened: Comment = { ...current, addressed: undefined };
-		const markerText = serialize({
-			id: reopened.id,
-			category: reopened.category,
-			body: reopened.body,
-			date: reopened.date,
-			author: reopened.author,
-			anchor: reopened.anchor,
-			replies: reopened.replies,
-			resolution: reopened.resolution,
-			unknownLines: reopened.unknownLines,
+		const reopened: Comment = { ...full, addressed: undefined };
+
+		// The addressed line lives in the store (eof) or in the marker (inline).
+		// Either way it is dropped here; the prose revert is the same splice in
+		// both modes. In eof mode the lean marker itself is untouched — it never
+		// held the addressed line — so only the store region and the prose change.
+		const splices: SpliceRange[] = [];
+		if (eof) {
+			const storeSplice = diffToSplice(
+				content,
+				writeStoreRegion(content, storeEntriesWith(eof, reopened)),
+			);
+			if (storeSplice) splices.push(storeSplice);
+		} else {
+			const markerText = serialize({
+				id: reopened.id,
+				category: reopened.category,
+				body: reopened.body,
+				date: reopened.date,
+				author: reopened.author,
+				anchor: reopened.anchor,
+				replies: reopened.replies,
+				resolution: reopened.resolution,
+				unknownLines: reopened.unknownLines,
+			});
+			splices.push({
+				from: markerStart,
+				to: markerEnd,
+				insert: markerText,
+			});
+		}
+		splices.push({
+			from: proseStart,
+			to: lineEnd,
+			insert: currentAddressed.original,
 		});
 
-		const wrote = await this.applySplices(
-			path,
-			file,
-			[
-				{ from: markerStart, to: markerEnd, insert: markerText },
-				{
-					from: proseStart,
-					to: lineEnd,
-					insert: currentAddressed.original,
-				},
-			],
-			content,
-		);
+		const wrote = await this.applySplices(path, file, splices, content);
 		if (!wrote) return;
 		new Notice('Reverted to the original text.');
 	}
@@ -537,7 +565,13 @@ export class CommentService {
 		const file = this.plugin.app.vault.getAbstractFileByPath(path);
 		if (!(file instanceof TFile)) return [];
 		const content = await this.readCurrentContent(file, path);
-		return parseAll(content).filter((c) => c.resolution !== undefined);
+		// parseDocument, not parseAll: an eof comment's resolution lives in its
+		// store entry, so a lean marker read on its own always looks open. A file
+		// with no store entries parses identically here, so inline notes are
+		// unaffected.
+		return parseDocument(content).comments.filter(
+			(c) => c.resolution !== undefined,
+		);
 	}
 
 	// Strips every resolved marker from `path` in a single file write. Returns
@@ -569,7 +603,10 @@ export class CommentService {
 			return null;
 		}
 		const content = await this.readCurrentContent(file, path);
-		const resolved = parseAll(content).filter(
+		// parseDocument, not parseAll: an eof comment carries its resolution in the
+		// store, so a lean marker read alone never looks resolved. Inline notes
+		// (no store entries) parse identically, so their behaviour is unchanged.
+		const resolved = parseDocument(content).comments.filter(
 			(c) => c.resolution !== undefined,
 		);
 		if (resolved.length === 0) return 0;
@@ -601,6 +638,27 @@ export class CommentService {
 				start -= 1;
 			}
 			splices.push({ from: start, to: end, insert: '' });
+		}
+
+		// Drop the store entries of every eof-stored resolved comment in one region
+		// rebuild, kept disjoint from the marker splices above (those sit in the
+		// prose, this sits after it). An inline-only sweep has no store entries, so
+		// this adds nothing.
+		const resolvedIds = new Set(
+			resolved
+				.map((c) => c.id)
+				.filter((id): id is string => id !== undefined),
+		);
+		const allEntries = parseStore(content);
+		const remaining = allEntries
+			.filter((e) => !resolvedIds.has(e.comment.id))
+			.map((e) => e.comment);
+		if (remaining.length !== allEntries.length) {
+			const storeSplice = diffToSplice(
+				content,
+				writeStoreRegion(content, remaining),
+			);
+			if (storeSplice) splices.push(storeSplice);
 		}
 
 		const wrote = await this.applySplices(path, file, splices, content);
@@ -654,6 +712,34 @@ export class CommentService {
 		const content = await this.readCurrentContent(file, path);
 		const current = this.resolveFresh(content, prev);
 		if (!current) return 'missing';
+
+		// eof mode: the transition acts on the FULL comment (merged from the store),
+		// never the lean marker's empty shell, and it persists by rewriting the
+		// store region — the inline marker stays lean and untouched, because none of
+		// these verbs change the category or id it carries. `current` here is that
+		// lean marker as parseAll read it; resolveEofTarget re-derives the merged
+		// state and the store context.
+		const eof = resolveEofTarget(content, current);
+		if (eof) {
+			const next = apply(eof.full);
+			if (!next) return 'declined';
+			const newContent = writeStoreRegion(
+				content,
+				storeEntriesWith(eof, next),
+			);
+			const splice = diffToSplice(content, newContent);
+			// A transition whose store bytes did not change is already persisted;
+			// report success rather than a phantom refusal.
+			if (!splice) return 'written';
+			const wrote = await this.applySplices(
+				path,
+				file,
+				[splice],
+				content,
+			);
+			return wrote ? 'written' : 'missing';
+		}
+
 		const next = apply(current);
 		if (!next) return 'declined';
 		const serialized = serialize({
@@ -951,6 +1037,42 @@ export class CommentService {
 		new Notice(ambiguousMessage(id));
 	}
 
+	// ---- eof store persistence ----------------------------------------
+	//
+	// The write half of "keep prose clean" storage (issue #48). An eof comment
+	// keeps a lean category + id marker inline; its body, thread, history and
+	// preserved original live in one end-of-file store region. So a mutation does
+	// not rewrite the marker — it recomputes the store region and rewrites only the
+	// part that changed. The read half (deciding a comment is eof and merging it)
+	// is resolveEofTarget in document.ts; this side only writes. The pure pieces
+	// (toStored, storeEntriesWith, diffToSplice) live in store.ts and document.ts
+	// so the composer shares them; this service only orchestrates them.
+
+	// The splices that remove one comment: its marker from the prose, plus — in eof
+	// mode — its store entry dropped from the region. Two disjoint edits (the
+	// marker sits in the prose, the store region after it), both computed against
+	// the same original content so applySplices applies them back to front.
+	private buildRemovalSplices(
+		content: string,
+		current: Comment,
+		eof: EofTarget | undefined,
+	): SpliceRange[] {
+		const markerSplice = this.buildDeleteSplice(
+			content,
+			current.marker.start,
+			current.marker.end,
+		);
+		if (!eof) return [markerSplice];
+		const remaining = eof.allEntries
+			.filter((e) => e !== eof.entry)
+			.map((e) => e.comment);
+		const storeSplice = diffToSplice(
+			content,
+			writeStoreRegion(content, remaining),
+		);
+		return storeSplice ? [markerSplice, storeSplice] : [markerSplice];
+	}
+
 	private buildDeleteSplice(
 		content: string,
 		start: number,
@@ -998,6 +1120,27 @@ export class CommentService {
 
 		// Apply in reverse so earlier splices do not shift later offsets.
 		const sorted = [...splices].sort((a, b) => a.from - b.from);
+
+		// Refuse rather than corrupt if two ranges overlap. The eof paths pair a
+		// marker splice in the prose with a store-region splice; the store splice
+		// normally lands at or after the marker, since writeStoreRegion never
+		// changes bytes before the marker. But on a note whose store blocks have
+		// been hand-moved out of the EOF region, stripping a block ahead of the
+		// marker makes the store splice reach back into the marker's range.
+		// Applying overlapping ranges back to front interleaves them and mangles
+		// the text; refusing is recoverable, the corruption is not. Adjacent ranges
+		// (one ends exactly where the next begins) do not overlap and are allowed.
+		for (let i = 1; i < sorted.length; i++) {
+			const prev = sorted[i - 1];
+			const cur = sorted[i];
+			if (prev && cur && prev.to > cur.from) {
+				new Notice(
+					'Annoteca did not change this note: its comment store has an unexpected layout, with a store block outside the region at the end of the file. Move the store blocks back to the end of the file and try again.',
+				);
+				return false;
+			}
+		}
+
 		const spliced = (source: string): string => {
 			let out = source;
 			for (let i = sorted.length - 1; i >= 0; i--) {

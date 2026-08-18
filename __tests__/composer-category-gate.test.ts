@@ -78,6 +78,9 @@ function plugin(settings: Partial<AnnotecaSettings>): AnnotecaPlugin {
 	return {
 		settings: { ...DEFAULT_SETTINGS, ...settings },
 		commentIndex: { hasId: () => false },
+		// The create path reads a per-note annoteca_storage override from the
+		// metadata cache; model an empty cache (no override) here.
+		app: { metadataCache: { getFileCache: () => null } },
 	} as unknown as AnnotecaPlugin;
 }
 

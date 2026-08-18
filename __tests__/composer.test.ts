@@ -18,7 +18,9 @@ import type { Editor, EditorPosition, MarkdownFileInfo } from 'obsidian';
 import type AnnotecaPlugin from '../main';
 import { ComposerForm, type ComposerRequest } from '../composer';
 import { convertNativeComments } from '../imports';
-import { parseAll, serialize } from '../parser';
+import { parseAll, serialize, serializeLeanMarker } from '../parser';
+import { parseDocument } from '../document';
+import { parseStore, writeStoreRegion, type StoredComment } from '../store';
 import { DEFAULT_SETTINGS } from '../settings';
 import type { Comment } from '../types';
 
@@ -33,7 +35,7 @@ beforeEach(() => {
 // Obsidian hands the SAME Editor object back after a leaf switches file: the
 // buffer changes under it and the view starts naming the other note. That pair
 // of moves is the whole of the wrong-file defect.
-function makeEditor(initial: string, path = 'note.md') {
+function makeEditor(initial: string, path = 'note.md', selection = '') {
 	let content = initial;
 	let showing: string | null = path;
 	const posToOffset = (pos: EditorPosition): number => {
@@ -50,7 +52,7 @@ function makeEditor(initial: string, path = 'note.md') {
 	};
 	const editor = {
 		getValue: () => content,
-		getSelection: () => '',
+		getSelection: () => selection,
 		getCursor: () => offsetToPos(0),
 		posToOffset,
 		offsetToPos,
@@ -96,6 +98,9 @@ function makePlugin(): AnnotecaPlugin {
 	return {
 		settings: { ...DEFAULT_SETTINGS },
 		commentIndex: { hasId: () => false },
+		// The create path reads a per-note annoteca_storage override from the
+		// metadata cache; model an empty cache (no override) here.
+		app: { metadataCache: { getFileCache: () => null } },
 	} as unknown as AnnotecaPlugin;
 }
 
@@ -572,5 +577,205 @@ describe('composer: the write refuses when the tab moved to another file', () =>
 		expect(host.content).toContain('the edited body');
 		expect(noticeLog).toEqual([]);
 		expect(closed()).toBe(true);
+	});
+});
+
+// The composer's eof-mode path (issue #48). Create inserts a lean category+id
+// marker and writes the body/thread to the end-of-file store; edit updates the
+// store entry and keeps the marker lean, rather than pulling the body inline.
+describe('composer: eof storage mode', () => {
+	function eofPlugin(
+		storageMode: 'inline' | 'eof',
+		frontmatter: Record<string, unknown> = {},
+	): AnnotecaPlugin {
+		return {
+			settings: { ...DEFAULT_SETTINGS, storageMode },
+			commentIndex: { hasId: () => false },
+			app: {
+				metadataCache: { getFileCache: () => ({ frontmatter }) },
+			},
+		} as unknown as AnnotecaPlugin;
+	}
+
+	function openCreateWith(
+		host: ReturnType<typeof makeEditor>,
+		plugin: AnnotecaPlugin,
+	): { form: ComposerInternals; closed: () => boolean } {
+		let closed = false;
+		const request: ComposerRequest = {
+			editor: host.editor,
+			view: host.view,
+			filePath: 'note.md',
+		};
+		const form = new ComposerForm(plugin, request, {
+			close: () => {
+				closed = true;
+			},
+		});
+		return {
+			form: form as unknown as ComposerInternals,
+			closed: () => closed,
+		};
+	}
+
+	function openEditWith(
+		host: ReturnType<typeof makeEditor>,
+		comment: Comment,
+		plugin: AnnotecaPlugin,
+	): { form: ComposerInternals } {
+		const from = host.editor.offsetToPos(comment.marker.start);
+		const to = host.editor.offsetToPos(comment.marker.end);
+		const request: ComposerRequest = {
+			editor: host.editor,
+			view: host.view,
+			filePath: 'note.md',
+			editing: { comment, from, to },
+		};
+		const form = new ComposerForm(plugin, request, { close: () => {} });
+		return { form: form as unknown as ComposerInternals };
+	}
+
+	// A one-comment eof note: a lean marker in the prose, its content in the store.
+	function eofNote(entry: StoredComment): string {
+		const prose = `Prose under review. ${serializeLeanMarker(
+			entry.category,
+			entry.id,
+		)}`;
+		return writeStoreRegion(prose, [entry]);
+	}
+
+	it('create writes a lean marker plus a store entry, not an inline body', async () => {
+		const host = makeEditor('Prose here.');
+		const { form, closed } = openCreateWith(host, eofPlugin('eof'));
+
+		form.state.selectedCategory = 'clarify';
+		form.state.body = 'which products?';
+		await form.submit();
+
+		expect(closed()).toBe(true);
+		// The inline marker is lean: parseAll sees an empty body at the passage.
+		const markers = parseAll(host.content);
+		expect(markers).toHaveLength(1);
+		expect(markers[0]?.body).toBe('');
+		expect(markers[0]?.category).toBe('clarify');
+		// The body lives in the store, and parseDocument merges it back.
+		expect(host.content).toContain('annoteca:store');
+		const merged = parseDocument(host.content).comments;
+		expect(merged).toHaveLength(1);
+		expect(merged[0]?.body).toBe('which products?');
+		expect(merged[0]?.id).toBe(markers[0]?.id);
+	});
+
+	it('create over a selection stores the anchor in the store entry', async () => {
+		// A begin-placed marker with a leading space, exactly like the inline path,
+		// and the selected text captured as the anchor, which lives in the store
+		// entry (not the lean marker) in eof mode.
+		const host = makeEditor(
+			'Pricing needs revisiting.',
+			'note.md',
+			'Pricing',
+		);
+		const { form, closed } = openCreateWith(host, eofPlugin('eof'));
+
+		form.state.selectedCategory = 'clarify';
+		form.state.body = 'which products?';
+		await form.submit();
+
+		expect(closed()).toBe(true);
+		expect(parseAll(host.content)[0]?.body).toBe('');
+		const merged = parseDocument(host.content).comments;
+		expect(merged[0]?.body).toBe('which products?');
+		expect(merged[0]?.anchor?.text).toBe('Pricing');
+	});
+
+	it('edit changes the store body and keeps the marker byte-for-byte lean', async () => {
+		const entry: StoredComment = {
+			id: 'eofedit0',
+			category: 'clarify',
+			body: 'first body',
+			replies: [
+				{ author: 'ai', date: '2026-08-01', body: 'a standing reply' },
+			],
+		};
+		const host = makeEditor(eofNote(entry));
+		const lean = serializeLeanMarker('clarify', 'eofedit0');
+		const opened = parseDocument(host.content).comments[0];
+		if (!opened) throw new Error('no eof comment');
+		const { form } = openEditWith(host, opened, eofPlugin('eof'));
+
+		form.state.body = 'second body';
+		await form.submit();
+
+		// Marker unchanged; the body moved in the store, not inline.
+		expect(host.content).toContain(lean);
+		const merged = parseDocument(host.content).comments;
+		expect(merged[0]?.body).toBe('second body');
+		// The standing reply is preserved through the store rewrite.
+		expect(merged[0]?.replies).toHaveLength(1);
+		expect(parseAll(host.content)[0]?.body).toBe('');
+	});
+
+	it('edit changing the category rewrites the lean marker and the store entry', async () => {
+		const entry: StoredComment = {
+			id: 'eofcat00',
+			category: 'clarify',
+			body: 'body stays',
+			replies: [],
+		};
+		const host = makeEditor(eofNote(entry));
+		const opened = parseDocument(host.content).comments[0];
+		if (!opened) throw new Error('no eof comment');
+		const { form } = openEditWith(host, opened, eofPlugin('eof'));
+
+		form.state.selectedCategory = 'tone';
+		form.state.body = 'body stays';
+		await form.submit();
+
+		// The marker carries the new category (it is authoritative for it).
+		expect(host.content).toContain(serializeLeanMarker('tone', 'eofcat00'));
+		const merged = parseDocument(host.content).comments;
+		expect(merged[0]?.category).toBe('tone');
+		expect(merged[0]?.body).toBe('body stays');
+		// Still lean, still one comment, still in the store.
+		expect(parseAll(host.content)[0]?.body).toBe('');
+		expect(parseStore(host.content)).toHaveLength(1);
+	});
+
+	it('keeps an inline note inline even when the default is eof (current format wins)', async () => {
+		// The note already has an inline comment, so a new comment is stored inline
+		// regardless of the global default: one note never mixes styles.
+		const inline = serialize({
+			id: 'inlnkeep',
+			category: 'clarify',
+			body: 'existing inline',
+		});
+		const host = makeEditor(`A. ${inline}\n\nB.`);
+		const { form } = openCreateWith(host, eofPlugin('eof'));
+
+		form.state.selectedCategory = 'tone';
+		form.state.body = 'new one';
+		await form.submit();
+
+		expect(host.content).not.toContain('annoteca:store');
+		expect(parseAll(host.content)).toHaveLength(2);
+	});
+
+	it('honors a per-note annoteca_storage override on an empty note', async () => {
+		// Global default is inline, but this note asks for eof in its frontmatter.
+		const host = makeEditor('Just prose.');
+		const { form } = openCreateWith(
+			host,
+			eofPlugin('inline', { annoteca_storage: 'eof' }),
+		);
+
+		form.state.selectedCategory = 'clarify';
+		form.state.body = 'stored at the bottom';
+		await form.submit();
+
+		expect(host.content).toContain('annoteca:store');
+		expect(parseAll(host.content)[0]?.body).toBe('');
+		expect(parseDocument(host.content).comments[0]?.body).toBe(
+			'stored at the bottom',
+		);
 	});
 });

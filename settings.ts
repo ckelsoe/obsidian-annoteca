@@ -72,6 +72,8 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 	resolvedDisplay: 'dim',
 	deleteOnResolve: false,
 
+	storageMode: 'inline',
+
 	composerLocation: 'panel',
 	selectionPopup: false,
 	submitCommentOnEnter: true,
@@ -414,6 +416,7 @@ const SETTING_VALIDATORS: {
 	resolvedBrightness: oneOf('normal', 'bright'),
 	resolvedDisplay: oneOf('dim', 'hide'),
 	deleteOnResolve: bool,
+	storageMode: oneOf('inline', 'eof'),
 	enableAuthorTag: bool,
 	authorTag: validAuthorTag,
 	authorStyles: validAuthorStyles,
@@ -577,7 +580,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 					this.customBlock((host) => this.renderPresetSection(host)),
 					{
 						name: 'Index-entry preset',
-						desc: 'Add an index-entry category for tagging concepts that should appear in a printed index. Pairs with the pandoc filter shipped under docs in the plugin repository.',
+						desc: "Adds an 'Index entry' category for marking terms that belong in a book's back-of-book index. Tag a term with a comment like <!-- annoteca/index-entry: Holy Spirit -->; on export to PDF, the Pandoc filter in the plugin's docs folder turns each one into a LaTeX index entry (use 'term > subterm' for a sub-entry). Leave off unless you publish an indexed document.",
 						control: {
 							type: 'toggle',
 							key: 'enableIndexEntryPreset',
@@ -594,6 +597,24 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 					},
 					this.customBlock((host) => this.renderCategoryList(host)),
 					this.customBlock((host) => this.renderAddCategory(host)),
+				],
+			},
+			{
+				type: 'group',
+				heading: 'Comment storage',
+				items: [
+					{
+						name: 'Where new comments are stored',
+						desc: "Every comment leaves a marker in your text. This sets where the rest of the comment (its body, replies, and history) is kept, for new comments. Inline keeps the whole comment in the marker right at the passage; best for short margin notes. At the end of the note shrinks the marker to a small category-and-id tag and moves the details to a block at the bottom of the note, so the passage stays readable; best for long-form writing, publishing, or handing a file to an AI. This is a default for new comments only: a note keeps whatever style it already has (one note never mixes the two), and changing it never rewrites existing notes. Use the convert command to switch an existing note, or add annoteca_storage: inline or annoteca_storage: eof to a note's frontmatter to override the default for that note.",
+						control: {
+							type: 'dropdown',
+							key: 'storageMode',
+							options: {
+								inline: 'Inline, with the text',
+								eof: 'At the end of the note',
+							},
+						},
+					},
 				],
 			},
 			{

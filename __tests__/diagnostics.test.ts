@@ -1,10 +1,16 @@
 import {
 	detectMarkerConflicts,
 	detectOrphans,
+	detectStoreOrphans,
 	MarkerDamageReporter,
 	validateMarkers,
 } from '../diagnostics';
-import type { MalformedMarker } from '../parser';
+import { serializeLeanMarker, type MalformedMarker } from '../parser';
+import {
+	encodeStoreEntry,
+	writeStoreRegion,
+	type StoredComment,
+} from '../store';
 
 describe('detectMarkerConflicts', () => {
 	it('flags non-annoteca namespaced HTML comments', () => {
@@ -61,6 +67,71 @@ Paragraph two.`;
 			'Paragraph two.',
 		].join('\n');
 		expect(detectOrphans(text, 'note.md')).toHaveLength(0);
+	});
+});
+
+describe('detectStoreOrphans', () => {
+	const entry: StoredComment = {
+		id: 'store001',
+		category: 'clarify',
+		body: 'which products?',
+		replies: [],
+	};
+
+	it('flags a store entry with no marker as an orphaned entry', () => {
+		// The marker and its prose were deleted; the entry is stranded at EOF.
+		const content = `Prose with no markers.\n\n${encodeStoreEntry(entry)}`;
+		const findings = detectStoreOrphans(content, 'note.md');
+		expect(findings).toHaveLength(1);
+		expect(findings[0]).toMatchObject({
+			kind: 'orphaned-store-entry',
+			id: 'store001',
+			category: 'clarify',
+			body: 'which products?',
+		});
+	});
+
+	it('flags a lean marker with no entry as a dangling marker', () => {
+		const content = `Prose. ${serializeLeanMarker('clarify', 'gone0001')}`;
+		const findings = detectStoreOrphans(content, 'note.md');
+		expect(findings).toHaveLength(1);
+		expect(findings[0]).toMatchObject({
+			kind: 'dangling-lean-marker',
+			id: 'gone0001',
+			category: 'clarify',
+			body: '',
+		});
+	});
+
+	it('is silent for a healthy eof note (marker joined to its entry)', () => {
+		const content = writeStoreRegion(
+			`Prose. ${serializeLeanMarker(entry.category, entry.id)}`,
+			[entry],
+		);
+		expect(detectStoreOrphans(content, 'note.md')).toEqual([]);
+	});
+
+	it('is silent for an inline-only file (no store, non-lean markers)', () => {
+		const content =
+			'Prose. <!-- annoteca/tone: has a body\n[id=inline01]\n-->';
+		expect(detectStoreOrphans(content, 'note.md')).toEqual([]);
+	});
+
+	it('reports both directions in one file', () => {
+		const content = writeStoreRegion(
+			[
+				`A. ${serializeLeanMarker('clarify', 'store001')}`,
+				`B. ${serializeLeanMarker('cut', 'dangling')}`,
+			].join('\n\n'),
+			[entry, { ...entry, id: 'stranded', body: 'stranded body' }],
+		);
+		const kinds = detectStoreOrphans(content, 'note.md')
+			.map((f) => `${f.kind}:${f.id}`)
+			.sort();
+		expect(kinds).toEqual([
+			'dangling-lean-marker:dangling',
+			'orphaned-store-entry:stranded',
+		]);
 	});
 });
 

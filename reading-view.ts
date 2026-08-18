@@ -5,7 +5,7 @@
 // per-section badge, or both, per the readingViewIndicator setting.
 
 import type AnnotecaPlugin from './main';
-import { parseAll } from './parser';
+import { parseDocument } from './document';
 import type { Comment } from './types';
 
 export interface ThreadCounts {
@@ -67,8 +67,10 @@ export function registerReadingViewIndicator(plugin: AnnotecaPlugin): void {
 		}
 		// info.text is the whole note's source; lineStart/lineEnd delimit the
 		// section being rendered. One parse serves both the per-section counts
-		// and the note-level banner totals.
-		const all = parseAll(info.text);
+		// and the note-level banner totals. parseDocument, not parseAll: an eof
+		// comment's resolution lives in the store, so a lean marker read alone
+		// always looks open and the indicator counts would be wrong.
+		const all = parseDocument(info.text).comments;
 		if (all.length === 0) {
 			return;
 		}

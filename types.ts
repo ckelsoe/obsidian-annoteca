@@ -89,6 +89,14 @@ export interface UserPreset {
 	categories: CategoryDefinition[];
 }
 
+// Where a comment's body, thread and history are stored (issue #48). Named by
+// intent in the UI. `inline` is today's format: everything lives in the marker.
+// `eof` keeps the prose clean: the marker holds only category + id, and the body,
+// thread, resolution and preserved original move to the end-of-file store. A third
+// `hybrid` mode (offload only long threads) is designed but held as a fast-follow,
+// so it is deliberately absent from this union until it ships.
+export type StorageMode = 'inline' | 'eof';
+
 export interface AnnotecaSettings {
 	categories: CategoryDefinition[];
 	defaultCategory: string;
@@ -158,6 +166,13 @@ export interface AnnotecaSettings {
 	// of appending a [resolved ...] line. Default false: keep-in-place history
 	// is the format's default; this is the opt-in for clean files.
 	deleteOnResolve: boolean;
+
+	// Default storage mode for NEW comments (issue #48). A default for new work,
+	// never a vault-wide rewrite: a note honors its own current on-disk format, so
+	// this only decides the mode for a comment added to a note that has none yet,
+	// and only when a per-note `annoteca_storage` frontmatter override is absent.
+	// See resolveStorageModeForNewComment. Default `inline` (today's behavior).
+	storageMode: StorageMode;
 
 	enableAuthorTag: boolean;
 	authorTag: string;

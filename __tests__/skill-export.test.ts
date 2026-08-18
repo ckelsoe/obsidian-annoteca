@@ -173,6 +173,23 @@ describe('buildSkillMarkdown', () => {
 		expect(skill).toContain('A `]` is worse');
 	});
 
+	it('teaches the end-of-file storage mode and its store grammar', () => {
+		// v7. An assistant reading this must recognize a lean marker, find the
+		// store, and know the JSON is where an eof comment's content lives.
+		expect(skill).toContain('End-of-file storage');
+		expect(skill).toContain('lean marker');
+		expect(skill).toContain('annoteca:store');
+		expect(skill).toContain('annoteca/tone: [id=a3b9c2x7]');
+	});
+
+	it('tells the assistant to edit the store entry, not the lean marker', () => {
+		// The corruption a v6 assistant would cause on an eof comment: appending a
+		// bracket reply line to the marker instead of the store JSON.
+		expect(skill).toContain('Edit both sites');
+		expect(skill).toContain("store entry's JSON");
+		expect(skill).toContain('never the lean marker');
+	});
+
 	it("names the reviewer's author tag when one is configured", () => {
 		const withTag = buildSkillMarkdown(CATEGORIES, 'Charles');
 		expect(withTag).toContain('signs comments as `Charles`');

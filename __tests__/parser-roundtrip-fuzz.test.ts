@@ -32,7 +32,14 @@
 // line becomes a real trailing line); what would be a defect is text that keeps
 // moving on every subsequent pass.
 
-import { parseAll, serialize, type SerializeInput } from '../parser';
+import {
+	parseAll,
+	serialize,
+	serializeLeanMarker,
+	type SerializeInput,
+} from '../parser';
+import { parseDocument } from '../document';
+import { parseStore, toStored, writeStoreRegion } from '../store';
 import type { AnchorText, Comment, Reply } from '../types';
 
 // mulberry32. Small, fast, and good enough to shuffle pool choices; this is a
@@ -349,6 +356,81 @@ describe('parser: serialize/parse round trip (seeded fuzz)', () => {
 						`not a fixed point:\n--- second ---\n${second}\n--- third ---\n${third}`,
 					),
 				);
+		}
+	});
+});
+
+// The store's defining property, over the SAME adversarial pools: where the
+// inline format sanitizes and collapses (an author with angle brackets is
+// repaired, a multi-line reply is flattened, a long anchor is capped), the store
+// preserves everything BYTE FOR BYTE, because JSON encodes it losslessly and
+// neutralizeAngles only rewrites `<`/`>` that JSON.parse restores. This is what
+// "marker + store reconstructs the comment byte-for-byte" (design §5.5) means, and
+// it is the invariant a fold between storage modes rests on.
+describe('store: lossless fold (seeded fuzz)', () => {
+	// A full comment from a generated input, with an id forced on (the store's
+	// join key is required) and the two positional fields a Comment carries.
+	function comment(input: SerializeInput, id: string): Comment {
+		return {
+			id,
+			category: input.category,
+			body: input.body,
+			date: input.date,
+			author: input.author,
+			anchor: input.anchor,
+			replies: input.replies ? [...input.replies] : [],
+			addressed: input.addressed,
+			resolution: input.resolution,
+			unknownLines: [],
+			marker: { start: 0, end: 0 },
+		};
+	}
+
+	it('round-trips every stored field byte-for-byte, over 5,000 comments', () => {
+		const rand = mulberry32(SEED ^ 0x00abcdef);
+
+		for (let i = 0; i < ITERATIONS; i++) {
+			const input = generate(rand);
+			const id = input.id ?? makeId(rand);
+			const c = comment(input, id);
+			const stored = toStored(id, c);
+			const context = (msg: string): string =>
+				`iteration ${i}: ${msg}\nstored: ${JSON.stringify(stored)}`;
+
+			// The store region round-trips the entry with no loss of any field,
+			// including the ones the inline format cannot hold.
+			const region = writeStoreRegion('Prose.', [stored]);
+			const parsed = parseStore(region);
+			if (parsed.length !== 1)
+				throw new Error(
+					context(`expected 1 entry, got ${parsed.length}`),
+				);
+			expect(parsed[0]?.comment).toEqual(stored);
+
+			// A lean marker joined to that entry reconstructs the full comment, and
+			// the reconstructed content matches the store byte-for-byte (the merge
+			// takes category and position from the marker, everything else verbatim
+			// from the store).
+			const eofDoc = writeStoreRegion(
+				`Prose. ${serializeLeanMarker(c.category, id)}`,
+				[stored],
+			);
+			const merged = parseDocument(eofDoc).comments;
+			if (merged.length !== 1)
+				throw new Error(
+					context(`expected 1 merged comment, got ${merged.length}`),
+				);
+			const m = merged[0];
+			if (!m) throw new Error(context('no merged comment'));
+			expect(m.id).toBe(id);
+			expect(m.category).toBe(c.category);
+			expect(m.body).toBe(stored.body);
+			expect(m.date).toBe(stored.date);
+			expect(m.author).toBe(stored.author);
+			expect(m.anchor).toEqual(stored.anchor);
+			expect(m.replies).toEqual(stored.replies);
+			expect(m.addressed).toEqual(stored.addressed);
+			expect(m.resolution).toEqual(stored.resolution);
 		}
 	});
 });

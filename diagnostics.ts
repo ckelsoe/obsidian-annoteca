@@ -3,6 +3,8 @@
 
 import type { Comment } from './types';
 import { parseAll, findMalformedMarkers, type MalformedMarker } from './parser';
+import { isLeanMarker, parseDocument } from './document';
+import { parseStore } from './store';
 
 export interface ConflictFinding {
 	path: string;
@@ -96,6 +98,63 @@ function isBlankLine(content: string, offsetInLine: number): boolean {
 	const start = findLineStart(content, offsetInLine);
 	const end = findLineEnd(content, offsetInLine);
 	return content.slice(start, end).trim() === '';
+}
+
+// The two eof-mode orphan directions (issue #48). Both break the marker/store
+// join that keeps a "keep prose clean" comment whole:
+//   - orphaned-store-entry: a store entry no lean marker points at. The passage
+//     and its marker were deleted but the entry was left behind, so its body,
+//     thread and history sit at the end of the file with nothing to show them.
+//   - dangling-lean-marker: a lean category+id marker with no store entry to join.
+//     The entry was deleted (or never written), so the marker renders as an empty
+//     comment with nothing behind it.
+export interface StoreOrphanFinding {
+	path: string;
+	kind: 'orphaned-store-entry' | 'dangling-lean-marker';
+	id: string;
+	category: string;
+	// The stored body for an orphaned entry, so the user can recognize which
+	// comment it was; empty for a dangling marker, whose body is gone.
+	body: string;
+}
+
+// Find both eof-mode orphan directions in one pass. Inline-only files produce
+// nothing: they have no store entries to strand, and their markers are not lean.
+export function detectStoreOrphans(
+	content: string,
+	path: string,
+): StoreOrphanFinding[] {
+	const out: StoreOrphanFinding[] = [];
+
+	// Orphaned store entries: parseDocument already computes which entries no lean
+	// marker consumed.
+	for (const entry of parseDocument(content).orphanedStore) {
+		out.push({
+			path,
+			kind: 'orphaned-store-entry',
+			id: entry.comment.id,
+			category: entry.comment.category,
+			body: entry.comment.body,
+		});
+	}
+
+	// Dangling lean markers: a lean marker whose id joins no store entry. A marker
+	// that still carries inline content is a normal inline comment, not dangling.
+	const storeIds = new Set(parseStore(content).map((e) => e.comment.id));
+	for (const marker of parseAll(content)) {
+		if (marker.id === undefined) continue;
+		if (!isLeanMarker(marker)) continue;
+		if (storeIds.has(marker.id)) continue;
+		out.push({
+			path,
+			kind: 'dangling-lean-marker',
+			id: marker.id,
+			category: marker.category,
+			body: '',
+		});
+	}
+
+	return out;
 }
 
 export interface ValidationFinding extends MalformedMarker {

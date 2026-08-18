@@ -88,6 +88,7 @@ import {
 	type ImportFormat,
 	type ImportResult,
 } from './imports';
+import { convertFileToEof, convertFileToInline } from './document';
 import {
 	ConfirmBackupModal,
 	ConfirmDeleteCommentModal,
@@ -941,6 +942,34 @@ export default class AnnotecaPlugin extends Plugin {
 			id: 'import-all-comments',
 			name: 'Convert every comment to the canonical format',
 			callback: () => this.confirmAndConvert('all'),
+		});
+		this.addCommand({
+			id: 'convert-note-to-eof-storage',
+			name: 'Convert this note to end-of-file comment storage',
+			editorCallback: (_editor: Editor, view: MarkdownFileInfo) => {
+				this.runGuarded('Storage conversion', () =>
+					this.convertCurrentNoteStorage(view, true),
+				);
+			},
+		});
+		this.addCommand({
+			id: 'convert-note-to-inline-storage',
+			name: 'Convert this note to inline comment storage',
+			editorCallback: (_editor: Editor, view: MarkdownFileInfo) => {
+				this.runGuarded('Storage conversion', () =>
+					this.convertCurrentNoteStorage(view, false),
+				);
+			},
+		});
+		this.addCommand({
+			id: 'convert-vault-to-eof-storage',
+			name: 'Convert every note in the vault to end-of-file comment storage',
+			callback: () => this.confirmAndConvertStorage(true),
+		});
+		this.addCommand({
+			id: 'convert-vault-to-inline-storage',
+			name: 'Convert every note in the vault to inline comment storage',
+			callback: () => this.confirmAndConvertStorage(false),
 		});
 	}
 
@@ -2296,10 +2325,13 @@ export default class AnnotecaPlugin extends Plugin {
 		).open();
 	}
 
-	private async runBulkConvert(format: ImportFormat): Promise<void> {
+	// Run one content-to-content transform over every note in the vault, and
+	// report how much it touched. Shared by the importer and the storage-mode
+	// convert so the file loop, the pre-filter and the index refresh live once.
+	private async convertVaultFiles(
+		convert: (content: string) => ImportResult,
+	): Promise<{ totalConverted: number; filesTouched: number }> {
 		const files = this.app.vault.getMarkdownFiles();
-		const convert = (content: string): ImportResult =>
-			convertAllComments(content, format, 'uncategorized');
 		let totalConverted = 0;
 		let filesTouched = 0;
 		for (const f of files) {
@@ -2324,8 +2356,78 @@ export default class AnnotecaPlugin extends Plugin {
 			filesTouched += 1;
 		}
 		this.events.trigger('index-changed');
+		return { totalConverted, filesTouched };
+	}
+
+	private async runBulkConvert(format: ImportFormat): Promise<void> {
+		const { totalConverted, filesTouched } = await this.convertVaultFiles(
+			(content: string): ImportResult =>
+				convertAllComments(content, format, 'uncategorized'),
+		);
 		new Notice(
 			`Converted ${totalConverted} comment(s) across ${filesTouched} file(s).`,
+		);
+	}
+
+	// Convert the note the editor is showing between storage modes (issue #48).
+	// No backup modal: this rewrites one open note through the editor as a single
+	// undo step, so Cmd/Ctrl+Z reverts it, and it is the note the user is looking
+	// at rather than a vault-wide sweep.
+	private async convertCurrentNoteStorage(
+		view: MarkdownFileInfo,
+		toEof: boolean,
+	): Promise<void> {
+		const file = view.file;
+		if (!file) return;
+		const convert = toEof ? convertFileToEof : convertFileToInline;
+		const converted = await this.comments.convertFileComments(
+			file.path,
+			file,
+			convert,
+		);
+		if (converted === 0) {
+			new Notice(
+				toEof
+					? 'No inline comments in this note to move to end-of-file storage.'
+					: 'No end-of-file comments in this note to move inline.',
+			);
+			return;
+		}
+		new Notice(
+			`Converted ${converted} comment(s) to ${
+				toEof ? 'end-of-file' : 'inline'
+			} storage.`,
+		);
+	}
+
+	// Vault-wide storage conversion, gated on the same backup confirmation the
+	// importer uses: it rewrites every note and cannot be undone across files.
+	private confirmAndConvertStorage(toEof: boolean): void {
+		const description = toEof
+			? 'Move every inline comment in the vault to end-of-file storage: the passage keeps a small category and id marker, and the body, thread and history move to a store at the end of each file.'
+			: 'Move every end-of-file comment in the vault back inline: each comment is written in full at its passage and the end-of-file store is removed. Inline markers cannot hold multi-line replies, so long threads are collapsed to a single line.';
+		new ConfirmBackupModal(
+			this.app,
+			toEof
+				? 'Convert to end-of-file storage'
+				: 'Convert to inline storage',
+			description,
+			() => {
+				this.runGuarded('Storage conversion', () =>
+					this.runBulkStorageConvert(toEof),
+				);
+			},
+		).open();
+	}
+
+	private async runBulkStorageConvert(toEof: boolean): Promise<void> {
+		const { totalConverted, filesTouched } = await this.convertVaultFiles(
+			toEof ? convertFileToEof : convertFileToInline,
+		);
+		new Notice(
+			`Converted ${totalConverted} comment(s) across ${filesTouched} file(s) to ${
+				toEof ? 'end-of-file' : 'inline'
+			} storage.`,
 		);
 	}
 

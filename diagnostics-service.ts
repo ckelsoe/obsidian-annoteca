@@ -9,6 +9,7 @@ import type AnnotecaPlugin from './main';
 import {
 	detectMarkerConflicts,
 	detectOrphans,
+	detectStoreOrphans,
 	validateMarkers,
 } from './diagnostics';
 import { detectDrift, type DriftFinding, type PositionSnapshot } from './drift';
@@ -64,7 +65,14 @@ export class DiagnosticsService {
 			emptyMessage: 'No orphan comments detected.',
 			foundMessage: (n) =>
 				`Found ${n} orphan(s). See the diagnostics note in the vault.`,
-			detect: detectOrphans,
+			// Two orphan directions in one scan: a comment whose prose was deleted
+			// (inline or eof), plus the eof-only pair, a store entry with no marker
+			// and a lean marker with no entry. An inline-only file yields only the
+			// first kind, exactly as before.
+			detect: (content, path) => [
+				...detectOrphans(content, path),
+				...detectStoreOrphans(content, path),
+			],
 			scanIndexFirst: true,
 		});
 	}

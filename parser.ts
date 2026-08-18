@@ -1230,6 +1230,22 @@ export function serialize(c: SerializeInput): string {
 	return lines.join('\n');
 }
 
+// The lean marker for eof storage (issue #48): category + id only, with the
+// body, thread and history living in the end-of-file store. It is deliberately a
+// NORMAL marker with an empty body and an id line, not a new shape, so MARKER_RE,
+// scanMarkers, parseAt and the nested-opener guard are untouched and parseAll
+// reads it back as a lean Comment (body ''). Kept to a single line because it
+// sits inline at the passage in the prose.
+//
+// The category is guarded exactly as serialize() guards it: a category MARKER_RE
+// cannot match would make the marker invisible, so it falls back to
+// `uncategorized` rather than writing a marker the parser will never find. The id
+// is the caller's (generateId's) to keep valid, the same trust serialize() places
+// in it.
+export function serializeLeanMarker(category: string, id: string): string {
+	return `<!-- annoteca/${serializableCategory(category)}: [id=${id}] -->`;
+}
+
 // Normalize a selected text range into a storable anchor. Strips `]` and
 // line breaks (the parser's tail regex requires single-line, non-`]` values),
 // collapses internal whitespace, and mid-truncates to ANCHOR_MAX_CHARS when

@@ -31,7 +31,15 @@ export type SkillExportTarget = 'claude' | 'agent' | 'both';
 // the skill said nothing about either, so an assistant following it wrote a
 // marker that splits in two, or a body line that the next read absorbs and the
 // next write deletes.
-export const SKILL_SCHEMA_VERSION = 6;
+// 7 = end-of-file storage (issue #48). A vault can now keep prose clean: the
+// passage carries a lean category+id marker and the body, thread and history move
+// to a JSON store at the end of the file. An assistant reading a v6 skill does not
+// know the mode exists, so on an eof comment it would append a `[reply ...]` line
+// to a marker whose body is empty (writing into the wrong place, and leaving the
+// real comment in the store untouched), or "create" a comment inline in a note the
+// user set up for clean prose. Same reason as every bump above: the assistant has
+// to be told.
+export const SKILL_SCHEMA_VERSION = 7;
 
 const SKILL_VERSION_RE = /^annoteca-skill-version:\s*(\d+)\s*$/m;
 
@@ -188,6 +196,40 @@ It landed as a shock.
 \`\`\`
 --> The discovery reframed the passage entirely.
 \`\`\`\`
+
+## End-of-file storage (keep prose clean)
+
+Some vaults keep the prose readable by moving each comment's content out of the passage. You will recognize it when a marker's body is empty:
+
+\`\`\`markdown
+The Q3 forecast assumes a hiring freeze. <!-- annoteca/tone: [id=a3b9c2x7] -->
+\`\`\`
+
+That is a **lean marker**: category and id only, no body or thread. Its real content lives in a **store** at the very end of the file, one HTML comment per comment, each holding JSON keyed by the same id:
+
+\`\`\`markdown
+<!-- annoteca:store
+{
+  "v": 1,
+  "id": "a3b9c2x7",
+  "category": "tone",
+  "body": "too blunt for the board deck",
+  "date": "2026-05-23T09:12:00",
+  "author": "reviewer",
+  "replies": [
+    { "author": "ai", "date": "2026-05-23T09:15:30", "body": "Consider a softer phrasing." }
+  ]
+}
+-->
+\`\`\`
+
+Find every store entry with this regex: \`<!--\\s*annoteca:store\\b[\\s\\S]*?-->\`. A comment is in this mode when its marker body is empty AND its id matches a store entry. A marker that still carries an inline body is NOT in this mode: leave it in the bracket format above.
+
+The JSON mirrors the comment model: \`v\` (schema version, currently 1), \`id\` (required, the join key), \`category\`, \`body\`, and the optional \`date\`, \`author\`, \`anchor\` (\`{ "text": "...", "truncated": false }\`), \`replies\` (array of \`{ "author", "date", "body" }\`), \`addressed\` (\`{ "author", "date", "note", "original"? }\`) and \`resolution\` (\`{ "author", "date", "note" }\`). Absent fields are omitted.
+
+**Edit both sites, and put each change in the right one.** To reply to, address, resolve or edit the body of an eof comment, change its **store entry's JSON**, never the lean marker: append to the \`replies\` array, add an \`addressed\` or \`resolution\` object, or edit \`body\`. Leave the marker lean. Category is the one field the marker owns, so changing it rewrites the marker (\`<!-- annoteca/<new-category>: [id=<id>] -->\`) and the entry's \`category\` together. To create a comment in this mode, insert a lean marker at the start of the passage and add a matching store entry at the end of the file.
+
+The store is **lossless and easier to write than the bracket lines**: JSON already encodes newlines, quotes and brackets, so a multi-line reply, a long anchor, and a body that contains \`-->\` or \`<!--\` all go in as ordinary string values with none of the backslash escaping the inline format needs. (On save the plugin rewrites any \`<\` or \`>\` in the JSON as \`\\u003c\`/\`\\u003e\`, which JSON reads straight back; you do not need to.) Keep the store region as the LAST thing in the file, and never let an entry's JSON hold a raw \`-->\`.
 
 ## Categories in this vault
 
