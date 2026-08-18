@@ -580,7 +580,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 					this.customBlock((host) => this.renderPresetSection(host)),
 					{
 						name: 'Index-entry preset',
-						desc: 'Add an index-entry category for tagging concepts that should appear in a printed index. Pairs with the pandoc filter shipped under docs in the plugin repository.',
+						desc: "Adds an 'Index entry' category for marking terms that belong in a book's back-of-book index. Tag a term with a comment like <!-- annoteca/index-entry: Holy Spirit -->; on export to PDF, the Pandoc filter in the plugin's docs folder turns each one into a LaTeX index entry (use 'term > subterm' for a sub-entry). Leave off unless you publish an indexed document.",
 						control: {
 							type: 'toggle',
 							key: 'enableIndexEntryPreset',
