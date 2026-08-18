@@ -11,15 +11,23 @@ import {
 } from 'obsidian';
 
 import type AnnotecaPlugin from './main';
-import type { AnchorText, Comment } from './types';
+import type { AnchorText, Comment, StorageMode } from './types';
 import {
 	buildAnchorFromSelection,
 	generateId,
 	parseAll,
 	parseAt,
 	serialize,
+	serializeLeanMarker,
 	nowISO,
 } from './parser';
+import {
+	coerceStorageMode,
+	resolveEofTarget,
+	resolveStorageModeForNewComment,
+	storeEntriesWith,
+} from './document';
+import { diffToSplice, parseStore, toStored, writeStoreRegion } from './store';
 import { VANISHED_MESSAGE, ambiguousMessage } from './comment-service';
 import { getCategoryOrFallback } from './categories';
 import { resolveSettingsCategories } from './settings';
@@ -357,6 +365,43 @@ export class ComposerForm {
 		return id;
 	}
 
+	// The storage mode a NEW comment in this note should use (issue #48). The
+	// note's own on-disk format wins; only a note with no comments yet consults
+	// the desired mode, a per-note `annoteca_storage` frontmatter override first,
+	// then the global default. See resolveStorageModeForNewComment.
+	private noteStorageMode(content: string): StorageMode {
+		const file = this.request.view.file ?? undefined;
+		const fm = file
+			? this.plugin.app.metadataCache.getFileCache(file)?.frontmatter
+			: undefined;
+		const raw: unknown = fm
+			? (fm as Record<string, unknown>)['annoteca_storage']
+			: undefined;
+		const override = coerceStorageMode(raw);
+		return resolveStorageModeForNewComment(
+			content,
+			override,
+			this.plugin.settings.storageMode,
+		);
+	}
+
+	// Apply a minimal single-region edit to the editor. Used for the eof store
+	// region, which sits after all prose, so this never rewrites untouched prose
+	// or collapses unrelated undo history. A no-op when nothing changed.
+	private applyEditorDiff(
+		editor: Editor,
+		before: string,
+		after: string,
+	): void {
+		const splice = diffToSplice(before, after);
+		if (!splice) return;
+		editor.replaceRange(
+			splice.insert,
+			editor.offsetToPos(splice.from),
+			editor.offsetToPos(splice.to),
+		);
+	}
+
 	// Find the marker this form is editing in the document as it stands NOW.
 	//
 	// Returns undefined on every refusal, and the caller then leaves the form
@@ -534,6 +579,43 @@ export class ComposerForm {
 			const fresh = this.resolveEditTarget(editor);
 			if (fresh === undefined) return;
 
+			// eof mode: the body, thread and history live in the store, not the
+			// marker. Rewrite the store entry and keep the marker lean, rather than
+			// serializing the body inline, which would pull it back into the prose
+			// and strand the entry. The marker is authoritative for category, so a
+			// category change also rewrites the lean marker in place; the id never
+			// changes. resolveEditTarget returned the lean marker itself (empty
+			// body), which is exactly what resolveEofTarget needs to join the store.
+			const content = editor.getValue();
+			const eof = resolveEofTarget(content, fresh);
+			if (eof) {
+				const nextFull: Comment = {
+					...eof.full,
+					category,
+					body: finalBody,
+				};
+				// Store region first (it sits after all prose), then the marker at
+				// the passage, so the earlier splice cannot shift the marker offsets.
+				this.applyEditorDiff(
+					editor,
+					content,
+					writeStoreRegion(content, storeEntriesWith(eof, nextFull)),
+				);
+				if (category !== fresh.category) {
+					editor.replaceRange(
+						serializeLeanMarker(category, eof.entry.comment.id),
+						editor.offsetToPos(fresh.marker.start),
+						editor.offsetToPos(fresh.marker.end),
+					);
+				}
+				this.hooks.close();
+				this.hooks.onSubmitted?.(
+					this.request.filePath,
+					fresh.marker.start,
+				);
+				return;
+			}
+
 			// Every tail field is listed rather than spread, because the defect
 			// here was an omitted one and a list is checkable against the format.
 			const serialized = serialize({
@@ -571,14 +653,26 @@ export class ComposerForm {
 				: undefined;
 
 		const comment = this.buildCommentForCreate(category, finalBody, anchor);
-		const text = serialize({
-			id: comment.id,
-			category: comment.category,
-			body: comment.body,
-			date: comment.date,
-			author: comment.author,
-			anchor: comment.anchor,
-		});
+		// The mode is resolved against the buffer BEFORE the marker is inserted, so
+		// "does this note already have comments" reads the note as it stands now.
+		const mode = this.noteStorageMode(editor.getValue());
+		const id = comment.id;
+
+		// What lands at the passage: a full inline marker, or a lean category+id
+		// marker whose body/thread move to the eof store below. The id guard is
+		// belt-and-braces (buildCommentForCreate always assigns one); without an id
+		// there is no join key, so such a comment can only be stored inline.
+		const eof = mode === 'eof' && id !== undefined;
+		const text = eof
+			? serializeLeanMarker(comment.category, id)
+			: serialize({
+					id: comment.id,
+					category: comment.category,
+					body: comment.body,
+					date: comment.date,
+					author: comment.author,
+					anchor: comment.anchor,
+				});
 
 		let markerStart: number;
 		if (selection.length > 0) {
@@ -596,6 +690,22 @@ export class ComposerForm {
 			const cursor = editor.getCursor();
 			markerStart = editor.posToOffset(cursor);
 			editor.replaceRange(text, cursor);
+		}
+
+		// eof mode: the marker just inserted is lean; write the entry that backs it
+		// to the store region at EOF. Computed against the buffer AFTER the marker
+		// insert so the store splice stays disjoint from the marker insertion.
+		if (eof) {
+			const afterMarker = editor.getValue();
+			const entries = [
+				...parseStore(afterMarker).map((e) => e.comment),
+				toStored(id, comment),
+			];
+			this.applyEditorDiff(
+				editor,
+				afterMarker,
+				writeStoreRegion(afterMarker, entries),
+			);
 		}
 
 		this.hooks.close();
