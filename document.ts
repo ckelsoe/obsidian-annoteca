@@ -45,7 +45,7 @@ export interface ParsedDocument {
 // overridden by a store entry: doing so could hide visible text behind a stale or
 // stray entry. Gating the merge on leanness is what makes "a note never mixes
 // styles" safe even when a file does.
-function isLeanMarker(c: Comment): boolean {
+export function isLeanMarker(c: Comment): boolean {
 	return (
 		c.body === '' &&
 		c.replies.length === 0 &&
