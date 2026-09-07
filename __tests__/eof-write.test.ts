@@ -125,3 +125,54 @@ describe('eof write + read round trip', () => {
 		expect(comments[0]?.replies[0]?.body).toBe('found one\nhere');
 	});
 });
+
+// A note that went new build -> downgrade -> old build folds it to eof -> upgrade.
+// The old build did not know `[source=...]`, so it carried the line verbatim in
+// unknownLines, which is the forward-compatibility the format promises. Coming
+// back, it has to be promoted: serialize filters unknownLines through
+// isUnknownStructuredLine, and the line is now KNOWN, so leaving it there means
+// convertFileToInline drops it and the provenance is gone for good.
+describe('legacy stored source line', () => {
+	const legacy = (unknownLines: string[]): StoredComment => ({
+		id: 'ffff6666',
+		category: 'prose-check',
+		body: 'Flagged register.',
+		replies: [],
+		unknownLines,
+	});
+
+	const decode = (c: StoredComment) =>
+		parseStore(writeStoreRegion('Prose.\n', [c]))[0]?.comment;
+
+	it('is promoted to source and removed from unknownLines', () => {
+		const back = decode(legacy(['[source=plumbline:a1b2c3d4]']));
+		expect(back?.source).toEqual({ tag: 'plumbline', key: 'a1b2c3d4' });
+		expect(back?.unknownLines ?? []).toEqual([]);
+	});
+
+	it('leaves the other carried lines alone', () => {
+		const back = decode(
+			legacy(['[retry=3]', '[source=plumbline:a1b2c3d4]', '[x=1]']),
+		);
+		expect(back?.source?.key).toBe('a1b2c3d4');
+		expect(back?.unknownLines).toEqual(['[retry=3]', '[x=1]']);
+	});
+
+	// An ungrammatical one is not provenance and must stay carried, or the
+	// migration would delete a line it cannot read.
+	it('does not lift a line the grammar rejects', () => {
+		const back = decode(legacy(['[source=Plumbline:has space]']));
+		expect(back?.source).toBeUndefined();
+		expect(back?.unknownLines).toEqual(['[source=Plumbline:has space]']);
+	});
+
+	// An entry carrying both is a hand edit; the structured field is the one this
+	// build wrote, and the stray line stays visible rather than being merged.
+	it('prefers an explicit source and keeps the stray line', () => {
+		const c = legacy(['[source=other:zzzz9999]']);
+		c.source = { tag: 'plumbline', key: 'a1b2c3d4' };
+		const back = decode(c);
+		expect(back?.source).toEqual({ tag: 'plumbline', key: 'a1b2c3d4' });
+		expect(back?.unknownLines).toEqual(['[source=other:zzzz9999]']);
+	});
+});

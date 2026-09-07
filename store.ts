@@ -190,6 +190,33 @@ function optString(value: unknown): string | undefined {
 // parser would read back as body text. `isCommentSource` is the same check the
 // serializer applies, so the store and the marker cannot disagree about what a
 // valid source looks like.
+// The same shape SOURCE_LINE_RE matches, kept local because this reads a line an
+// older build carried as opaque text rather than one this build parsed.
+const LEGACY_SOURCE_RE =
+	/^\s*\[source=([a-z][a-z0-9-]*):([A-Za-z0-9._-]{1,64})\]\s*$/;
+
+// Pull a legal `[source=...]` out of the lines an older build carried verbatim,
+// and hand back the rest. First legal one wins; a second stays in unknownLines,
+// where it round-trips as text rather than being silently merged into one field.
+function liftLegacySource(lines: readonly string[]): {
+	source: CommentSource | undefined;
+	rest: readonly string[];
+} {
+	for (let i = 0; i < lines.length; i++) {
+		const match = LEGACY_SOURCE_RE.exec(lines[i] ?? '');
+		if (match && match[1] !== undefined && match[2] !== undefined) {
+			const source = { tag: match[1], key: match[2] };
+			if (isCommentSource(source)) {
+				return {
+					source,
+					rest: [...lines.slice(0, i), ...lines.slice(i + 1)],
+				};
+			}
+		}
+	}
+	return { source: undefined, rest: lines };
+}
+
 function coerceSource(value: unknown): CommentSource | undefined {
 	if (typeof value !== 'object' || value === null) return undefined;
 	const obj = value as Record<string, unknown>;
@@ -316,9 +343,29 @@ export function decodeStoreEntry(json: string): StoredComment | undefined {
 	const unknownLines = coerceUnknownLines(obj.unknownLines);
 	if (unknownLines === undefined) return undefined;
 
-	const source =
+	const explicitSource =
 		obj.source === undefined ? undefined : coerceSource(obj.source);
-	if (obj.source !== undefined && source === undefined) return undefined;
+	if (obj.source !== undefined && explicitSource === undefined)
+		return undefined;
+
+	// Migration for an entry an OLDER build wrote. That build did not know
+	// `[source=...]`, so toStored carried it verbatim in unknownLines, which is
+	// exactly the forward-compatibility the format promises. On the way back it
+	// has to be promoted, and not for tidiness: serialize filters unknownLines
+	// through isUnknownStructuredLine, and this line is now KNOWN, so leaving it
+	// there means convertFileToInline drops it and the provenance is gone for
+	// good. Reproduced before fixing.
+	//
+	// Only when there is no explicit `source`. An entry carrying both is a hand
+	// edit, and the structured field is the one this build wrote.
+	// coerceUnknownLines returns null for "absent", distinct from an empty list.
+	const priorLines = unknownLines ?? [];
+	const lifted =
+		explicitSource === undefined
+			? liftLegacySource(priorLines)
+			: { source: explicitSource, rest: priorLines };
+	const source = lifted.source;
+	const carried = lifted.rest;
 
 	const out: StoredComment = { id, category, body, replies };
 	const date = optString(obj.date);
@@ -329,8 +376,8 @@ export function decodeStoreEntry(json: string): StoredComment | undefined {
 	if (anchor !== undefined) out.anchor = anchor;
 	if (addressed !== null) out.addressed = addressed;
 	if (resolution !== null) out.resolution = resolution;
-	if (unknownLines !== null && unknownLines.length > 0) {
-		out.unknownLines = unknownLines;
+	if (carried.length > 0) {
+		out.unknownLines = [...carried];
 	}
 	return out;
 }
