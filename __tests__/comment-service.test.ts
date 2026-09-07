@@ -2125,3 +2125,58 @@ describe('promote: stale content refusal', () => {
 		expect(made).toHaveLength(1);
 	});
 });
+
+// Bounds alone are not enough. An offset inside existing syntax is in bounds and
+// splices a new marker into the middle of it, which is the exact damage
+// findMalformedMarkers exists to report after the fact. A consumer computing
+// offsets over raw markdown reaches this honestly.
+describe('promote: anchors must land in prose', () => {
+	const req = (start: number, end: number, key = 'k1') => ({
+		category: 'prose-check',
+		body: 'Flagged register.',
+		anchor: { start, end },
+		author: 'plumbline',
+		sourceKey: key,
+	});
+
+	it('refuses an anchor inside an existing marker', async () => {
+		const note = 'Before. <!-- annoteca/tone: soften this --> after.\n';
+		const h = makeHarnessWith(note, false);
+		const inside = note.indexOf('soften');
+		const made = await h.service.promote(
+			'note.md',
+			[req(inside, inside + 6)],
+			h.content,
+		);
+		expect(made).toEqual([]);
+		expect(h.content).toBe(note);
+	});
+
+	it('refuses an anchor inside frontmatter', async () => {
+		const note = '---\ntitle: A note\n---\n\nProse follows here.\n';
+		const h = makeHarnessWith(note, false);
+		const inside = note.indexOf('A note');
+		const made = await h.service.promote(
+			'note.md',
+			[req(inside, inside + 6)],
+			h.content,
+		);
+		expect(made).toEqual([]);
+		expect(h.content).toBe(note);
+	});
+
+	// The counterweight: prose in the same documents still promotes, so the
+	// refusals above are the guard and not promote refusing everything.
+	it('accepts prose in a note that has both', async () => {
+		const note =
+			'---\ntitle: A note\n---\n\nBefore. <!-- annoteca/tone: x --> the rough draft here.\n';
+		const h = makeHarnessWith(note, false);
+		const at = note.indexOf('rough draft');
+		const made = await h.service.promote(
+			'note.md',
+			[req(at, at + 11)],
+			h.content,
+		);
+		expect(made).toHaveLength(1);
+	});
+});

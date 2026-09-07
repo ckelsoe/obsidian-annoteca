@@ -52,6 +52,7 @@ import {
 } from './document';
 import {
 	parseStore,
+	scanStoreEntries,
 	writeStoreRegion,
 	diffToSplice,
 	type SpliceRange,
@@ -126,23 +127,61 @@ export function markerDamageMessage(finding: MalformedMarker): string {
 // unqueued form. Queueing at both layers would deadlock: resolveComment waiting
 // on resolveAndRemoveComment, which is waiting behind resolveComment in the same
 // queue.
+// Byte ranges a promoted marker must never be spliced into: existing markers,
+// end-of-file store blocks, and YAML frontmatter.
+//
+// Bounds alone are not enough. An offset inside an existing marker is in bounds
+// and splices a new marker into the middle of that one, which is the exact
+// damage `findMalformedMarkers` exists to report after the fact. A consumer
+// computing offsets over raw markdown reaches this honestly: Plumbline masks
+// markers before linting, and a bug in that masking would arrive here as a
+// perfectly well-formed request.
+function forbiddenRanges(content: string): { start: number; end: number }[] {
+	const out = parseAll(content).map((c) => ({
+		start: c.marker.start,
+		end: c.marker.end,
+	}));
+	for (const e of scanStoreEntries(content)) {
+		out.push({ start: e.start, end: e.end });
+	}
+	// Frontmatter, only when the document opens with it. A `---` fence anywhere
+	// else is a horizontal rule and is ordinary prose.
+	const fm = /^---\r?\n[\s\S]*?\r?\n---[ \t]*(\r?\n|$)/.exec(content);
+	if (fm) out.push({ start: 0, end: fm[0].length });
+	return out;
+}
+
 // Vetted before ANY write, so a bad request cannot leave a partial batch the
 // caller cannot reconcile. Every field is checked against the same rules the
 // format enforces, not looser ones: a category the parser cannot match makes the
 // whole marker invisible, and a source the serializer refuses would silently drop
 // the provenance that makes promotion idempotent.
-function isValidPromoteRequest(r: PromoteRequest, docLength: number): boolean {
+function isValidPromoteRequest(
+	r: PromoteRequest,
+	docLength: number,
+	forbidden: readonly { start: number; end: number }[],
+): boolean {
 	if (!isSerializableCategory(r.category)) return false;
 	if (r.body.trim() === '') return false;
 	if (!isAuthorToken(r.author)) return false;
 	if (!isCommentSource({ tag: r.author, key: r.sourceKey })) return false;
 	const { start, end } = r.anchor;
+	if (
+		!Number.isInteger(start) ||
+		!Number.isInteger(end) ||
+		start < 0 ||
+		end < start ||
+		end > docLength
+	) {
+		return false;
+	}
+	// The marker is inserted AT `start`, and the anchor text is captured from
+	// start..end, so both have to be clear of existing syntax. A range that
+	// merely touches a boundary is fine: inserting at the position a marker ends
+	// is inserting after it.
 	return (
-		Number.isInteger(start) &&
-		Number.isInteger(end) &&
-		start >= 0 &&
-		end >= start &&
-		end <= docLength
+		!forbidden.some((f) => start > f.start && start < f.end) &&
+		!forbidden.some((f) => end > f.start && start < f.end)
 	);
 }
 
@@ -650,9 +689,10 @@ export class CommentService {
 				.comments.filter((c) => c.source !== undefined)
 				.map((c) => `${c.source?.tag}:${c.source?.key}`),
 		);
+		const forbidden = forbiddenRanges(content);
 		const valid: PromoteRequest[] = [];
 		for (const r of requests) {
-			if (!isValidPromoteRequest(r, content.length)) continue;
+			if (!isValidPromoteRequest(r, content.length, forbidden)) continue;
 			// Idempotent by source key (contract 7.2): promoting a finding twice
 			// is a no-op, not a second marker. A consumer re-running over a note
 			// it already promoted is the normal case, not an error.
