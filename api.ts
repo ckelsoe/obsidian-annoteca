@@ -1,0 +1,166 @@
+import type { EventRef } from 'obsidian';
+
+import type AnnotecaPlugin from './main';
+import type { Comment } from './types';
+import { ANCHOR_WINDOW, resolveAnchorRangeInWindows } from './view-utils';
+import { SKILL_SCHEMA_VERSION } from './skill-export';
+
+// The read-only API other plugins call (F-284, interop-contract section 7).
+//
+// Read-only on purpose, and first. The compatibility promise starts as small as
+// it can be, and until `promote()` lands in AN-C2 a consumer bug cannot damage a
+// note. Everything here is a pure read over the comment index.
+//
+// Consumers must resolve this at CALL time through
+// `app.plugins.getPlugin('annoteca')?.api` and never cache it in their own
+// `onload`. Caching is the only thing that makes plugin load order matter, and
+// `isEnabled()` is not an availability test: it reports saved config, so it
+// answers true for a disabled, unloaded plugin. See contract 4.5.
+
+export const API_VERSION = 1;
+
+// The shape a consumer sees. Deliberately NOT the internal `Comment`: that
+// carries the marker grammar, `unknownLines`, reply and addressed structures
+// that exist to round-trip the file format, and every one of them would become
+// something this API could not change later. What is here is what a consumer has
+// a reason to read.
+export interface ApiComment {
+	readonly id: string | undefined;
+	readonly path: string;
+	readonly category: string;
+	readonly body: string;
+	readonly author: string | undefined;
+	readonly date: string | undefined;
+	readonly resolved: boolean;
+	// Addressed means a proposed edit is in the note awaiting accept, revise or
+	// reject. Such a comment is still open, so it is counted as unresolved.
+	readonly addressed: boolean;
+	readonly replyCount: number;
+	// The prose the comment was made about, as captured when it was created.
+	// `truncated` means the original selection was longer than the stored text.
+	readonly anchor:
+		{ readonly text: string; readonly truncated: boolean } | undefined;
+	// Where the marker itself sits in the file.
+	readonly marker: { readonly start: number; readonly end: number };
+}
+
+// Where a comment's prose actually sits in the current text, which is not the
+// marker position: a marker is written at the HEAD of the passage it concerns.
+export interface AnchorRange {
+	readonly start: number;
+	readonly end: number;
+	readonly category: string;
+	readonly resolved: boolean;
+	readonly commentId: string | undefined;
+}
+
+export interface ApiFilter {
+	readonly paths?: readonly string[];
+	readonly categories?: readonly string[];
+	// Defaults to 'open', which is the question a consumer usually has.
+	readonly resolved?: 'open' | 'resolved' | 'all';
+	readonly author?: string;
+}
+
+export interface AnnotecaApi {
+	readonly apiVersion: number;
+	// Mirrors SKILL_SCHEMA_VERSION, so a consumer can tell which marker format
+	// this build reads and writes without parsing a note to find out.
+	readonly formatVersion: number;
+	queryComments(filter?: ApiFilter): readonly ApiComment[];
+	// Sync and pure: the caller passes the text it already has rather than this
+	// reading the vault. Plumbline's use (contract 5.1) is inside a CodeMirror
+	// extension that holds the document, so an async vault read would be both
+	// slower and wrong, resolving anchors against a stale on-disk copy while the
+	// editor shows unsaved edits.
+	anchorsFor(path: string, content: string): readonly AnchorRange[];
+	// Fires when the comment index changes. Returns its own unsubscribe; a
+	// consumer must call it on unload or the callback outlives the consumer.
+	onChange(cb: () => void): () => void;
+}
+
+// A copy, never the indexed object. The index hands out its live `Comment`
+// instances, and a consumer that mutated one would corrupt the vault's view of
+// its own comments without touching a byte on disk.
+function toApiComment(path: string, c: Comment): ApiComment {
+	return {
+		id: c.id,
+		path,
+		category: c.category,
+		body: c.body,
+		author: c.author,
+		date: c.date,
+		resolved: c.resolution !== undefined,
+		addressed: c.addressed !== undefined,
+		replyCount: c.replies.length,
+		anchor: c.anchor
+			? { text: c.anchor.text, truncated: c.anchor.truncated }
+			: undefined,
+		marker: { start: c.marker.start, end: c.marker.end },
+	};
+}
+
+export function createApi(plugin: AnnotecaPlugin): AnnotecaApi {
+	return {
+		apiVersion: API_VERSION,
+		formatVersion: SKILL_SCHEMA_VERSION,
+
+		queryComments(filter?: ApiFilter): readonly ApiComment[] {
+			const located = plugin.commentIndex.queryUnresolved({
+				paths: filter?.paths ? new Set(filter.paths) : undefined,
+				categories: filter?.categories
+					? new Set(filter.categories)
+					: undefined,
+				resolved: filter?.resolved ?? 'open',
+				author: filter?.author,
+			});
+			return located.map((l) => toApiComment(l.path, l.comment));
+		},
+
+		anchorsFor(path: string, content: string): readonly AnchorRange[] {
+			const idx = plugin.commentIndex.get(path);
+			if (!idx) {
+				return [];
+			}
+			const out: AnchorRange[] = [];
+			for (const c of idx.comments) {
+				const anchor = c.anchor;
+				if (!anchor || anchor.text.length === 0) {
+					continue;
+				}
+				// The same two windows the editor decorations slice, so the
+				// ranges this returns are the ones a reader sees underlined
+				// rather than a second, subtly different answer.
+				const backStart = Math.max(0, c.marker.start - ANCHOR_WINDOW);
+				const range = resolveAnchorRangeInWindows(
+					content.slice(backStart, c.marker.start),
+					backStart,
+					c.marker.start,
+					content.slice(
+						c.marker.end,
+						Math.min(content.length, c.marker.end + ANCHOR_WINDOW),
+					),
+					c.marker.end,
+					anchor.text,
+				);
+				if (range) {
+					out.push({
+						start: range.from,
+						end: range.to,
+						category: c.category,
+						resolved: c.resolution !== undefined,
+						commentId: c.id,
+					});
+				}
+			}
+			return out;
+		},
+
+		onChange(cb: () => void): () => void {
+			const ref: EventRef = plugin.events.on('index-changed', cb);
+			return () => {
+				plugin.events.offref(ref);
+			};
+		},
+	};
+}

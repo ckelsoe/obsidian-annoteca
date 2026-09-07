@@ -85,18 +85,41 @@ export class ButtonComponent {}
 export function requireApiVersion(_version: string): boolean {
 	return true;
 }
+// A working emitter, not a no-op. It was a no-op, which meant nothing that
+// subscribes to plugin events could be tested at all: a subscription that never
+// fired and one that fired correctly looked identical. Small enough to keep
+// honest, and it matches the parts of Obsidian's Events this plugin uses.
+interface MockEventRef {
+	name: string;
+	cb: (...args: unknown[]) => void;
+}
+
 export class Events {
-	on(_name: string, _cb: (...args: unknown[]) => void): { name: string } {
-		return { name: _name };
+	private readonly handlers = new Map<
+		string,
+		((...args: unknown[]) => void)[]
+	>();
+
+	on(name: string, cb: (...args: unknown[]) => void): MockEventRef {
+		const list = this.handlers.get(name) ?? [];
+		list.push(cb);
+		this.handlers.set(name, list);
+		return { name, cb };
 	}
-	off(): void {
-		// no-op
+
+	off(name: string, cb: (...args: unknown[]) => void): void {
+		const list = this.handlers.get(name);
+		if (!list) return;
+		const i = list.indexOf(cb);
+		if (i >= 0) list.splice(i, 1);
 	}
-	trigger(): void {
-		// no-op
+
+	trigger(name: string, ...args: unknown[]): void {
+		for (const cb of [...(this.handlers.get(name) ?? [])]) cb(...args);
 	}
-	offref(): void {
-		// no-op
+
+	offref(ref: MockEventRef | undefined): void {
+		if (ref) this.off(ref.name, ref.cb);
 	}
 }
 

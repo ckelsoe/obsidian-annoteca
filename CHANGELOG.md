@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- A read-only API other plugins can call, so a companion tool can see your comments without parsing notes itself. It exposes the open comments for a note or the whole vault, where each comment's prose actually sits in the current text, and a way to be told when anything changes. It only reads: nothing another plugin does through it can alter a note. Plumbline, the prose linter, is the first consumer.
 - A "Known comment namespaces" setting under Diagnostics. The marker-conflict check reports any `<!-- prefix/... -->` comment that is not Annoteca's, which is right for a mistyped marker and wrong for another tool you installed on purpose. List those prefixes here and the check stays quiet about them. Seeded with `plumbline`, the prose linter that pairs with Annoteca. The conflict report now also opens with the namespaces it found and the ones already listed, so you can copy a prefix out of the report instead of guessing at its spelling.
 
 ### Fixed
