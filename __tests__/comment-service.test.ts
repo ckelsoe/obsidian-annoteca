@@ -35,6 +35,7 @@ const NOTE = [
 // vault.modify). The editor path shares applySplices and is validated by hand.
 function makeHarness(deleteOnResolve: boolean) {
 	let content = NOTE;
+	const frontmatter: Record<string, unknown> | undefined = undefined;
 	const file = new TFile();
 	const plugin = {
 		settings: {
@@ -53,6 +54,11 @@ function makeHarness(deleteOnResolve: boolean) {
 					content = fn(content);
 					return Promise.resolve(content);
 				},
+			},
+			// Frontmatter the service reads for the per-note storage override.
+			// Mutable so a test can set `annoteca_storage` on the note.
+			metadataCache: {
+				getFileCache: () => ({ frontmatter }),
 			},
 			workspace: {
 				getLeavesOfType: () => [],
@@ -74,6 +80,7 @@ function makeHarness(deleteOnResolve: boolean) {
 // transitions (F-270). Same closed-file (vault.modify) write path as makeHarness.
 function makeHarnessWith(initial: string, deleteOnResolve = false) {
 	let content = initial;
+	let frontmatter: Record<string, unknown> | undefined;
 	const file = new TFile();
 	const plugin = {
 		settings: {
@@ -98,6 +105,11 @@ function makeHarnessWith(initial: string, deleteOnResolve = false) {
 					return Promise.resolve(content);
 				},
 			},
+			// Frontmatter the service reads for the per-note storage override.
+			// Mutable so a test can set `annoteca_storage` on the note.
+			metadataCache: {
+				getFileCache: () => ({ frontmatter }),
+			},
 			workspace: {
 				getLeavesOfType: () => [],
 				// Deliberately NOT the file under test, standing in for a Hub
@@ -113,6 +125,9 @@ function makeHarnessWith(initial: string, deleteOnResolve = false) {
 		// Exposed so a test can change a setting the service reads, which the
 		// promotion-budget cases need.
 		plugin,
+		setFrontmatter(fm: Record<string, unknown> | undefined) {
+			frontmatter = fm;
+		},
 		get content() {
 			return content;
 		},
@@ -928,6 +943,7 @@ const TWO_COMMENTS = [
 // moment ago, and the file has moved on before the write lands.
 function makeRacingHarness(initial: string) {
 	let content = initial;
+	const frontmatter: Record<string, unknown> | undefined = undefined;
 	let afterNextRead: (() => void) | undefined;
 	const file = new TFile();
 	const plugin = {
@@ -951,6 +967,11 @@ function makeRacingHarness(initial: string) {
 					content = fn(content);
 					return Promise.resolve(content);
 				},
+			},
+			// Frontmatter the service reads for the per-note storage override.
+			// Mutable so a test can set `annoteca_storage` on the note.
+			metadataCache: {
+				getFileCache: () => ({ frontmatter }),
 			},
 			workspace: {
 				getLeavesOfType: () => [],
@@ -1223,6 +1244,7 @@ const NOTE_WITH_NATIVE = [
 // own write runs, which is the window the old code computed its offsets in.
 function makeConvertHarness(initial: string) {
 	let content = initial;
+	const frontmatter: Record<string, unknown> | undefined = undefined;
 	let beforeNextProcess: (() => void) | undefined;
 	let afterNextRead: (() => void) | undefined;
 	const file = new TFile();
@@ -1254,6 +1276,11 @@ function makeConvertHarness(initial: string) {
 					content = fn(content);
 					return Promise.resolve(content);
 				},
+			},
+			// Frontmatter the service reads for the per-note storage override.
+			// Mutable so a test can set `annoteca_storage` on the note.
+			metadataCache: {
+				getFileCache: () => ({ frontmatter }),
 			},
 			workspace: {
 				getLeavesOfType: () => [],
@@ -2018,5 +2045,43 @@ describe('promote: the promotion budget', () => {
 		const made = await h.service.promote('note.md', many(5));
 		expect(made).toHaveLength(5);
 		expect(parseAll(h.content)).toHaveLength(5);
+	});
+});
+
+// The per-note storage override, which only bites on a note with no comments
+// yet: exactly the note a consumer promotes into first. Ignoring it wrote full
+// inline markers into a note explicitly configured for clean prose.
+describe('promote: per-note storage override', () => {
+	const PLAIN = 'The rough draft carries on here and then some more prose.\n';
+	const one = {
+		category: 'prose-check',
+		body: 'Flagged register.',
+		anchor: { start: 4, end: 15 },
+		author: 'plumbline',
+		sourceKey: 'a1b2c3d4',
+	};
+
+	it('writes a lean marker when the note asks for end-of-file storage', async () => {
+		const h = makeHarnessWith(PLAIN, false);
+		h.setFrontmatter({ annoteca_storage: 'eof' });
+		await h.service.promote('note.md', [one]);
+		// A lean marker carries category and id only; the body moved to the store.
+		expect(h.content).toContain('annoteca:store');
+		expect(h.content).not.toContain('[author=plumbline]');
+		// parseDocument, not parseAll: the lean marker's body and provenance live
+		// in the store, so parseAll alone would see an empty, source-less comment.
+		const c = parseDocument(h.content).comments[0];
+		expect(c?.body).toBe('Flagged register.');
+		expect(c?.source).toEqual({ tag: 'plumbline', key: 'a1b2c3d4' });
+	});
+
+	// The counterweight: without an override the same call writes inline, so the
+	// test above cannot pass by promote always choosing eof.
+	it('writes inline when the note asks for nothing', async () => {
+		const h = makeHarnessWith(PLAIN, false);
+		h.setFrontmatter(undefined);
+		await h.service.promote('note.md', [one]);
+		expect(h.content).not.toContain('annoteca:store');
+		expect(h.content).toContain('[author=plumbline]');
 	});
 });

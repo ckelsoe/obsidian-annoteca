@@ -43,6 +43,7 @@ import {
 	type MalformedMarker,
 } from './parser';
 import {
+	coerceStorageMode,
 	parseDocument,
 	resolveEofTarget,
 	resolveStorageModeForNewComment,
@@ -672,9 +673,22 @@ export class CommentService {
 			if (!approved) return [];
 		}
 
+		// The per-note `annoteca_storage` override, read the same way the composer
+		// reads it. Passing undefined here ignored it, so promoting into a note
+		// explicitly configured for clean prose wrote full inline markers into it
+		// (or the reverse) whenever the note had no comments yet. It only matters
+		// on an empty note, which is exactly the note a consumer promotes into
+		// first.
+		const fm =
+			this.plugin.app.metadataCache.getFileCache(file)?.frontmatter;
+		const override = coerceStorageMode(
+			fm
+				? (fm as Record<string, unknown>)['annoteca_storage']
+				: undefined,
+		);
 		const mode = resolveStorageModeForNewComment(
 			content,
-			undefined,
+			override,
 			this.plugin.settings.storageMode,
 		);
 		const splices: SpliceRange[] = [];
