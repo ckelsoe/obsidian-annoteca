@@ -18,7 +18,11 @@ import { SKILL_SCHEMA_VERSION } from './skill-export';
 // `isEnabled()` is not an availability test: it reports saved config, so it
 // answers true for a disabled, unloaded plugin. See contract 4.5.
 
-export const API_VERSION = 1;
+// 1 = read only: queryComments, anchorsFor, onChange.
+// 2 = adds promote(). Bumped because a consumer checking `apiVersion` to decide
+//     whether it can promote would otherwise treat a read-only build and this one
+//     as the same thing and call a method that is not there.
+export const API_VERSION = 2;
 
 // The shape a consumer sees. Deliberately NOT the internal `Comment`: that
 // carries the marker grammar, `unknownLines`, reply and addressed structures

@@ -2180,3 +2180,78 @@ describe('promote: anchors must land in prose', () => {
 		expect(made).toHaveLength(1);
 	});
 });
+
+// A public runtime API: the TypeScript declaration is documentation, not a
+// guarantee, so a consumer can hand over anything.
+describe('promote: hostile and mixed input', () => {
+	const PLAIN = 'The rough draft carries on here and then some more prose.\n';
+	const good = {
+		category: 'prose-check',
+		body: 'Flagged register.',
+		anchor: { start: 4, end: 15 },
+		author: 'plumbline',
+		sourceKey: 'a1b2c3d4',
+	};
+
+	// All or nothing. A consumer handed back fewer comments than it asked for
+	// cannot tell which were rejected and which were already present, and would
+	// record a partial analysis as complete.
+	it('writes nothing when any one request in the batch is invalid', async () => {
+		const h = makeHarnessWith(PLAIN, false);
+		const made = await h.service.promote(
+			'note.md',
+			[good, { ...good, sourceKey: 'has space' }],
+			h.content,
+		);
+		expect(made).toEqual([]);
+		expect(h.content).toBe(PLAIN);
+	});
+
+	// Rejects rather than throws. A throw across a plugin boundary is a worse
+	// failure than a refusal, because the caller cannot tell what happened.
+	it('rejects malformed values instead of throwing', async () => {
+		const h = makeHarnessWith(PLAIN, false);
+		for (const bad of [
+			{ ...good, body: undefined },
+			{ ...good, anchor: undefined },
+			{ ...good, anchor: { start: 'x', end: 9 } },
+			{ ...good, category: 42 },
+			null,
+		]) {
+			const made = await h.service.promote(
+				'note.md',
+				[bad as unknown as PromoteRequest],
+				h.content,
+			);
+			expect(made).toEqual([]);
+		}
+		expect(h.content).toBe(PLAIN);
+	});
+
+	// An already-promoted finding is NOT an invalid one: it is skipped, not
+	// refused, so a re-run alongside new findings still promotes the new ones.
+	it('still promotes new findings alongside an already-promoted one', async () => {
+		const h = makeHarnessWith(PLAIN, false);
+		await h.service.promote('note.md', [good], h.content);
+		// Offsets are recomputed against the note AS IT NOW IS. The first
+		// promotion inserted a marker, so every offset after it moved and the
+		// original anchor no longer points where it did. Reusing the old numbers
+		// is refused by the syntax guard, which is that guard working.
+		const now = h.content;
+		const at = now.indexOf('some more');
+		const made = await h.service.promote(
+			'note.md',
+			[
+				{ ...good, anchor: { start: at, end: at + 9 } },
+				{
+					...good,
+					sourceKey: 'bbbb2222',
+					anchor: { start: at, end: at + 9 },
+				},
+			],
+			now,
+		);
+		expect(made).toHaveLength(1);
+		expect(made[0]?.sourceKey).toBe('bbbb2222');
+	});
+});

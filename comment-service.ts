@@ -156,16 +156,35 @@ function forbiddenRanges(content: string): { start: number; end: number }[] {
 // format enforces, not looser ones: a category the parser cannot match makes the
 // whole marker invisible, and a source the serializer refuses would silently drop
 // the provenance that makes promotion idempotent.
+// Takes `unknown`, deliberately. This is a RUNTIME api other plugins call, so
+// the PromoteRequest declaration is documentation and not a guarantee: a
+// consumer can hand over anything, and typing the parameter as the interface
+// would be asserting the very thing this function exists to check. Reading
+// `r.body.trim()` off a missing body throws out of a function documented to
+// reject, and a throw across a plugin boundary is a worse failure than a refusal
+// because the caller cannot tell what happened.
 function isValidPromoteRequest(
-	r: PromoteRequest,
+	value: unknown,
 	docLength: number,
 	forbidden: readonly { start: number; end: number }[],
-): boolean {
+): value is PromoteRequest {
+	if (typeof value !== 'object' || value === null) return false;
+	const r = value as Record<string, unknown>;
+	if (typeof r.category !== 'string') return false;
+	if (typeof r.body !== 'string') return false;
+	if (typeof r.author !== 'string') return false;
+	if (typeof r.sourceKey !== 'string') return false;
+	if (typeof r.anchor !== 'object' || r.anchor === null) return false;
+	const anchor = r.anchor as Record<string, unknown>;
+	if (typeof anchor.start !== 'number') return false;
+	if (typeof anchor.end !== 'number') return false;
+
 	if (!isSerializableCategory(r.category)) return false;
 	if (r.body.trim() === '') return false;
 	if (!isAuthorToken(r.author)) return false;
 	if (!isCommentSource({ tag: r.author, key: r.sourceKey })) return false;
-	const { start, end } = r.anchor;
+	const start = anchor.start;
+	const end = anchor.end;
 	if (
 		!Number.isInteger(start) ||
 		!Number.isInteger(end) ||
@@ -689,13 +708,23 @@ export class CommentService {
 				.comments.filter((c) => c.source !== undefined)
 				.map((c) => `${c.source?.tag}:${c.source?.key}`),
 		);
+		// All or nothing. A batch holding one bad request writes NOTHING rather
+		// than dropping it and promoting the rest: a consumer handed back fewer
+		// comments than it asked for cannot tell which of its findings were
+		// rejected and which were merely already present, and would record a
+		// partial analysis as complete.
 		const forbidden = forbiddenRanges(content);
+		const allValid = requests.every((r) =>
+			isValidPromoteRequest(r, content.length, forbidden),
+		);
+		if (!allValid) return [];
+
 		const valid: PromoteRequest[] = [];
 		for (const r of requests) {
-			if (!isValidPromoteRequest(r, content.length, forbidden)) continue;
 			// Idempotent by source key (contract 7.2): promoting a finding twice
-			// is a no-op, not a second marker. A consumer re-running over a note
-			// it already promoted is the normal case, not an error.
+			// is a no-op, not a second marker, and unlike an invalid request it is
+			// not an error. A consumer re-running over a note it already promoted
+			// is the normal case, so these are skipped rather than refused.
 			const key = `${r.author}:${r.sourceKey}`;
 			if (existing.has(key)) continue;
 			existing.add(key);
