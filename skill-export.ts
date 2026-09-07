@@ -39,7 +39,14 @@ export type SkillExportTarget = 'claude' | 'agent' | 'both';
 // real comment in the store untouched), or "create" a comment inline in a note the
 // user set up for clean prose. Same reason as every bump above: the assistant has
 // to be told.
-export const SKILL_SCHEMA_VERSION = 7;
+// 8 = the `[source=...]` line (F-282), and the rule that goes with it. A comment
+// can now be created by another plugin rather than a person, and carries where it
+// came from. An assistant reading a v7 skill does not know the line exists, so it
+// would treat it as an unknown trailing line, and, worse, would treat the comment
+// itself as an ordinary human one: resolving a machine finding on the author's
+// behalf is exactly the thing the flow must never do, because the finding
+// disappearing is not the same as the prose being fixed.
+export const SKILL_SCHEMA_VERSION = 8;
 
 const SKILL_VERSION_RE = /^annoteca-skill-version:\s*(\d+)\s*$/m;
 
@@ -153,7 +160,19 @@ The Q3 forecast assumes a hiring freeze through December.
 -->
 \`\`\`
 
-Structured lines sit at the END of the comment, after all body text, one per line, in this order: \`[id=]\`, \`[date=]\`, \`[author=]\`, \`[anchor=]\`, then \`[reply ...]\` lines oldest first, then at most one \`[addressed ...]\` line (with its optional \`annoteca-original\` fence), then at most one \`[resolved ...]\` line.
+Structured lines sit at the END of the comment, after all body text, one per line, in this order: \`[id=]\`, \`[date=]\`, \`[author=]\`, \`[source=]\`, \`[anchor=]\`, then \`[reply ...]\` lines oldest first, then at most one \`[addressed ...]\` line (with its optional \`annoteca-original\` fence), then at most one \`[resolved ...]\` line.
+
+### Machine-created comments: \`[source=...]\`
+
+A comment carrying a \`[source=<plugin>:<key>]\` line was created by another plugin, not by a person. For example \`[source=plumbline:a1b2c3d4]\`, where \`plumbline\` is a prose linter and the key is that plugin's own identity for the finding.
+
+**Never resolve one on the author's behalf.** This is the one rule the line exists for. A machine finding stops being reported the moment the prose changes, and that is not the same as the prose being right: the writer may have rewritten the sentence in a way the rule no longer matches while leaving the actual problem in place. Resolution is a judgement about the writing, so it stays a human act, exactly as it does for a comment a person wrote.
+
+What you may do with one: reply to it, address it by proposing a replacement through the normal \`[addressed ...]\` flow, or leave it. What you may not do: resolve it, delete it, or edit its \`[source=...]\` line.
+
+If a finding is no longer detected, the useful response is a reply saying so. Do not remove the comment; the thread is the record of what was raised and what happened to it.
+
+Do not write \`[source=...]\` yourself. It is written by the plugin that created the comment. If you are an assistant writing a comment by hand, you are the author: use \`[author=...]\` and leave \`[source=...]\` off.
 
 Field rules (match these exactly; the plugin's parser enforces them):
 

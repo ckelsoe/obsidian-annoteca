@@ -55,6 +55,12 @@ export function isLeanMarker(c: Comment): boolean {
 		c.anchor === undefined &&
 		c.date === undefined &&
 		c.author === undefined &&
+		// A source line is inline content, so a marker carrying one is not lean.
+		// Without this, a machine-created comment with an empty body classified
+		// as lean: the fold could treat it as eof-backed when an entry shared its
+		// id, overwrite its provenance on merge, and convertFileToEof would skip
+		// it entirely.
+		c.source === undefined &&
 		c.unknownLines.length === 0
 	);
 }
@@ -70,6 +76,9 @@ function merge(marker: Comment, stored: StoredComment): Comment {
 		category: marker.category,
 		body: stored.body,
 		date: stored.date,
+		// From the store, like every other field the lean marker dropped. A lean
+		// marker carries category and id only, so it never holds a source line.
+		source: stored.source,
 		author: stored.author,
 		anchor: stored.anchor,
 		replies: stored.replies.slice(),

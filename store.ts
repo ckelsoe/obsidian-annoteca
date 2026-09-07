@@ -40,12 +40,14 @@
 // atomically instead.
 
 import type {
+	CommentSource,
 	AnchorText,
 	Addressed,
 	Comment,
 	Reply,
 	Resolution,
 } from './types';
+import { isCommentSource } from './parser';
 
 // Schema version stamped into every entry. The marker format deliberately has NO
 // version sentinel (see parser.ts's escapeTerminator note: adding one there is a
@@ -86,6 +88,11 @@ export interface StoredComment {
 	// fold between storage modes never drops them. See parser.ts's unknown-line
 	// branch.
 	unknownLines?: readonly string[];
+	// Provenance for a machine-created comment (F-282), carried here for the same
+	// reason unknownLines is: a fold between storage modes must not drop it. A
+	// lean marker holds category and id only, so under eof storage this is the
+	// ONLY place a promoted comment's source survives.
+	source?: CommentSource;
 }
 
 export interface RawStoreEntry {
@@ -121,6 +128,20 @@ function buildPayload(c: StoredComment): Record<string, unknown> {
 	};
 	if (c.date !== undefined) out.date = c.date;
 	if (c.author !== undefined) out.author = c.author;
+	// Provenance goes into unknownLines as its marker line, NOT a top-level JSON
+	// field, and that is the whole point. Store entries are not version-gated, so
+	// an older build decodes this entry happily and simply ignores a field it does
+	// not know; the next reply or resolve on that build then rewrites the entry
+	// without it and the provenance is gone. unknownLines is the channel that
+	// already survives exactly that trip, because an older build carries those
+	// lines verbatim without understanding them.
+	//
+	// The decoder lifts it back out (liftLegacySource), so the pair is symmetric
+	// and a newer build never sees it as an unknown line.
+	const sourceLine =
+		c.source !== undefined
+			? `[source=${c.source.tag}:${c.source.key}]`
+			: undefined;
 	if (c.anchor !== undefined) {
 		out.anchor = { text: c.anchor.text, truncated: c.anchor.truncated };
 	}
@@ -152,8 +173,12 @@ function buildPayload(c: StoredComment): Record<string, unknown> {
 			note: c.resolution.note,
 		};
 	}
-	if (c.unknownLines !== undefined && c.unknownLines.length > 0) {
-		out.unknownLines = [...c.unknownLines];
+	const carried = [
+		...(c.unknownLines ?? []),
+		...(sourceLine !== undefined ? [sourceLine] : []),
+	];
+	if (carried.length > 0) {
+		out.unknownLines = carried;
 	}
 	return out;
 }
@@ -173,6 +198,58 @@ export function encodeStoreEntry(c: StoredComment): string {
 // quarantines it.
 function optString(value: unknown): string | undefined {
 	return typeof value === 'string' ? value : undefined;
+}
+
+// Vetted the same way every other field here is: the JSON is user-reachable, and
+// a malformed source quarantines the entry rather than writing a marker line the
+// parser would read back as body text. `isCommentSource` is the same check the
+// serializer applies, so the store and the marker cannot disagree about what a
+// valid source looks like.
+// The same shape SOURCE_LINE_RE matches, kept local because this reads a line an
+// older build carried as opaque text rather than one this build parsed.
+const LEGACY_SOURCE_RE =
+	/^\s*\[source=([a-z][a-z0-9-]*):([A-Za-z0-9._-]{1,64})\]\s*$/;
+
+// Pull a legal `[source=...]` out of the carried lines and hand back the rest.
+//
+// The first legal one wins and any FURTHER source-shaped line is dropped here,
+// deliberately. Once `[source=...]` is a known line, serialize refuses it from
+// unknownLines, so a second copy has no representation that survives a write:
+// leaving it would be a silent deletion further downstream, at conversion time,
+// instead of a decided one here. A comment has one origin, and two source lines
+// only arise from a hand edit or a merge.
+function liftLegacySource(lines: readonly string[]): {
+	source: CommentSource | undefined;
+	rest: readonly string[];
+} {
+	let source: CommentSource | undefined;
+	const rest: string[] = [];
+	for (const line of lines) {
+		const match = LEGACY_SOURCE_RE.exec(line);
+		const candidate =
+			match && match[1] !== undefined && match[2] !== undefined
+				? { tag: match[1], key: match[2] }
+				: undefined;
+		if (candidate !== undefined && isCommentSource(candidate)) {
+			// First wins; later ones are dropped rather than carried into a list
+			// serialize would reject. An ungrammatical one is not provenance and
+			// falls through to `rest`, because the migration must never delete a
+			// line it cannot read.
+			if (source === undefined) source = candidate;
+			continue;
+		}
+		rest.push(line);
+	}
+	return { source, rest };
+}
+
+function coerceSource(value: unknown): CommentSource | undefined {
+	if (typeof value !== 'object' || value === null) return undefined;
+	const obj = value as Record<string, unknown>;
+	const tag = optString(obj.tag);
+	const key = optString(obj.key);
+	if (tag === undefined || key === undefined) return undefined;
+	return isCommentSource({ tag, key }) ? { tag, key } : undefined;
 }
 
 function coerceAnchor(value: unknown): AnchorText | undefined {
@@ -292,16 +369,42 @@ export function decodeStoreEntry(json: string): StoredComment | undefined {
 	const unknownLines = coerceUnknownLines(obj.unknownLines);
 	if (unknownLines === undefined) return undefined;
 
+	const explicitSource =
+		obj.source === undefined ? undefined : coerceSource(obj.source);
+	if (obj.source !== undefined && explicitSource === undefined)
+		return undefined;
+
+	// Migration for an entry an OLDER build wrote. That build did not know
+	// `[source=...]`, so toStored carried it verbatim in unknownLines, which is
+	// exactly the forward-compatibility the format promises. On the way back it
+	// has to be promoted, and not for tidiness: serialize filters unknownLines
+	// through isUnknownStructuredLine, and this line is now KNOWN, so leaving it
+	// there means convertFileToInline drops it and the provenance is gone for
+	// good. Reproduced before fixing.
+	//
+	// Only when there is no explicit `source`. An entry carrying both is a hand
+	// edit, and the structured field is the one this build wrote.
+	// coerceUnknownLines returns null for "absent", distinct from an empty list.
+	const priorLines = unknownLines ?? [];
+	// The lift runs either way, because its second job is stripping source-shaped
+	// lines that serialize would refuse from unknownLines. Skipping it when an
+	// explicit source exists would leave one there to be deleted silently at
+	// conversion time instead of deliberately here.
+	const lifted = liftLegacySource(priorLines);
+	const source = explicitSource ?? lifted.source;
+	const carried = lifted.rest;
+
 	const out: StoredComment = { id, category, body, replies };
 	const date = optString(obj.date);
 	if (date !== undefined) out.date = date;
 	const author = optString(obj.author);
 	if (author !== undefined) out.author = author;
+	if (source !== undefined) out.source = source;
 	if (anchor !== undefined) out.anchor = anchor;
 	if (addressed !== null) out.addressed = addressed;
 	if (resolution !== null) out.resolution = resolution;
-	if (unknownLines !== null && unknownLines.length > 0) {
-		out.unknownLines = unknownLines;
+	if (carried.length > 0) {
+		out.unknownLines = [...carried];
 	}
 	return out;
 }
@@ -419,6 +522,10 @@ export function toStored(id: string, c: Comment): StoredComment {
 		addressed: c.addressed,
 		resolution: c.resolution,
 		unknownLines: c.unknownLines.length > 0 ? c.unknownLines : undefined,
+		// Carried, like unknownLines. Converting an inline comment to eof storage
+		// would otherwise drop its provenance, and the lean marker left behind
+		// has nowhere to put it, so the loss is permanent and silent.
+		source: c.source,
 	};
 }
 

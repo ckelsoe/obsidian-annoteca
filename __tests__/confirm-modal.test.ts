@@ -26,6 +26,7 @@ const COMMENT: Comment = {
 	addressed: undefined,
 	resolution: undefined,
 	unknownLines: [],
+	source: undefined,
 	marker: { start: 0, end: 0 },
 };
 

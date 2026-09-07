@@ -4,8 +4,9 @@ import {
 	resolveStorageModeForNewComment,
 	convertFileToEof,
 	convertFileToInline,
+	isLeanMarker,
 } from '../document';
-import { parseAll, serialize } from '../parser';
+import { parseAll, serialize, serializeLeanMarker } from '../parser';
 import {
 	encodeStoreEntry,
 	parseStore,
@@ -405,5 +406,28 @@ describe('document: convertFileToInline', () => {
 		expect(after?.category).toBe(before?.category);
 		expect(after?.body).toBe(before?.body);
 		expect(back).not.toContain('annoteca:store');
+	});
+});
+
+// A lean marker carries category and id only. A source line is inline content,
+// so a machine-created comment with an empty body is NOT lean: classifying it as
+// lean let the fold treat it as eof-backed when an entry shared its id, overwrite
+// its provenance on merge, and skip it in convertFileToEof.
+describe('isLeanMarker and provenance', () => {
+	it('is not lean when the marker carries a source line', () => {
+		const text = [
+			'<!-- annoteca/prose-check: ',
+			'[id=ffff6666]',
+			'[source=plumbline:a1b2c3d4]',
+			'-->',
+		].join('\n');
+		const c = parseAll(text)[0];
+		expect(c?.source).toEqual({ tag: 'plumbline', key: 'a1b2c3d4' });
+		expect(c && isLeanMarker(c)).toBe(false);
+	});
+
+	it('is still lean without one', () => {
+		const c = parseAll(serializeLeanMarker('tone', 'abc12345'))[0];
+		expect(c && isLeanMarker(c)).toBe(true);
 	});
 });

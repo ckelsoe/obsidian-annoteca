@@ -125,3 +125,74 @@ describe('eof write + read round trip', () => {
 		expect(comments[0]?.replies[0]?.body).toBe('found one\nhere');
 	});
 });
+
+// A note that went new build -> downgrade -> old build folds it to eof -> upgrade.
+// The old build did not know `[source=...]`, so it carried the line verbatim in
+// unknownLines, which is the forward-compatibility the format promises. Coming
+// back, it has to be promoted: serialize filters unknownLines through
+// isUnknownStructuredLine, and the line is now KNOWN, so leaving it there means
+// convertFileToInline drops it and the provenance is gone for good.
+describe('legacy stored source line', () => {
+	const legacy = (unknownLines: string[]): StoredComment => ({
+		id: 'ffff6666',
+		category: 'prose-check',
+		body: 'Flagged register.',
+		replies: [],
+		unknownLines,
+	});
+
+	const decode = (c: StoredComment) =>
+		parseStore(writeStoreRegion('Prose.\n', [c]))[0]?.comment;
+
+	it('is promoted to source and removed from unknownLines', () => {
+		const back = decode(legacy(['[source=plumbline:a1b2c3d4]']));
+		expect(back?.source).toEqual({ tag: 'plumbline', key: 'a1b2c3d4' });
+		expect(back?.unknownLines ?? []).toEqual([]);
+	});
+
+	it('leaves the other carried lines alone', () => {
+		const back = decode(
+			legacy(['[retry=3]', '[source=plumbline:a1b2c3d4]', '[x=1]']),
+		);
+		expect(back?.source?.key).toBe('a1b2c3d4');
+		expect(back?.unknownLines).toEqual(['[retry=3]', '[x=1]']);
+	});
+
+	// An ungrammatical one is not provenance and must stay carried, or the
+	// migration would delete a line it cannot read.
+	it('does not lift a line the grammar rejects', () => {
+		const back = decode(legacy(['[source=Plumbline:has space]']));
+		expect(back?.source).toBeUndefined();
+		expect(back?.unknownLines).toEqual(['[source=Plumbline:has space]']);
+	});
+
+	// No case here for "explicit JSON field plus a carried line". The encoder no
+	// longer writes a top-level `source` at all, so that combination cannot be
+	// produced through writeStoreRegion; the decoder still accepts the field for
+	// an entry a FUTURE build might write, and the lift below covers the line
+	// path either way.
+
+	it('keeps only the first of two carried source lines', () => {
+		const back = decode(
+			legacy(['[source=first:aaaa1111]', '[source=second:bbbb2222]']),
+		);
+		expect(back?.source).toEqual({ tag: 'first', key: 'aaaa1111' });
+		expect(back?.unknownLines ?? []).toEqual([]);
+	});
+
+	// The round trip a downgrade actually takes: written by this build under eof
+	// storage, decoded by a build that does not know the field. It arrives as a
+	// carried line, which is the only representation that survives a rewrite
+	// there, and comes back as provenance on upgrade.
+	it('writes provenance as a carried line, not a JSON field', () => {
+		const c = legacy([]);
+		c.source = { tag: 'plumbline', key: 'a1b2c3d4' };
+		const content = writeStoreRegion('Prose.\n', [c]);
+		expect(content).toContain('[source=plumbline:a1b2c3d4]');
+		expect(content).not.toContain('"source"');
+		expect(decode(c)?.source).toEqual({
+			tag: 'plumbline',
+			key: 'a1b2c3d4',
+		});
+	});
+});

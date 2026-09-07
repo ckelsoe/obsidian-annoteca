@@ -342,6 +342,9 @@ export class ComposerForm {
 				? this.plugin.settings.authorTag
 				: undefined;
 		return {
+			// A person is typing this one. `source` is provenance for a comment
+			// created through the API, so a composer comment never carries it.
+			source: undefined,
 			id,
 			category,
 			body,
@@ -629,6 +632,11 @@ export class ComposerForm {
 				// to — per data-format.md the anchor reflects the original
 				// commented text and is not updated by edits.
 				anchor: fresh.anchor,
+				// Carried, like unknownLines below. Editing a comment does not
+				// change where it came from, and dropping it here would strip
+				// provenance on the first ordinary interaction, after which the
+				// comment reads as human-created to every consumer.
+				source: fresh.source,
 				replies: fresh.replies,
 				addressed: fresh.addressed,
 				resolution: fresh.resolution,
