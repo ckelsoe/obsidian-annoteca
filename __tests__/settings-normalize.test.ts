@@ -1,6 +1,7 @@
 import {
 	AnnotecaSettingTab,
 	normalizeSettings,
+	parseNamespaceAllowlist,
 	reconcileDefaultCategory,
 	mergeRestoredSettings,
 	resolveSettingsCategories,
@@ -791,5 +792,156 @@ describe('normalizeSettings: frontmatter class property', () => {
 			frontmatterFileclassProperty: 'fileClass',
 		});
 		expect(s.frontmatterFileclassProperty).toBe('fileClass');
+	});
+});
+
+describe('parseNamespaceAllowlist', () => {
+	it('splits on commas and on whitespace', () => {
+		expect(
+			parseNamespaceAllowlist('plumbline, other-tool').accepted,
+		).toEqual(['plumbline', 'other-tool']);
+		expect(
+			parseNamespaceAllowlist('plumbline other-tool').accepted,
+		).toEqual(['plumbline', 'other-tool']);
+	});
+
+	// Folded, not rejected. The scan's grammar is lowercase-only, so storing
+	// 'Plumbline' verbatim would look configured and suppress nothing.
+	it('folds case rather than rejecting it', () => {
+		const { accepted, rejected } = parseNamespaceAllowlist('Plumbline');
+		expect(accepted).toEqual(['plumbline']);
+		expect(rejected).toEqual([]);
+	});
+
+	it('drops duplicates, keeping the first spelling', () => {
+		expect(
+			parseNamespaceAllowlist('plumbline, Plumbline, plumbline').accepted,
+		).toEqual(['plumbline']);
+	});
+
+	// Reported rather than silently discarded, and reported as the user typed
+	// them so the notice names something recognizable.
+	it('names what it could not accept', () => {
+		const { accepted, rejected } = parseNamespaceAllowlist(
+			'plumbline, 1tool, plumbline/, ok-one',
+		);
+		expect(accepted).toEqual(['plumbline', 'ok-one']);
+		expect(rejected).toEqual(['1tool', 'plumbline/']);
+	});
+
+	it('treats an empty or whitespace-only field as an empty list', () => {
+		expect(parseNamespaceAllowlist('')).toEqual({
+			accepted: [],
+			rejected: [],
+		});
+		expect(parseNamespaceAllowlist('  ,  , ')).toEqual({
+			accepted: [],
+			rejected: [],
+		});
+	});
+});
+
+describe('normalizeSettings: conflictNamespaceAllowlist', () => {
+	it('ships seeded with plumbline', () => {
+		expect(DEFAULT_SETTINGS.conflictNamespaceAllowlist).toEqual([
+			'plumbline',
+		]);
+	});
+
+	// Same repair the settings field applies, so a synced or hand-edited
+	// data.json cannot end up with a suppression that looks set and does nothing.
+	it('folds a stored entry rather than dropping it', () => {
+		expect(
+			normalizeSettings({
+				conflictNamespaceAllowlist: ['Plumbline', '  other-tool  '],
+			}).conflictNamespaceAllowlist,
+		).toEqual(['plumbline', 'other-tool']);
+	});
+
+	it('drops only the entries no folding can rescue', () => {
+		const out = normalizeSettings({
+			conflictNamespaceAllowlist: [
+				'plumbline',
+				'',
+				42,
+				'1tool',
+				'plumbline/',
+				'third-party',
+			],
+		});
+		expect(out.conflictNamespaceAllowlist).toEqual([
+			'plumbline',
+			'third-party',
+		]);
+	});
+
+	it('falls back to the default when the stored value is not a list', () => {
+		expect(
+			normalizeSettings({ conflictNamespaceAllowlist: 'plumbline' })
+				.conflictNamespaceAllowlist,
+		).toEqual(['plumbline']);
+	});
+
+	// Reachable only because case is folded: two spellings of one namespace
+	// normalize to the same entry. Suppression stays correct either way (the
+	// scan builds a Set), but the settings field and the conflict report's
+	// allowlisted summary would both name it twice.
+	it('collapses entries that fold to the same namespace', () => {
+		expect(
+			normalizeSettings({
+				conflictNamespaceAllowlist: [
+					'plumbline',
+					'Plumbline',
+					'PLUMBLINE',
+				],
+			}).conflictNamespaceAllowlist,
+		).toEqual(['plumbline']);
+	});
+
+	it('keeps first-occurrence order when it collapses', () => {
+		expect(
+			normalizeSettings({
+				conflictNamespaceAllowlist: [
+					'third-party',
+					'plumbline',
+					'Third-Party',
+				],
+			}).conflictNamespaceAllowlist,
+		).toEqual(['third-party', 'plumbline']);
+	});
+
+	// The restored-settings path runs the same validators, so the collapse has
+	// to hold there too: a backup is exactly where a hand-edited list arrives.
+	it('collapses on the restore path as well', () => {
+		// Deliberately NOT the seeded 'plumbline'. Asserting the default value
+		// here would pass whether the restore applied or fell back to it.
+		const restored = mergeRestoredSettings(DEFAULT_SETTINGS, {
+			conflictNamespaceAllowlist: ['Other-Tool', 'other-tool'],
+		});
+		expect(restored.conflictNamespaceAllowlist).toEqual(['other-tool']);
+	});
+
+	// A restored list that lost every entry is not "suppress nothing", it is a
+	// list this build cannot read, and accepting it would wipe a configured
+	// allowlist on the restore path.
+	it('declines a non-empty list whose entries are all unusable', () => {
+		const live = {
+			...DEFAULT_SETTINGS,
+			conflictNamespaceAllowlist: ['plumbline', 'other-tool'],
+		};
+		const restored = mergeRestoredSettings(live, {
+			conflictNamespaceAllowlist: ['1bad', 'also/bad', ''],
+		});
+		expect(restored.conflictNamespaceAllowlist).toEqual([
+			'plumbline',
+			'other-tool',
+		]);
+	});
+
+	it('accepts a deliberately emptied list', () => {
+		expect(
+			normalizeSettings({ conflictNamespaceAllowlist: [] })
+				.conflictNamespaceAllowlist,
+		).toEqual([]);
 	});
 });

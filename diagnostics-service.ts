@@ -11,6 +11,7 @@ import {
 	detectOrphans,
 	detectStoreOrphans,
 	validateMarkers,
+	type ConflictFinding,
 } from './diagnostics';
 import { detectDrift, type DriftFinding, type PositionSnapshot } from './drift';
 import { todayISO } from './parser';
@@ -24,17 +25,24 @@ export class DiagnosticsService {
 	// user-facing copy. `scanIndexFirst` matches the original behavior:
 	// conflict and orphan detection consult the comment index, marker
 	// validation reads raw content only.
-	private async runDetectorScan(options: {
+	//
+	// Generic in the finding type so a caller can summarize its own findings
+	// without casting back out of `unknown[]`, which the repo's no-unsafe rules
+	// would refuse anyway.
+	private async runDetectorScan<T>(options: {
 		readonly label: string;
 		readonly emptyMessage: string;
 		readonly foundMessage: (count: number) => string;
-		readonly detect: (content: string, path: string) => readonly unknown[];
+		readonly detect: (content: string, path: string) => readonly T[];
 		readonly scanIndexFirst: boolean;
+		// Optional header written above the findings in the report note. Derived
+		// from the findings themselves, so it cannot disagree with them.
+		readonly summarize?: (findings: readonly T[]) => unknown;
 	}): Promise<void> {
 		if (options.scanIndexFirst) {
 			await this.plugin.scanVaultIfNeeded();
 		}
-		const findings: unknown[] = [];
+		const findings: T[] = [];
 		const files = this.plugin.app.vault.getMarkdownFiles();
 		for (const f of files) {
 			const content = await this.plugin.app.vault.cachedRead(f);
@@ -44,18 +52,34 @@ export class DiagnosticsService {
 			new Notice(options.emptyMessage);
 			return;
 		}
-		await this.writeReport(options.label, findings);
+		await this.writeReport(
+			options.label,
+			findings,
+			options.summarize?.(findings),
+		);
 		new Notice(options.foundMessage(findings.length));
 	}
 
 	async runConflictCheck(): Promise<void> {
-		await this.runDetectorScan({
+		const allowlist = this.plugin.settings.conflictNamespaceAllowlist;
+		await this.runDetectorScan<ConflictFinding>({
 			label: 'Marker conflicts',
 			emptyMessage: 'No marker conflicts detected.',
 			foundMessage: (n) =>
 				`Found ${n} potential conflict(s). See the diagnostics note in the vault.`,
-			detect: detectMarkerConflicts,
+			detect: (content, path) =>
+				detectMarkerConflicts(content, path, allowlist),
 			scanIndexFirst: true,
+			// The report leads with the distinct namespaces it found and the ones
+			// already allowlisted, so a user with a hundred findings from one tool
+			// can allowlist it by reading the top of the note rather than by
+			// scrolling for the prefix or guessing at its spelling.
+			summarize: (findings) => ({
+				namespacesFound: [
+					...new Set(findings.map((f) => f.prefix)),
+				].sort(),
+				namespacesAllowlisted: [...allowlist].sort(),
+			}),
 		});
 	}
 
@@ -161,6 +185,7 @@ export class DiagnosticsService {
 	private async writeReport(
 		label: string,
 		findings: unknown[],
+		summary?: unknown,
 	): Promise<void> {
 		// Write findings to a vault note so the user can read them without
 		// opening devtools. V2 adds debug-log routing per F-237.
@@ -170,6 +195,16 @@ export class DiagnosticsService {
 		lines.push('');
 		lines.push(`Generated: ${todayISO()}`);
 		lines.push('');
+		if (summary !== undefined) {
+			lines.push('## Summary');
+			lines.push('');
+			lines.push('```json');
+			lines.push(JSON.stringify(summary, null, 2));
+			lines.push('```');
+			lines.push('');
+			lines.push('## Findings');
+			lines.push('');
+		}
 		lines.push('```json');
 		lines.push(JSON.stringify(findings, null, 2));
 		lines.push('```');

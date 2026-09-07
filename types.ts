@@ -212,6 +212,15 @@ export interface AnnotecaSettings {
 
 	settingsBackupPath: string | undefined;
 
+	// Namespaces the marker-conflict scan treats as known and does not report
+	// (F-285). The scan flags any `<!-- <prefix>/...` comment that is not
+	// Annoteca's own, which is right for a hand-typed near-miss and wrong for a
+	// sibling tool the user installed on purpose. Pre-seeded with `plumbline`.
+	//
+	// Entries are bare prefixes in the grammar the scan matches (`isNamespacePrefix`
+	// in diagnostics.ts), so `plumbline`, never `plumbline/` or `<!-- plumbline`.
+	conflictNamespaceAllowlist: string[];
+
 	// Position drift snapshots keyed by comment id (F-234). Captured on demand
 	// by the detection command; not user-editable.
 	driftSnapshots?: Record<string, { before: string; after: string }>;
