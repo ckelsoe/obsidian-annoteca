@@ -1871,3 +1871,40 @@ describe('eof-mode persistence', () => {
 		expect(h.content).toContain('[reply');
 	});
 });
+
+// Provenance survives an ordinary interaction (F-282). The rewrite paths build
+// SerializeInput field by field, so a field they forget is dropped from the file
+// on the FIRST reply, resolve, reopen or edit, and the comment then reads as
+// human-created to every consumer. Nothing else in the suite exercises that,
+// which is how `source` was dropped from all three call sites.
+describe('a machine-created comment keeps its source line', () => {
+	const MACHINE = [
+		'Prose here. <!-- annoteca/prose-check: Flagged register.',
+		'[id=ffff6666]',
+		'[author=plumbline]',
+		'[source=plumbline:a1b2c3d4]',
+		'--> and it continues.',
+		'',
+	].join('\n');
+
+	it('survives resolve', async () => {
+		const h = makeHarnessWith(MACHINE, false);
+		await h.service.resolveComment('note.md', target(h.content));
+		expect(h.content).toContain('[source=plumbline:a1b2c3d4]');
+		expect(target(h.content).source).toEqual({
+			tag: 'plumbline',
+			key: 'a1b2c3d4',
+		});
+	});
+
+	it('survives resolve then reopen', async () => {
+		const h = makeHarnessWith(MACHINE, false);
+		await h.service.resolveComment('note.md', target(h.content));
+		await h.service.reopenComment('note.md', target(h.content));
+		expect(target(h.content).resolution).toBeUndefined();
+		expect(target(h.content).source).toEqual({
+			tag: 'plumbline',
+			key: 'a1b2c3d4',
+		});
+	});
+});

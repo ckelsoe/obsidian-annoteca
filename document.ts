@@ -55,6 +55,12 @@ export function isLeanMarker(c: Comment): boolean {
 		c.anchor === undefined &&
 		c.date === undefined &&
 		c.author === undefined &&
+		// A source line is inline content, so a marker carrying one is not lean.
+		// Without this, a machine-created comment with an empty body classified
+		// as lean: the fold could treat it as eof-backed when an entry shared its
+		// id, overwrite its provenance on merge, and convertFileToEof would skip
+		// it entirely.
+		c.source === undefined &&
 		c.unknownLines.length === 0
 	);
 }

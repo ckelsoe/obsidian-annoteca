@@ -632,6 +632,11 @@ export class ComposerForm {
 				// to — per data-format.md the anchor reflects the original
 				// commented text and is not updated by edits.
 				anchor: fresh.anchor,
+				// Carried, like unknownLines below. Editing a comment does not
+				// change where it came from, and dropping it here would strip
+				// provenance on the first ordinary interaction, after which the
+				// comment reads as human-created to every consumer.
+				source: fresh.source,
 				replies: fresh.replies,
 				addressed: fresh.addressed,
 				resolution: fresh.resolution,
