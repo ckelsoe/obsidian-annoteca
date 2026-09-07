@@ -882,6 +882,45 @@ describe('normalizeSettings: conflictNamespaceAllowlist', () => {
 		).toEqual(['plumbline']);
 	});
 
+	// Reachable only because case is folded: two spellings of one namespace
+	// normalize to the same entry. Suppression stays correct either way (the
+	// scan builds a Set), but the settings field and the conflict report's
+	// allowlisted summary would both name it twice.
+	it('collapses entries that fold to the same namespace', () => {
+		expect(
+			normalizeSettings({
+				conflictNamespaceAllowlist: [
+					'plumbline',
+					'Plumbline',
+					'PLUMBLINE',
+				],
+			}).conflictNamespaceAllowlist,
+		).toEqual(['plumbline']);
+	});
+
+	it('keeps first-occurrence order when it collapses', () => {
+		expect(
+			normalizeSettings({
+				conflictNamespaceAllowlist: [
+					'third-party',
+					'plumbline',
+					'Third-Party',
+				],
+			}).conflictNamespaceAllowlist,
+		).toEqual(['third-party', 'plumbline']);
+	});
+
+	// The restored-settings path runs the same validators, so the collapse has
+	// to hold there too: a backup is exactly where a hand-edited list arrives.
+	it('collapses on the restore path as well', () => {
+		// Deliberately NOT the seeded 'plumbline'. Asserting the default value
+		// here would pass whether the restore applied or fell back to it.
+		const restored = mergeRestoredSettings(DEFAULT_SETTINGS, {
+			conflictNamespaceAllowlist: ['Other-Tool', 'other-tool'],
+		});
+		expect(restored.conflictNamespaceAllowlist).toEqual(['other-tool']);
+	});
+
 	it('accepts a deliberately emptied list', () => {
 		expect(
 			normalizeSettings({ conflictNamespaceAllowlist: [] })

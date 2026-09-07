@@ -428,6 +428,22 @@ function validNamespacePrefix(raw: unknown): string | undefined {
 	return s !== undefined && isNamespacePrefix(s) ? s : undefined;
 }
 
+// Deduplicated as well as validated, so both ingresses land on the same value.
+// Folding case is what makes this reachable: parseNamespaceAllowlist collapses
+// repeats as it folds, and without the same step here a synced data.json
+// holding ['plumbline', 'Plumbline'] normalizes to two identical entries.
+// Suppression would still be correct, because the scan builds a Set from the
+// list, but the settings field would read 'plumbline, plumbline' and the
+// conflict report would name the namespace twice in its allowlisted summary.
+//
+// Spread of a Set, so first occurrence wins and the user's ordering survives.
+const validNamespaceAllowlist: SettingValidator<
+	'conflictNamespaceAllowlist'
+> = (raw) => {
+	const values = arrayOf(validNamespacePrefix)(raw);
+	return values === undefined ? undefined : [...new Set(values)];
+};
+
 const validAuthorTag: SettingValidator<'authorTag'> = (raw) => {
 	if (typeof raw !== 'string') return undefined;
 	return repairAuthorTag(raw);
@@ -474,7 +490,7 @@ const SETTING_VALIDATORS: {
 	markerScrollAlign: oneOf('top', 'center', 'minimal'),
 	debugMode: bool,
 	debugLogTarget: oneOf('console', 'vault'),
-	conflictNamespaceAllowlist: arrayOf(validNamespacePrefix),
+	conflictNamespaceAllowlist: validNamespaceAllowlist,
 	settingsBackupPath: str,
 	driftSnapshots: validDriftSnapshots,
 	starredComments: arrayOf(str),
