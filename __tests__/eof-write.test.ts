@@ -166,13 +166,33 @@ describe('legacy stored source line', () => {
 		expect(back?.unknownLines).toEqual(['[source=Plumbline:has space]']);
 	});
 
-	// An entry carrying both is a hand edit; the structured field is the one this
-	// build wrote, and the stray line stays visible rather than being merged.
-	it('prefers an explicit source and keeps the stray line', () => {
-		const c = legacy(['[source=other:zzzz9999]']);
+	// No case here for "explicit JSON field plus a carried line". The encoder no
+	// longer writes a top-level `source` at all, so that combination cannot be
+	// produced through writeStoreRegion; the decoder still accepts the field for
+	// an entry a FUTURE build might write, and the lift below covers the line
+	// path either way.
+
+	it('keeps only the first of two carried source lines', () => {
+		const back = decode(
+			legacy(['[source=first:aaaa1111]', '[source=second:bbbb2222]']),
+		);
+		expect(back?.source).toEqual({ tag: 'first', key: 'aaaa1111' });
+		expect(back?.unknownLines ?? []).toEqual([]);
+	});
+
+	// The round trip a downgrade actually takes: written by this build under eof
+	// storage, decoded by a build that does not know the field. It arrives as a
+	// carried line, which is the only representation that survives a rewrite
+	// there, and comes back as provenance on upgrade.
+	it('writes provenance as a carried line, not a JSON field', () => {
+		const c = legacy([]);
 		c.source = { tag: 'plumbline', key: 'a1b2c3d4' };
-		const back = decode(c);
-		expect(back?.source).toEqual({ tag: 'plumbline', key: 'a1b2c3d4' });
-		expect(back?.unknownLines).toEqual(['[source=other:zzzz9999]']);
+		const content = writeStoreRegion('Prose.\n', [c]);
+		expect(content).toContain('[source=plumbline:a1b2c3d4]');
+		expect(content).not.toContain('"source"');
+		expect(decode(c)?.source).toEqual({
+			tag: 'plumbline',
+			key: 'a1b2c3d4',
+		});
 	});
 });

@@ -128,9 +128,20 @@ function buildPayload(c: StoredComment): Record<string, unknown> {
 	};
 	if (c.date !== undefined) out.date = c.date;
 	if (c.author !== undefined) out.author = c.author;
-	if (c.source !== undefined) {
-		out.source = { tag: c.source.tag, key: c.source.key };
-	}
+	// Provenance goes into unknownLines as its marker line, NOT a top-level JSON
+	// field, and that is the whole point. Store entries are not version-gated, so
+	// an older build decodes this entry happily and simply ignores a field it does
+	// not know; the next reply or resolve on that build then rewrites the entry
+	// without it and the provenance is gone. unknownLines is the channel that
+	// already survives exactly that trip, because an older build carries those
+	// lines verbatim without understanding them.
+	//
+	// The decoder lifts it back out (liftLegacySource), so the pair is symmetric
+	// and a newer build never sees it as an unknown line.
+	const sourceLine =
+		c.source !== undefined
+			? `[source=${c.source.tag}:${c.source.key}]`
+			: undefined;
 	if (c.anchor !== undefined) {
 		out.anchor = { text: c.anchor.text, truncated: c.anchor.truncated };
 	}
@@ -162,8 +173,12 @@ function buildPayload(c: StoredComment): Record<string, unknown> {
 			note: c.resolution.note,
 		};
 	}
-	if (c.unknownLines !== undefined && c.unknownLines.length > 0) {
-		out.unknownLines = [...c.unknownLines];
+	const carried = [
+		...(c.unknownLines ?? []),
+		...(sourceLine !== undefined ? [sourceLine] : []),
+	];
+	if (carried.length > 0) {
+		out.unknownLines = carried;
 	}
 	return out;
 }
@@ -195,26 +210,37 @@ function optString(value: unknown): string | undefined {
 const LEGACY_SOURCE_RE =
 	/^\s*\[source=([a-z][a-z0-9-]*):([A-Za-z0-9._-]{1,64})\]\s*$/;
 
-// Pull a legal `[source=...]` out of the lines an older build carried verbatim,
-// and hand back the rest. First legal one wins; a second stays in unknownLines,
-// where it round-trips as text rather than being silently merged into one field.
+// Pull a legal `[source=...]` out of the carried lines and hand back the rest.
+//
+// The first legal one wins and any FURTHER source-shaped line is dropped here,
+// deliberately. Once `[source=...]` is a known line, serialize refuses it from
+// unknownLines, so a second copy has no representation that survives a write:
+// leaving it would be a silent deletion further downstream, at conversion time,
+// instead of a decided one here. A comment has one origin, and two source lines
+// only arise from a hand edit or a merge.
 function liftLegacySource(lines: readonly string[]): {
 	source: CommentSource | undefined;
 	rest: readonly string[];
 } {
-	for (let i = 0; i < lines.length; i++) {
-		const match = LEGACY_SOURCE_RE.exec(lines[i] ?? '');
-		if (match && match[1] !== undefined && match[2] !== undefined) {
-			const source = { tag: match[1], key: match[2] };
-			if (isCommentSource(source)) {
-				return {
-					source,
-					rest: [...lines.slice(0, i), ...lines.slice(i + 1)],
-				};
-			}
+	let source: CommentSource | undefined;
+	const rest: string[] = [];
+	for (const line of lines) {
+		const match = LEGACY_SOURCE_RE.exec(line);
+		const candidate =
+			match && match[1] !== undefined && match[2] !== undefined
+				? { tag: match[1], key: match[2] }
+				: undefined;
+		if (candidate !== undefined && isCommentSource(candidate)) {
+			// First wins; later ones are dropped rather than carried into a list
+			// serialize would reject. An ungrammatical one is not provenance and
+			// falls through to `rest`, because the migration must never delete a
+			// line it cannot read.
+			if (source === undefined) source = candidate;
+			continue;
 		}
+		rest.push(line);
 	}
-	return { source: undefined, rest: lines };
+	return { source, rest };
 }
 
 function coerceSource(value: unknown): CommentSource | undefined {
@@ -360,11 +386,12 @@ export function decodeStoreEntry(json: string): StoredComment | undefined {
 	// edit, and the structured field is the one this build wrote.
 	// coerceUnknownLines returns null for "absent", distinct from an empty list.
 	const priorLines = unknownLines ?? [];
-	const lifted =
-		explicitSource === undefined
-			? liftLegacySource(priorLines)
-			: { source: explicitSource, rest: priorLines };
-	const source = lifted.source;
+	// The lift runs either way, because its second job is stripping source-shaped
+	// lines that serialize would refuse from unknownLines. Skipping it when an
+	// explicit source exists would leave one there to be deleted silently at
+	// conversion time instead of deliberately here.
+	const lifted = liftLegacySource(priorLines);
+	const source = explicitSource ?? lifted.source;
 	const carried = lifted.rest;
 
 	const out: StoredComment = { id, category, body, replies };
