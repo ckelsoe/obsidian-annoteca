@@ -22,6 +22,7 @@ import type {
 } from './types';
 import { CommentIndex } from './index';
 import { MarkerDamageReporter } from './diagnostics';
+import { createApi, type AnnotecaApi } from './api';
 import {
 	AnnotecaSettingTab,
 	resolveSettingsCategories,
@@ -107,6 +108,12 @@ export default class AnnotecaPlugin extends Plugin {
 	settings!: AnnotecaSettings;
 	commentIndex = new CommentIndex();
 	events = new Events();
+
+	// The read-only API other plugins call (F-284). Public field on the plugin
+	// instance, which is what `app.plugins.getPlugin('annoteca')?.api` reaches.
+	// Built once here rather than per call so `onChange` subscriptions stay
+	// attached to one object.
+	readonly api: AnnotecaApi = createApi(this);
 	comments!: CommentService;
 	diagnostics!: DiagnosticsService;
 	private vaultScanned = false;
