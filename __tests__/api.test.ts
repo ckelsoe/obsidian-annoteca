@@ -15,14 +15,29 @@ import type AnnotecaPlugin from '../main';
 
 // A stand-in for the plugin carrying only what the API touches: the index and
 // the event bus. Building the real plugin would drag in the whole Obsidian app.
-function harness(): { api: AnnotecaApi; index: CommentIndex; events: Events } {
+function harness(): {
+	api: AnnotecaApi;
+	index: CommentIndex;
+	events: Events;
+	scans: string[];
+} {
 	const index = new CommentIndex();
 	const events = new Events();
+	const scans: string[] = [];
 	const api = createApi({
 		commentIndex: index,
 		events,
+		// The API awaits both before querying; the harness records that it did.
+		scanVaultIfNeeded: () => {
+			scans.push('scanVaultIfNeeded');
+			return Promise.resolve();
+		},
+		indexUnseenFiles: () => {
+			scans.push('indexUnseenFiles');
+			return Promise.resolve();
+		},
 	} as unknown as AnnotecaPlugin);
-	return { api, index, events };
+	return { api, index, events, scans };
 }
 
 const NOTE = [
@@ -37,11 +52,11 @@ const NOTE = [
 // imports, so nothing in this repo uses them and only an explicit check keeps a
 // silent narrowing from shipping.
 describe('AnnotecaApi: the published shape', () => {
-	it('returns the documented types', () => {
+	it('returns the documented types', async () => {
 		const { api, index } = harness();
 		index.rebuild('a.md', NOTE);
 		const filter: ApiFilter = { resolved: 'all' };
-		const comments: readonly ApiComment[] = api.queryComments(filter);
+		const comments: readonly ApiComment[] = await api.queryComments(filter);
 		const anchors: readonly AnchorRange[] = api.anchorsFor(NOTE);
 		expect(comments).toHaveLength(1);
 		expect(anchors).toHaveLength(1);
@@ -60,31 +75,35 @@ describe('AnnotecaApi: version surface', () => {
 });
 
 describe('AnnotecaApi.queryComments', () => {
-	it('returns open comments by default', () => {
+	it('returns open comments by default', async () => {
 		const { api, index } = harness();
 		index.rebuild('a.md', NOTE);
-		const out = api.queryComments();
+		const out = await api.queryComments();
 		expect(out).toHaveLength(1);
 		expect(out[0]?.category).toBe('tone');
 		expect(out[0]?.path).toBe('a.md');
 		expect(out[0]?.resolved).toBe(false);
 	});
 
-	it('filters by path and by category', () => {
+	it('filters by path and by category', async () => {
 		const { api, index } = harness();
 		index.rebuild('a.md', NOTE);
 		index.rebuild('b.md', NOTE);
-		expect(api.queryComments({ paths: ['a.md'] })).toHaveLength(1);
-		expect(api.queryComments({ categories: ['tone'] })).toHaveLength(2);
-		expect(api.queryComments({ categories: ['cut'] })).toHaveLength(0);
+		expect(await api.queryComments({ paths: ['a.md'] })).toHaveLength(1);
+		expect(await api.queryComments({ categories: ['tone'] })).toHaveLength(
+			2,
+		);
+		expect(await api.queryComments({ categories: ['cut'] })).toHaveLength(
+			0,
+		);
 	});
 
 	// The index hands out its live objects. A consumer that mutated one would
 	// corrupt the vault's view of its own comments without touching the file.
-	it('returns copies, not the indexed objects', () => {
+	it('returns copies, not the indexed objects', async () => {
 		const { api, index } = harness();
 		index.rebuild('a.md', NOTE);
-		const first = api.queryComments()[0];
+		const first = (await api.queryComments())[0];
 		expect(first).toBeDefined();
 		const internal = index.get('a.md')?.comments[0];
 		expect(internal).toBeDefined();
@@ -95,10 +114,12 @@ describe('AnnotecaApi.queryComments', () => {
 
 	// The public shape is narrow on purpose: anything exposed here is something
 	// the API cannot change later.
-	it('exposes only the documented fields', () => {
+	it('exposes only the documented fields', async () => {
 		const { api, index } = harness();
 		index.rebuild('a.md', NOTE);
-		expect(Object.keys(api.queryComments()[0] ?? {}).sort()).toEqual([
+		expect(
+			Object.keys((await api.queryComments())[0] ?? {}).sort(),
+		).toEqual([
 			'addressed',
 			'anchor',
 			'author',
@@ -113,13 +134,13 @@ describe('AnnotecaApi.queryComments', () => {
 		]);
 	});
 
-	it('is empty for an unindexed vault', () => {
-		expect(harness().api.queryComments()).toEqual([]);
+	it('is empty for an unindexed vault', async () => {
+		expect(await harness().api.queryComments()).toEqual([]);
 	});
 });
 
 describe('AnnotecaApi.anchorsFor', () => {
-	it('locates the prose a comment is about, not the marker', () => {
+	it('locates the prose a comment is about, not the marker', async () => {
 		const { api, index } = harness();
 		index.rebuild('a.md', NOTE);
 		const ranges = api.anchorsFor(NOTE);
@@ -133,7 +154,7 @@ describe('AnnotecaApi.anchorsFor', () => {
 			expect(r.commentId).toBe('aaaa1111');
 			// The anchor sits AFTER the marker, which is the whole reason this
 			// is not just the marker range.
-			const marker = api.queryComments()[0]?.marker;
+			const marker = (await api.queryComments())[0]?.marker;
 			expect(r.start).toBeGreaterThanOrEqual(marker?.end ?? 0);
 		}
 	});

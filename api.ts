@@ -68,7 +68,12 @@ export interface AnnotecaApi {
 	// Mirrors SKILL_SCHEMA_VERSION, so a consumer can tell which marker format
 	// this build reads and writes without parsing a note to find out.
 	readonly formatVersion: number;
-	queryComments(filter?: ApiFilter): readonly ApiComment[];
+	// Async because it has to be. The comment index is populated lazily, from
+	// files opened or modified this session, so querying it directly in a fresh
+	// session silently returns a fraction of the vault and looks like a correct
+	// answer. This awaits the vault scan first, which is the only way the
+	// vault-wide promise in the name is true.
+	queryComments(filter?: ApiFilter): Promise<readonly ApiComment[]>;
 	// Pure over the content it is given: it parses that text rather than reading
 	// the vault OR consulting the index, and takes no path for that reason.
 	//
@@ -111,7 +116,14 @@ export function createApi(plugin: AnnotecaPlugin): AnnotecaApi {
 		apiVersion: API_VERSION,
 		formatVersion: SKILL_SCHEMA_VERSION,
 
-		queryComments(filter?: ApiFilter): readonly ApiComment[] {
+		async queryComments(
+			filter?: ApiFilter,
+		): Promise<readonly ApiComment[]> {
+			// Both calls, matching the drift check. scanVaultIfNeeded is one-shot
+			// and cannot promise the index knows the vault as it is NOW; files
+			// added since it ran are picked up by indexUnseenFiles.
+			await plugin.scanVaultIfNeeded();
+			await plugin.indexUnseenFiles();
 			const located = plugin.commentIndex.queryUnresolved({
 				paths: filter?.paths ? new Set(filter.paths) : undefined,
 				categories: filter?.categories
