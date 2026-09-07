@@ -110,6 +110,9 @@ function makeHarnessWith(initial: string, deleteOnResolve = false) {
 	} as unknown as AnnotecaPlugin;
 	return {
 		service: new CommentService(plugin),
+		// Exposed so a test can change a setting the service reads, which the
+		// promotion-budget cases need.
+		plugin,
 		get content() {
 			return content;
 		},
@@ -1975,5 +1978,45 @@ describe('promote', () => {
 		const h = makeHarnessWith(PLAIN, false);
 		expect(await h.service.promote('note.md', [])).toEqual([]);
 		expect(h.content).toBe(PLAIN);
+	});
+});
+
+// The budget gate (F-286). The mock Modal dismisses on open, so this exercises
+// the refusal branch, which is the safety-critical one: a cancelled prompt must
+// write nothing.
+//
+// It is tested at this level because a bug here survived unit tests once. The
+// decision callback was wired as `() => resolve(true)`, which makes Cancel,
+// Escape and click-away all approve the write, and nothing caught it because
+// every other promote test sits under the budget and never opens the modal.
+describe('promote: the promotion budget', () => {
+	const PLAIN = 'The rough draft carries on here and then some more prose.\n';
+
+	const many = (n: number): PromoteRequest[] =>
+		Array.from({ length: n }, (_, i) => ({
+			category: 'prose-check',
+			body: `Finding ${i}.`,
+			anchor: { start: 4, end: 9 },
+			author: 'plumbline',
+			sourceKey: `key${i}`,
+		}));
+
+	it('writes nothing when the prompt is dismissed', async () => {
+		const h = makeHarnessWith(PLAIN, false);
+		h.plugin.settings.promotionBudget = 2;
+		const made = await h.service.promote('note.md', many(5));
+		expect(made).toEqual([]);
+		expect(h.content).toBe(PLAIN);
+	});
+
+	// At or below the budget there is no prompt at all, so the same requests go
+	// straight through. Without this the test above would pass even if promote
+	// were broken outright.
+	it('does not prompt at or below the budget', async () => {
+		const h = makeHarnessWith(PLAIN, false);
+		h.plugin.settings.promotionBudget = 5;
+		const made = await h.service.promote('note.md', many(5));
+		expect(made).toHaveLength(5);
+		expect(parseAll(h.content)).toHaveLength(5);
 	});
 });

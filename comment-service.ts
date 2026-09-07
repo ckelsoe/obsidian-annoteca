@@ -651,23 +651,23 @@ export class CommentService {
 		const budget = this.plugin.settings.promotionBudget;
 		if (valid.length > budget) {
 			const first = valid[0];
+			// `resolve` IS the decision callback. Passing `() => resolve(true)`
+			// instead makes Cancel, Escape and click-away all approve the write,
+			// because every one of those exits calls back with false and the
+			// argument would be thrown away.
+			//
+			// The modal answers on every exit, so this settles exactly once and
+			// needs no timeout. An earlier version polled the DOM for the modal
+			// container to detect a cancel, which is fragile, untestable outside
+			// a browser, and wrong whenever another modal is open.
 			const approved = await new Promise<boolean>((resolve) => {
 				new ConfirmPromotionModal(
 					this.plugin.app,
 					valid.length,
 					first?.author ?? 'A plugin',
 					file.basename,
-					() => resolve(true),
+					resolve,
 				).open();
-				// The modal resolves true only through its confirm button. Its
-				// close path has to resolve too, or a cancelled prompt leaves the
-				// caller awaiting forever.
-				const closer = window.setInterval(() => {
-					if (document.querySelector('.modal-container') === null) {
-						window.clearInterval(closer);
-						resolve(false);
-					}
-				}, 150);
 			});
 			if (!approved) return [];
 		}
