@@ -613,18 +613,34 @@ export class CommentService {
 	async promote(
 		path: string,
 		requests: readonly PromoteRequest[],
+		expected: string,
 	): Promise<readonly CreatedComment[]> {
-		return this.enqueue(path, () => this.promoteUnqueued(path, requests));
+		return this.enqueue(path, () =>
+			this.promoteUnqueued(path, requests, expected),
+		);
 	}
 
 	private async promoteUnqueued(
 		path: string,
 		requests: readonly PromoteRequest[],
+		expected: string,
 	): Promise<readonly CreatedComment[]> {
 		if (requests.length === 0) return [];
 		const file = this.plugin.app.vault.getAbstractFileByPath(path);
 		if (!(file instanceof TFile)) return [];
 		const content = await this.readCurrentContent(file, path);
+
+		// The anchors are offsets into the content the CONSUMER read, and this
+		// task only reaches the front of the queue some time later. Another write
+		// landing in between shifts every offset after it, and the request would
+		// still pass validation against the new content while placing its marker
+		// in the wrong prose and capturing the wrong anchor text.
+		//
+		// Refusing is the same answer applySplices already gives one layer down,
+		// for the same reason: this cannot know what the consumer meant, and the
+		// call is repeatable once it re-reads. A marker on the wrong sentence is
+		// not repairable, because nothing afterwards knows it is wrong.
+		if (content !== expected) return [];
 
 		// Every request is vetted before anything is written. A partial write on a
 		// bad request would leave the caller unable to tell which of its findings

@@ -111,9 +111,16 @@ export interface AnnotecaApi {
 	// Returns only the comments actually written. A stale-read refusal deep in
 	// the write path returns empty too, so a consumer that records what it got
 	// back can never believe a finding was promoted when it was not.
+	// `expected` is the note content the anchors were computed against, the same
+	// text passed to anchorsFor. Promotion is queued behind any write already in
+	// flight for that path, so by the time it runs the note may have moved on;
+	// this refuses rather than placing markers at offsets that no longer mean
+	// what the consumer meant. A refusal returns an empty array, and re-reading
+	// and calling again is the correct response.
 	promote(
 		path: string,
 		requests: readonly PromoteRequest[],
+		expected: string,
 	): Promise<readonly CreatedComment[]>;
 
 	// Fires when the comment index changes. Returns its own unsubscribe; a
@@ -214,12 +221,13 @@ export function createApi(plugin: AnnotecaPlugin): AnnotecaApi {
 		promote(
 			path: string,
 			requests: readonly PromoteRequest[],
+			expected: string,
 		): Promise<readonly CreatedComment[]> {
 			// Delegated, not reimplemented. comment-service owns every write:
 			// the serializer, the queue and the stale-read guard all live there,
 			// and contract 4.1 exists because a second writer is how this format
 			// has been damaged before.
-			return plugin.comments.promote(path, requests);
+			return plugin.comments.promote(path, requests, expected);
 		},
 
 		onChange(cb: () => void): () => void {

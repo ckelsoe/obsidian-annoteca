@@ -1955,7 +1955,7 @@ describe('promote', () => {
 
 	it('creates a comment carrying author and provenance', async () => {
 		const h = makeHarnessWith(PLAIN, false);
-		const made = await h.service.promote('note.md', [req()]);
+		const made = await h.service.promote('note.md', [req()], h.content);
 		expect(made).toHaveLength(1);
 		const c = target(h.content);
 		expect(c.category).toBe('prose-check');
@@ -1968,18 +1968,22 @@ describe('promote', () => {
 	// normal case, not an error, and must not double the markers.
 	it('is idempotent on the source key', async () => {
 		const h = makeHarnessWith(PLAIN, false);
-		await h.service.promote('note.md', [req()]);
-		const again = await h.service.promote('note.md', [req()]);
+		await h.service.promote('note.md', [req()], h.content);
+		const again = await h.service.promote('note.md', [req()], h.content);
 		expect(again).toEqual([]);
 		expect(parseAll(h.content)).toHaveLength(1);
 	});
 
 	it('creates several at once, each with its own id', async () => {
 		const h = makeHarnessWith(PLAIN, false);
-		const made = await h.service.promote('note.md', [
-			req({ sourceKey: 'aaaa1111', anchor: { start: 4, end: 9 } }),
-			req({ sourceKey: 'bbbb2222', anchor: { start: 20, end: 27 } }),
-		]);
+		const made = await h.service.promote(
+			'note.md',
+			[
+				req({ sourceKey: 'aaaa1111', anchor: { start: 4, end: 9 } }),
+				req({ sourceKey: 'bbbb2222', anchor: { start: 20, end: 27 } }),
+			],
+			h.content,
+		);
 		expect(made).toHaveLength(2);
 		expect(new Set(made.map((m) => m.id)).size).toBe(2);
 		expect(parseAll(h.content)).toHaveLength(2);
@@ -1989,21 +1993,25 @@ describe('promote', () => {
 	// tell which of its findings landed.
 	it('skips a request the format cannot hold', async () => {
 		const h = makeHarnessWith(PLAIN, false);
-		const made = await h.service.promote('note.md', [
-			req({ category: 'Not A Category' }),
-			req({ sourceKey: 'has space' }),
-			req({ author: 'Bob Smith' }),
-			req({ body: '   ' }),
-			req({ anchor: { start: 5, end: 4 } }),
-			req({ anchor: { start: 0, end: 99999 } }),
-		]);
+		const made = await h.service.promote(
+			'note.md',
+			[
+				req({ category: 'Not A Category' }),
+				req({ sourceKey: 'has space' }),
+				req({ author: 'Bob Smith' }),
+				req({ body: '   ' }),
+				req({ anchor: { start: 5, end: 4 } }),
+				req({ anchor: { start: 0, end: 99999 } }),
+			],
+			h.content,
+		);
 		expect(made).toEqual([]);
 		expect(parseAll(h.content)).toHaveLength(0);
 	});
 
 	it('writes nothing at all for an empty request list', async () => {
 		const h = makeHarnessWith(PLAIN, false);
-		expect(await h.service.promote('note.md', [])).toEqual([]);
+		expect(await h.service.promote('note.md', [], h.content)).toEqual([]);
 		expect(h.content).toBe(PLAIN);
 	});
 });
@@ -2031,7 +2039,7 @@ describe('promote: the promotion budget', () => {
 	it('writes nothing when the prompt is dismissed', async () => {
 		const h = makeHarnessWith(PLAIN, false);
 		h.plugin.settings.promotionBudget = 2;
-		const made = await h.service.promote('note.md', many(5));
+		const made = await h.service.promote('note.md', many(5), h.content);
 		expect(made).toEqual([]);
 		expect(h.content).toBe(PLAIN);
 	});
@@ -2042,7 +2050,7 @@ describe('promote: the promotion budget', () => {
 	it('does not prompt at or below the budget', async () => {
 		const h = makeHarnessWith(PLAIN, false);
 		h.plugin.settings.promotionBudget = 5;
-		const made = await h.service.promote('note.md', many(5));
+		const made = await h.service.promote('note.md', many(5), h.content);
 		expect(made).toHaveLength(5);
 		expect(parseAll(h.content)).toHaveLength(5);
 	});
@@ -2064,7 +2072,7 @@ describe('promote: per-note storage override', () => {
 	it('writes a lean marker when the note asks for end-of-file storage', async () => {
 		const h = makeHarnessWith(PLAIN, false);
 		h.setFrontmatter({ annoteca_storage: 'eof' });
-		await h.service.promote('note.md', [one]);
+		await h.service.promote('note.md', [one], h.content);
 		// A lean marker carries category and id only; the body moved to the store.
 		expect(h.content).toContain('annoteca:store');
 		expect(h.content).not.toContain('[author=plumbline]');
@@ -2080,8 +2088,40 @@ describe('promote: per-note storage override', () => {
 	it('writes inline when the note asks for nothing', async () => {
 		const h = makeHarnessWith(PLAIN, false);
 		h.setFrontmatter(undefined);
-		await h.service.promote('note.md', [one]);
+		await h.service.promote('note.md', [one], h.content);
 		expect(h.content).not.toContain('annoteca:store');
 		expect(h.content).toContain('[author=plumbline]');
+	});
+});
+
+// The stale-anchor guard. Anchors are offsets into the content the CONSUMER
+// read, and promotion is queued behind any write already in flight for that
+// path, so the note can move on before this task runs. Placing a marker at
+// offsets that no longer mean what the consumer meant is not repairable, because
+// nothing afterwards knows it is wrong.
+describe('promote: stale content refusal', () => {
+	const PLAIN = 'The rough draft carries on here and then some more prose.\n';
+	const one = {
+		category: 'prose-check',
+		body: 'Flagged register.',
+		anchor: { start: 4, end: 15 },
+		author: 'plumbline',
+		sourceKey: 'a1b2c3d4',
+	};
+
+	it('writes nothing when the note changed since the consumer read it', async () => {
+		const h = makeHarnessWith(PLAIN, false);
+		const stale = `A sentence inserted ahead of everything. ${PLAIN}`;
+		const made = await h.service.promote('note.md', [one], stale);
+		expect(made).toEqual([]);
+		expect(h.content).toBe(PLAIN);
+	});
+
+	// The counterweight: the same call with the right snapshot goes through, so
+	// the refusal above is the guard firing and not promote being broken.
+	it('writes when the snapshot matches', async () => {
+		const h = makeHarnessWith(PLAIN, false);
+		const made = await h.service.promote('note.md', [one], h.content);
+		expect(made).toHaveLength(1);
 	});
 });
