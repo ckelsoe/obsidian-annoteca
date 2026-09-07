@@ -90,6 +90,7 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 	// its directives are a known non-conflict, so a user who installs both
 	// should not have to dismiss a diagnostic to learn that.
 	conflictNamespaceAllowlist: ['plumbline'],
+	promotionBudget: 10,
 
 	settingsBackupPath: undefined,
 
@@ -437,6 +438,13 @@ function validNamespacePrefix(raw: unknown): string | undefined {
 // conflict report would name the namespace twice in its allowlisted summary.
 //
 // Spread of a Set, so first occurrence wins and the user's ordering survives.
+// A whole number of comments, at least 1. Zero would prompt on every single
+// promotion, which trains the user to click through the one prompt that matters.
+const validPromotionBudget: SettingValidator<'promotionBudget'> = (raw) => {
+	const n = num(raw);
+	return n !== undefined && n >= 1 ? Math.floor(n) : undefined;
+};
+
 const validNamespaceAllowlist: SettingValidator<
 	'conflictNamespaceAllowlist'
 > = (raw) => {
@@ -502,6 +510,7 @@ const SETTING_VALIDATORS: {
 	debugMode: bool,
 	debugLogTarget: oneOf('console', 'vault'),
 	conflictNamespaceAllowlist: validNamespaceAllowlist,
+	promotionBudget: validPromotionBudget,
 	settingsBackupPath: str,
 	driftSnapshots: validDriftSnapshots,
 	starredComments: arrayOf(str),

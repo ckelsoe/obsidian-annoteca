@@ -9,7 +9,22 @@ export class ItemView {}
 export class WorkspaceLeaf {}
 export class TFile {}
 export class MarkdownView {}
-export class Modal {}
+// Enough of a Modal to test what a dismissal DOES, which is the hazard: several
+// verbs here await a promise a modal settles, and an exit that answers nothing
+// leaves the write pending for the life of the session.
+//
+// `open()` goes straight to `close()`, modelling the prompt the user dismisses
+// without choosing. That is the safety-critical branch, and the confirm branch is
+// covered by driving the lifecycle methods directly (see confirm-modal.test.ts).
+export class Modal {
+	contentEl = { empty: (): void => undefined };
+	open(): void {
+		this.close();
+	}
+	close(): void {
+		(this as { onClose?: () => void }).onClose?.();
+	}
+}
 export class App {}
 // Every Notice raised during a test, oldest first. A test imports this from
 // '../__mocks__/obsidian' (a relative path, so it types against THIS file

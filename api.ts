@@ -1,7 +1,7 @@
 import type { EventRef } from 'obsidian';
 
 import type AnnotecaPlugin from './main';
-import type { Comment } from './types';
+import type { Comment, CreatedComment, PromoteRequest } from './types';
 import { parseDocument } from './document';
 import { ANCHOR_WINDOW, resolveAnchorRangeInWindows } from './view-utils';
 import { SKILL_SCHEMA_VERSION } from './skill-export';
@@ -18,7 +18,11 @@ import { SKILL_SCHEMA_VERSION } from './skill-export';
 // `isEnabled()` is not an availability test: it reports saved config, so it
 // answers true for a disabled, unloaded plugin. See contract 4.5.
 
-export const API_VERSION = 1;
+// 1 = read only: queryComments, anchorsFor, onChange.
+// 2 = adds promote(). Bumped because a consumer checking `apiVersion` to decide
+//     whether it can promote would otherwise treat a read-only build and this one
+//     as the same thing and call a method that is not there.
+export const API_VERSION = 2;
 
 // The shape a consumer sees. Deliberately NOT the internal `Comment`: that
 // carries the marker grammar, `unknownLines`, reply and addressed structures
@@ -95,6 +99,34 @@ export interface AnnotecaApi {
 	// missing or as covering the wrong words. Parsing the supplied text is the
 	// only version with no stale half.
 	anchorsFor(content: string): readonly AnchorRange[];
+	// Create comments on this consumer's behalf (F-281).
+	//
+	// CREATE ONLY, and that is the design. There is no path here to resolve,
+	// delete, edit or reply: resolution is a judgement about the writing, and
+	// machine tooling does not close a human's thread. A consumer that wants a
+	// finding retracted replies to it.
+	//
+	// Idempotent on `sourceKey`, so a consumer re-running over a note it already
+	// promoted creates nothing and gets back only what it made this time. Above
+	// the promotion budget the user is asked first, and a refusal returns an
+	// empty array rather than throwing: nothing was created, which is exactly
+	// what the return value says.
+	//
+	// Returns only the comments actually written. A stale-read refusal deep in
+	// the write path returns empty too, so a consumer that records what it got
+	// back can never believe a finding was promoted when it was not.
+	// `expected` is the note content the anchors were computed against, the same
+	// text passed to anchorsFor. Promotion is queued behind any write already in
+	// flight for that path, so by the time it runs the note may have moved on;
+	// this refuses rather than placing markers at offsets that no longer mean
+	// what the consumer meant. A refusal returns an empty array, and re-reading
+	// and calling again is the correct response.
+	promote(
+		path: string,
+		requests: readonly PromoteRequest[],
+		expected: string,
+	): Promise<readonly CreatedComment[]>;
+
 	// Fires when the comment index changes. Returns its own unsubscribe; a
 	// consumer must call it on unload or the callback outlives the consumer.
 	onChange(cb: () => void): () => void;
@@ -188,6 +220,18 @@ export function createApi(plugin: AnnotecaPlugin): AnnotecaApi {
 				}
 			}
 			return out;
+		},
+
+		promote(
+			path: string,
+			requests: readonly PromoteRequest[],
+			expected: string,
+		): Promise<readonly CreatedComment[]> {
+			// Delegated, not reimplemented. comment-service owns every write:
+			// the serializer, the queue and the stale-read guard all live there,
+			// and contract 4.1 exists because a second writer is how this format
+			// has been damaged before.
+			return plugin.comments.promote(path, requests, expected);
 		},
 
 		onChange(cb: () => void): () => void {

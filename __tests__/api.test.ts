@@ -67,7 +67,9 @@ describe('AnnotecaApi: version surface', () => {
 	it('reports its own version and the exported-skill version', () => {
 		const { api } = harness();
 		expect(api.apiVersion).toBe(API_VERSION);
-		expect(api.apiVersion).toBe(1);
+		// 2 since promote() landed. A consumer checking this to decide whether it
+		// can promote must be able to tell a read-only build from this one.
+		expect(api.apiVersion).toBe(2);
 		// The exported-skill generation, not the marker format. Named for what
 		// it is: SKILL_SCHEMA_VERSION bumps on teaching changes too.
 		expect(api.skillSchemaVersion).toBe(SKILL_SCHEMA_VERSION);

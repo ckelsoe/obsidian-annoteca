@@ -209,3 +209,75 @@ export class ConfirmBackupModal extends Modal {
 		this.contentEl.empty();
 	}
 }
+
+// Promotion budget (F-286, interop-contract 3.4). Shown before any API caller
+// creates more than the configured number of comments in one call.
+//
+// It guards the note against EVERY consumer, not just the one that prompted it.
+// A prose linter can report forty findings on a chapter, and a scripted mistake
+// on the consumer's side is the difference between a review queue and a note
+// nobody can read. The count and the note are both in the prompt because the
+// user is being asked about a specific, irreversible bulk write.
+export class ConfirmPromotionModal extends Modal {
+	private readonly count: number;
+	private readonly author: string;
+	private readonly fileBasename: string;
+	private readonly onDecision: (approved: boolean) => void;
+	// Dismissing the modal any other way (Escape, the close button, clicking
+	// out) has to answer too, or the caller awaits a promise nothing resolves.
+	// Tracked here rather than inferred from the DOM.
+	private decided = false;
+
+	constructor(
+		app: App,
+		count: number,
+		author: string,
+		fileBasename: string,
+		onDecision: (approved: boolean) => void,
+	) {
+		super(app);
+		this.count = count;
+		this.author = author;
+		this.fileBasename = fileBasename;
+		this.onDecision = onDecision;
+	}
+
+	onOpen(): void {
+		const { contentEl } = this;
+		contentEl.empty();
+		contentEl.createEl('h3', { text: 'Add comments from another plugin' });
+		const noun = this.count === 1 ? 'comment' : 'comments';
+		contentEl.createEl('p', {
+			text: `${this.author} wants to add ${this.count} ${noun} to ${this.fileBasename}.`,
+		});
+		contentEl.createEl('p', {
+			text: 'Each one becomes a marker in the note. If the file is open in an editor you can undo with Ctrl/Cmd+Z.',
+		});
+
+		new Setting(contentEl)
+			.addButton((b) =>
+				b
+					.setButtonText('Add')
+					.then((btn) => btn.buttonEl.addClass('mod-cta'))
+					.onClick(() => {
+						this.decided = true;
+						this.onDecision(true);
+						this.close();
+					}),
+			)
+			.addButton((b) =>
+				b.setButtonText('Cancel').onClick(() => this.close()),
+			);
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+		// Every exit that is not the Add button is a refusal, and it must still
+		// answer: a dismissed prompt that resolves nothing leaves the caller
+		// waiting forever on a write the user has already declined.
+		if (!this.decided) {
+			this.decided = true;
+			this.onDecision(false);
+		}
+	}
+}

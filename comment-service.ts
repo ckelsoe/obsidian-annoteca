@@ -20,25 +20,43 @@ import { MarkdownView, Notice, TFile } from 'obsidian';
 
 import type AnnotecaPlugin from './main';
 import type { ImportResult } from './imports';
-import type { Addressed, Comment, MarkerRange, Reply } from './types';
+import type {
+	Addressed,
+	Comment,
+	CreatedComment,
+	MarkerRange,
+	PromoteRequest,
+	Reply,
+} from './types';
+import { ConfirmPromotionModal } from './confirm-modal';
 import {
 	findRemovalBlocker,
 	parseAll,
 	serialize,
+	serializeLeanMarker,
 	nowISO,
+	generateId,
+	buildAnchorFromSelection,
+	isAuthorToken,
+	isCommentSource,
+	isSerializableCategory,
 	type MalformedMarker,
 } from './parser';
 import {
+	coerceStorageMode,
 	parseDocument,
 	resolveEofTarget,
+	resolveStorageModeForNewComment,
 	storeEntriesWith,
 	type EofTarget,
 } from './document';
 import {
 	parseStore,
+	scanStoreEntries,
 	writeStoreRegion,
 	diffToSplice,
 	type SpliceRange,
+	type StoredComment,
 } from './store';
 
 // What a lifecycle write actually did. Three outcomes rather than a boolean,
@@ -109,6 +127,83 @@ export function markerDamageMessage(finding: MalformedMarker): string {
 // unqueued form. Queueing at both layers would deadlock: resolveComment waiting
 // on resolveAndRemoveComment, which is waiting behind resolveComment in the same
 // queue.
+// Byte ranges a promoted marker must never be spliced into: existing markers,
+// end-of-file store blocks, and YAML frontmatter.
+//
+// Bounds alone are not enough. An offset inside an existing marker is in bounds
+// and splices a new marker into the middle of that one, which is the exact
+// damage `findMalformedMarkers` exists to report after the fact. A consumer
+// computing offsets over raw markdown reaches this honestly: Plumbline masks
+// markers before linting, and a bug in that masking would arrive here as a
+// perfectly well-formed request.
+function forbiddenRanges(content: string): { start: number; end: number }[] {
+	const out = parseAll(content).map((c) => ({
+		start: c.marker.start,
+		end: c.marker.end,
+	}));
+	for (const e of scanStoreEntries(content)) {
+		out.push({ start: e.start, end: e.end });
+	}
+	// Frontmatter, only when the document opens with it. A `---` fence anywhere
+	// else is a horizontal rule and is ordinary prose.
+	const fm = /^---\r?\n[\s\S]*?\r?\n---[ \t]*(\r?\n|$)/.exec(content);
+	if (fm) out.push({ start: 0, end: fm[0].length });
+	return out;
+}
+
+// Vetted before ANY write, so a bad request cannot leave a partial batch the
+// caller cannot reconcile. Every field is checked against the same rules the
+// format enforces, not looser ones: a category the parser cannot match makes the
+// whole marker invisible, and a source the serializer refuses would silently drop
+// the provenance that makes promotion idempotent.
+// Takes `unknown`, deliberately. This is a RUNTIME api other plugins call, so
+// the PromoteRequest declaration is documentation and not a guarantee: a
+// consumer can hand over anything, and typing the parameter as the interface
+// would be asserting the very thing this function exists to check. Reading
+// `r.body.trim()` off a missing body throws out of a function documented to
+// reject, and a throw across a plugin boundary is a worse failure than a refusal
+// because the caller cannot tell what happened.
+function isValidPromoteRequest(
+	value: unknown,
+	docLength: number,
+	forbidden: readonly { start: number; end: number }[],
+): value is PromoteRequest {
+	if (typeof value !== 'object' || value === null) return false;
+	const r = value as Record<string, unknown>;
+	if (typeof r.category !== 'string') return false;
+	if (typeof r.body !== 'string') return false;
+	if (typeof r.author !== 'string') return false;
+	if (typeof r.sourceKey !== 'string') return false;
+	if (typeof r.anchor !== 'object' || r.anchor === null) return false;
+	const anchor = r.anchor as Record<string, unknown>;
+	if (typeof anchor.start !== 'number') return false;
+	if (typeof anchor.end !== 'number') return false;
+
+	if (!isSerializableCategory(r.category)) return false;
+	if (r.body.trim() === '') return false;
+	if (!isAuthorToken(r.author)) return false;
+	if (!isCommentSource({ tag: r.author, key: r.sourceKey })) return false;
+	const start = anchor.start;
+	const end = anchor.end;
+	if (
+		!Number.isInteger(start) ||
+		!Number.isInteger(end) ||
+		start < 0 ||
+		end < start ||
+		end > docLength
+	) {
+		return false;
+	}
+	// The marker is inserted AT `start`, and the anchor text is captured from
+	// start..end, so both have to be clear of existing syntax. A range that
+	// merely touches a boundary is fine: inserting at the position a marker ends
+	// is inserting after it.
+	return (
+		!forbidden.some((f) => start > f.start && start < f.end) &&
+		!forbidden.some((f) => end > f.start && start < f.end)
+	);
+}
+
 export class CommentService {
 	private readonly writeQueue = new Map<string, Promise<void>>();
 
@@ -562,6 +657,205 @@ export class CommentService {
 
 	// Returns the resolved comments in `path` without modifying the file.
 	// Used by the delete-all-resolved command to size its confirmation modal.
+	// Create comments on behalf of another plugin (F-281, interop-contract 7).
+	//
+	// CREATE ONLY. There is no API path here to resolve, delete, edit or reply to
+	// a comment, and that is the design rather than an omission: resolution is a
+	// judgement about the writing, and machine tooling does not close a human's
+	// thread. A consumer that wants a finding retracted replies to it.
+	//
+	// The write goes through the same serializer and the same applySplices lock
+	// every other verb uses, per contract 4.1. A second writer is exactly the
+	// failure the format has been bitten by before, and it is why the exported
+	// skill spends a version teaching assistants not to hand-write markers.
+	async promote(
+		path: string,
+		requests: readonly PromoteRequest[],
+		expected: string,
+	): Promise<readonly CreatedComment[]> {
+		return this.enqueue(path, () =>
+			this.promoteUnqueued(path, requests, expected),
+		);
+	}
+
+	private async promoteUnqueued(
+		path: string,
+		requests: readonly PromoteRequest[],
+		expected: string,
+	): Promise<readonly CreatedComment[]> {
+		if (requests.length === 0) return [];
+		const file = this.plugin.app.vault.getAbstractFileByPath(path);
+		if (!(file instanceof TFile)) return [];
+		const content = await this.readCurrentContent(file, path);
+
+		// The anchors are offsets into the content the CONSUMER read, and this
+		// task only reaches the front of the queue some time later. Another write
+		// landing in between shifts every offset after it, and the request would
+		// still pass validation against the new content while placing its marker
+		// in the wrong prose and capturing the wrong anchor text.
+		//
+		// Refusing is the same answer applySplices already gives one layer down,
+		// for the same reason: this cannot know what the consumer meant, and the
+		// call is repeatable once it re-reads. A marker on the wrong sentence is
+		// not repairable, because nothing afterwards knows it is wrong.
+		if (content !== expected) return [];
+
+		// Every request is vetted before anything is written. A partial write on a
+		// bad request would leave the caller unable to tell which of its findings
+		// landed, and the whole point of the source key is that it can.
+		const existing = new Set(
+			parseDocument(content)
+				.comments.filter((c) => c.source !== undefined)
+				.map((c) => `${c.source?.tag}:${c.source?.key}`),
+		);
+		// All or nothing. A batch holding one bad request writes NOTHING rather
+		// than dropping it and promoting the rest: a consumer handed back fewer
+		// comments than it asked for cannot tell which of its findings were
+		// rejected and which were merely already present, and would record a
+		// partial analysis as complete.
+		const forbidden = forbiddenRanges(content);
+		const allValid = requests.every((r) =>
+			isValidPromoteRequest(r, content.length, forbidden),
+		);
+		if (!allValid) return [];
+
+		const valid: PromoteRequest[] = [];
+		for (const r of requests) {
+			// Idempotent by source key (contract 7.2): promoting a finding twice
+			// is a no-op, not a second marker, and unlike an invalid request it is
+			// not an error. A consumer re-running over a note it already promoted
+			// is the normal case, so these are skipped rather than refused.
+			const key = `${r.author}:${r.sourceKey}`;
+			if (existing.has(key)) continue;
+			existing.add(key);
+			valid.push(r);
+		}
+		if (valid.length === 0) return [];
+
+		// The budget guards the note against EVERY consumer, not just this one
+		// (contract 3.4). Above it the user is asked, with the count and the note.
+		const budget = this.plugin.settings.promotionBudget;
+		if (valid.length > budget) {
+			const first = valid[0];
+			// `resolve` IS the decision callback. Passing `() => resolve(true)`
+			// instead makes Cancel, Escape and click-away all approve the write,
+			// because every one of those exits calls back with false and the
+			// argument would be thrown away.
+			//
+			// The modal answers on every exit, so this settles exactly once and
+			// needs no timeout. An earlier version polled the DOM for the modal
+			// container to detect a cancel, which is fragile, untestable outside
+			// a browser, and wrong whenever another modal is open.
+			const approved = await new Promise<boolean>((resolve) => {
+				new ConfirmPromotionModal(
+					this.plugin.app,
+					valid.length,
+					first?.author ?? 'A plugin',
+					file.basename,
+					resolve,
+				).open();
+			});
+			if (!approved) return [];
+		}
+
+		// The per-note `annoteca_storage` override, read the same way the composer
+		// reads it. Passing undefined here ignored it, so promoting into a note
+		// explicitly configured for clean prose wrote full inline markers into it
+		// (or the reverse) whenever the note had no comments yet. It only matters
+		// on an empty note, which is exactly the note a consumer promotes into
+		// first.
+		const fm =
+			this.plugin.app.metadataCache.getFileCache(file)?.frontmatter;
+		const override = coerceStorageMode(
+			fm
+				? (fm as Record<string, unknown>)['annoteca_storage']
+				: undefined,
+		);
+		const mode = resolveStorageModeForNewComment(
+			content,
+			override,
+			this.plugin.settings.storageMode,
+		);
+		const splices: SpliceRange[] = [];
+		const created: CreatedComment[] = [];
+		const stored: StoredComment[] = [];
+		for (const r of valid) {
+			const id = this.freshId(content, created);
+			const anchorText = buildAnchorFromSelection(
+				content.slice(r.anchor.start, r.anchor.end),
+			);
+			const comment = {
+				id,
+				category: r.category,
+				body: r.body,
+				date: nowISO(),
+				author: r.author,
+				anchor: anchorText,
+				source: { tag: r.author, key: r.sourceKey },
+			};
+			const text =
+				mode === 'eof'
+					? serializeLeanMarker(comment.category, id)
+					: serialize(comment);
+			if (mode === 'eof') {
+				stored.push({
+					id,
+					category: comment.category,
+					body: comment.body,
+					date: comment.date,
+					author: comment.author,
+					anchor: comment.anchor,
+					replies: [],
+					source: comment.source,
+				});
+			}
+			// Beginning-placement, the same as the composer: the marker goes at
+			// the START of the passage it concerns so the prose follows it.
+			splices.push({
+				from: r.anchor.start,
+				to: r.anchor.start,
+				insert: `${text} `,
+			});
+			created.push({ id, sourceKey: r.sourceKey });
+		}
+		if (stored.length > 0) {
+			// Appended to whatever the note already stores, not replacing it. The
+			// existing entries come from parseStore rather than being assumed
+			// empty, because a note in eof mode already has comments in it.
+			const merged = [
+				...parseStore(content).map((e) => e.comment),
+				...stored,
+			];
+			const storeSplice = diffToSplice(
+				content,
+				writeStoreRegion(content, merged),
+			);
+			if (storeSplice) splices.push(storeSplice);
+		}
+		const wrote = await this.applySplices(path, file, splices, content);
+		// Honoured, not assumed. applySplices refuses on a stale read, and a
+		// caller told it created comments that are not in the file would record
+		// them as promoted and never retry.
+		return wrote ? created : [];
+	}
+
+	// An id no comment in this note already uses, and none already minted in this
+	// batch. generateId is random, so a collision inside one promote call is
+	// unlikely and not impossible, and two markers sharing an id is the join-key
+	// corruption the store's whole design avoids.
+	private freshId(
+		content: string,
+		created: readonly CreatedComment[],
+	): string {
+		const taken = new Set([
+			...parseDocument(content).comments.map((c) => c.id),
+			...created.map((c) => c.id),
+		]);
+		let id = generateId();
+		while (taken.has(id)) id = generateId();
+		return id;
+	}
+
 	async listResolvedInFile(path: string): Promise<Comment[]> {
 		const file = this.plugin.app.vault.getAbstractFileByPath(path);
 		if (!(file instanceof TFile)) return [];
