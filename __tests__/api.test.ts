@@ -40,7 +40,7 @@ describe('AnnotecaApi: the published shape', () => {
 		index.rebuild('a.md', NOTE);
 		const filter: ApiFilter = { resolved: 'all' };
 		const comments: readonly ApiComment[] = api.queryComments(filter);
-		const anchors: readonly AnchorRange[] = api.anchorsFor('a.md', NOTE);
+		const anchors: readonly AnchorRange[] = api.anchorsFor(NOTE);
 		expect(comments).toHaveLength(1);
 		expect(anchors).toHaveLength(1);
 	});
@@ -120,7 +120,7 @@ describe('AnnotecaApi.anchorsFor', () => {
 	it('locates the prose a comment is about, not the marker', () => {
 		const { api, index } = harness();
 		index.rebuild('a.md', NOTE);
-		const ranges = api.anchorsFor('a.md', NOTE);
+		const ranges = api.anchorsFor(NOTE);
 		expect(ranges).toHaveLength(1);
 		const r = ranges[0];
 		expect(r).toBeDefined();
@@ -136,9 +136,9 @@ describe('AnnotecaApi.anchorsFor', () => {
 		}
 	});
 
-	it('is empty for a path with no comments', () => {
+	it('is empty for content with no comments', () => {
 		const { api } = harness();
-		expect(api.anchorsFor('missing.md', 'text')).toEqual([]);
+		expect(api.anchorsFor('text with no markers')).toEqual([]);
 	});
 
 	// Content is passed in rather than read from the vault, so an editor with
@@ -146,7 +146,20 @@ describe('AnnotecaApi.anchorsFor', () => {
 	it('resolves against the content it is given', () => {
 		const { api, index } = harness();
 		index.rebuild('a.md', NOTE);
-		expect(api.anchorsFor('a.md', 'nothing matching here')).toEqual([]);
+		expect(api.anchorsFor('nothing matching here')).toEqual([]);
+	});
+
+	// The defect this signature exists to avoid: an edit BEFORE the marker moves
+	// every later offset. Resolving from the index would slice the old positions
+	// out of the new text and lose the anchor.
+	it('survives an unsaved insertion ahead of the marker', () => {
+		const { api, index } = harness();
+		index.rebuild('a.md', NOTE);
+		const edited = 'A new opening sentence was typed here. ' + NOTE;
+		const ranges = api.anchorsFor(edited);
+		expect(ranges).toHaveLength(1);
+		const r = ranges[0];
+		expect(r && edited.slice(r.start, r.end)).toBe('the rough draft');
 	});
 });
 

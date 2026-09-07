@@ -2,6 +2,7 @@ import type { EventRef } from 'obsidian';
 
 import type AnnotecaPlugin from './main';
 import type { Comment } from './types';
+import { parseAll } from './parser';
 import { ANCHOR_WINDOW, resolveAnchorRangeInWindows } from './view-utils';
 import { SKILL_SCHEMA_VERSION } from './skill-export';
 
@@ -68,12 +69,17 @@ export interface AnnotecaApi {
 	// this build reads and writes without parsing a note to find out.
 	readonly formatVersion: number;
 	queryComments(filter?: ApiFilter): readonly ApiComment[];
-	// Sync and pure: the caller passes the text it already has rather than this
-	// reading the vault. Plumbline's use (contract 5.1) is inside a CodeMirror
-	// extension that holds the document, so an async vault read would be both
-	// slower and wrong, resolving anchors against a stale on-disk copy while the
-	// editor shows unsaved edits.
-	anchorsFor(path: string, content: string): readonly AnchorRange[];
+	// Pure over the content it is given: it parses that text rather than reading
+	// the vault OR consulting the index, and takes no path for that reason.
+	//
+	// Both alternatives are wrong here, and the second one subtly. Reading the
+	// vault resolves against the stale on-disk copy while the editor shows
+	// unsaved edits. Using the index is worse: its marker offsets come from the
+	// last rebuild, so combining them with newer content slices the wrong place
+	// entirely once an edit lands ahead of a marker, and reports an anchor as
+	// missing or as covering the wrong words. Parsing the supplied text is the
+	// only version with no stale half.
+	anchorsFor(content: string): readonly AnchorRange[];
 	// Fires when the comment index changes. Returns its own unsubscribe; a
 	// consumer must call it on unload or the callback outlives the consumer.
 	onChange(cb: () => void): () => void;
@@ -117,13 +123,12 @@ export function createApi(plugin: AnnotecaPlugin): AnnotecaApi {
 			return located.map((l) => toApiComment(l.path, l.comment));
 		},
 
-		anchorsFor(path: string, content: string): readonly AnchorRange[] {
-			const idx = plugin.commentIndex.get(path);
-			if (!idx) {
-				return [];
-			}
+		anchorsFor(content: string): readonly AnchorRange[] {
+			// Parsed from the supplied text, never from the index. The index
+			// holds offsets from its last rebuild, and an unsaved edit before a
+			// marker moves every offset after it.
 			const out: AnchorRange[] = [];
-			for (const c of idx.comments) {
+			for (const c of parseAll(content)) {
 				const anchor = c.anchor;
 				if (!anchor || anchor.text.length === 0) {
 					continue;
