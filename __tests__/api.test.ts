@@ -7,6 +7,8 @@ import {
 	type ApiFilter,
 } from '../api';
 import { CommentIndex } from '../index';
+import { parseAll, serializeLeanMarker } from '../parser';
+import { writeStoreRegion, type StoredComment } from '../store';
 import { SKILL_SCHEMA_VERSION } from '../skill-export';
 import { Events } from 'obsidian';
 import type AnnotecaPlugin from '../main';
@@ -160,6 +162,43 @@ describe('AnnotecaApi.anchorsFor', () => {
 		expect(ranges).toHaveLength(1);
 		const r = ranges[0];
 		expect(r && edited.slice(r.start, r.end)).toBe('the rough draft');
+	});
+});
+
+// End-of-file storage (1.16.0) leaves a lean marker inline and puts the body and
+// anchor in a store at the bottom of the file. Parsing only the markers loses the
+// anchor, so every eof comment would vanish from this list.
+describe('AnnotecaApi.anchorsFor: end-of-file storage', () => {
+	it('locates prose for a comment whose anchor lives in the store', () => {
+		const { api } = harness();
+		// Built with the real serializers rather than hand-written, so the
+		// fixture cannot drift from the format the plugin actually writes.
+		const marker = serializeLeanMarker('tone', 'eeee5555');
+		const stored: StoredComment = {
+			id: 'eeee5555',
+			category: 'tone',
+			body: 'soften this',
+			date: undefined,
+			author: undefined,
+			anchor: { text: 'the rough draft', truncated: false },
+			replies: [],
+			addressed: undefined,
+			resolution: undefined,
+			unknownLines: [],
+		};
+		const eof = writeStoreRegion(
+			`Prose before it. ${marker} the rough draft carries on here.\n`,
+			[stored],
+		);
+
+		// The fixture is only meaningful if the anchor really is in the store.
+		expect(parseAll(eof)[0]?.anchor).toBeUndefined();
+
+		const ranges = api.anchorsFor(eof);
+		expect(ranges).toHaveLength(1);
+		const r = ranges[0];
+		expect(r && eof.slice(r.start, r.end)).toBe('the rough draft');
+		expect(r?.commentId).toBe('eeee5555');
 	});
 });
 

@@ -2,7 +2,7 @@ import type { EventRef } from 'obsidian';
 
 import type AnnotecaPlugin from './main';
 import type { Comment } from './types';
-import { parseAll } from './parser';
+import { parseDocument } from './document';
 import { ANCHOR_WINDOW, resolveAnchorRangeInWindows } from './view-utils';
 import { SKILL_SCHEMA_VERSION } from './skill-export';
 
@@ -124,11 +124,18 @@ export function createApi(plugin: AnnotecaPlugin): AnnotecaApi {
 		},
 
 		anchorsFor(content: string): readonly AnchorRange[] {
+			// parseDocument, not parseAll, for the same reason the index uses it:
+			// under end-of-file storage the inline marker is lean and the anchor
+			// lives in the store at the bottom of the file, so parseAll alone
+			// returns a comment whose anchor is undefined and every eof comment
+			// silently vanishes from this list. A file with no store entries
+			// parses identically either way.
+			//
 			// Parsed from the supplied text, never from the index. The index
 			// holds offsets from its last rebuild, and an unsaved edit before a
 			// marker moves every offset after it.
 			const out: AnchorRange[] = [];
-			for (const c of parseAll(content)) {
+			for (const c of parseDocument(content).comments) {
 				const anchor = c.anchor;
 				if (!anchor || anchor.text.length === 0) {
 					continue;
