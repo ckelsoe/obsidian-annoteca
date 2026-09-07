@@ -65,9 +65,19 @@ export interface ApiFilter {
 
 export interface AnnotecaApi {
 	readonly apiVersion: number;
-	// Mirrors SKILL_SCHEMA_VERSION, so a consumer can tell which marker format
-	// this build reads and writes without parsing a note to find out.
-	readonly formatVersion: number;
+	// The version of the exported assistant guidance, NOT the marker format.
+	//
+	// It was called `formatVersion` and that name overclaimed. SKILL_SCHEMA_VERSION
+	// bumps when the assistant-facing teaching materially changes, which usually
+	// but not always tracks the format: v2 was a workflow change (begin-placement,
+	// the addressed flow) with no format change behind it. It is also the wrong
+	// direction as a guarantee, since a format change that needs no new teaching
+	// would not bump it.
+	//
+	// Annoteca has no independent marker-format version to expose yet. Use this to
+	// tell which SKILL.md generation a build ships, not as a compatibility gate on
+	// the format itself.
+	readonly skillSchemaVersion: number;
 	// Async because it has to be. The comment index is populated lazily, from
 	// files opened or modified this session, so querying it directly in a fresh
 	// session silently returns a fraction of the vault and looks like a correct
@@ -114,7 +124,7 @@ function toApiComment(path: string, c: Comment): ApiComment {
 export function createApi(plugin: AnnotecaPlugin): AnnotecaApi {
 	return {
 		apiVersion: API_VERSION,
-		formatVersion: SKILL_SCHEMA_VERSION,
+		skillSchemaVersion: SKILL_SCHEMA_VERSION,
 
 		async queryComments(
 			filter?: ApiFilter,
