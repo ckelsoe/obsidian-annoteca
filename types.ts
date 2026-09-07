@@ -60,6 +60,27 @@ export interface Comment {
 	source: CommentSource | undefined;
 }
 
+// One comment another plugin is asking Annoteca to create (F-281).
+export interface PromoteRequest {
+	category: string;
+	body: string;
+	// Offsets into the note's CURRENT content. The marker is placed at `start`,
+	// and the text between start and end becomes the anchor.
+	anchor: { start: number; end: number };
+	// The creating plugin's id. Used as both the author tag and the source tag,
+	// so a promoted comment reads as authored by the plugin and carries its
+	// provenance.
+	author: string;
+	// The creating plugin's own identity for the finding. Promotion is idempotent
+	// on it: promoting the same finding twice is a no-op, not a second marker.
+	sourceKey: string;
+}
+
+export interface CreatedComment {
+	id: string;
+	sourceKey: string;
+}
+
 // Provenance for a comment created through the API rather than by a person.
 // Deliberately opaque to Annoteca: it never interprets `key`, only carries it.
 export interface CommentSource {
@@ -232,6 +253,12 @@ export interface AnnotecaSettings {
 	// Entries are bare prefixes in the grammar the scan matches (`isNamespacePrefix`
 	// in diagnostics.ts), so `plumbline`, never `plumbline/` or `<!-- plumbline`.
 	conflictNamespaceAllowlist: string[];
+
+	// Above this many comments in ONE promote() call, the user is asked before
+	// anything is written (F-286). Guards the note against every API consumer,
+	// not just one, since a scripted mistake is the difference between a review
+	// queue and a note nobody can read.
+	promotionBudget: number;
 
 	// Position drift snapshots keyed by comment id (F-234). Captured on demand
 	// by the detection command; not user-editable.

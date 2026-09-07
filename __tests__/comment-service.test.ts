@@ -9,6 +9,7 @@ import {
 	VANISHED_MESSAGE,
 } from '../comment-service';
 import { parseAll, serializeLeanMarker } from '../parser';
+import type { PromoteRequest } from '../types';
 import { convertAllComments } from '../imports';
 import {
 	parseStore,
@@ -1906,5 +1907,73 @@ describe('a machine-created comment keeps its source line', () => {
 			tag: 'plumbline',
 			key: 'a1b2c3d4',
 		});
+	});
+});
+
+// promote(): comments created on another plugin's behalf (F-281, F-286).
+describe('promote', () => {
+	const PLAIN = 'The rough draft carries on here and then some more prose.\n';
+
+	const req = (over: Partial<PromoteRequest> = {}): PromoteRequest => ({
+		category: 'prose-check',
+		body: 'Flagged register.',
+		anchor: { start: 4, end: 15 },
+		author: 'plumbline',
+		sourceKey: 'a1b2c3d4',
+		...over,
+	});
+
+	it('creates a comment carrying author and provenance', async () => {
+		const h = makeHarnessWith(PLAIN, false);
+		const made = await h.service.promote('note.md', [req()]);
+		expect(made).toHaveLength(1);
+		const c = target(h.content);
+		expect(c.category).toBe('prose-check');
+		expect(c.author).toBe('plumbline');
+		expect(c.source).toEqual({ tag: 'plumbline', key: 'a1b2c3d4' });
+		expect(c.id).toBe(made[0]?.id);
+	});
+
+	// Contract 7.2: a consumer re-running over a note it already promoted is the
+	// normal case, not an error, and must not double the markers.
+	it('is idempotent on the source key', async () => {
+		const h = makeHarnessWith(PLAIN, false);
+		await h.service.promote('note.md', [req()]);
+		const again = await h.service.promote('note.md', [req()]);
+		expect(again).toEqual([]);
+		expect(parseAll(h.content)).toHaveLength(1);
+	});
+
+	it('creates several at once, each with its own id', async () => {
+		const h = makeHarnessWith(PLAIN, false);
+		const made = await h.service.promote('note.md', [
+			req({ sourceKey: 'aaaa1111', anchor: { start: 4, end: 9 } }),
+			req({ sourceKey: 'bbbb2222', anchor: { start: 20, end: 27 } }),
+		]);
+		expect(made).toHaveLength(2);
+		expect(new Set(made.map((m) => m.id)).size).toBe(2);
+		expect(parseAll(h.content)).toHaveLength(2);
+	});
+
+	// Vetted before ANY write: a partial batch would leave the caller unable to
+	// tell which of its findings landed.
+	it('skips a request the format cannot hold', async () => {
+		const h = makeHarnessWith(PLAIN, false);
+		const made = await h.service.promote('note.md', [
+			req({ category: 'Not A Category' }),
+			req({ sourceKey: 'has space' }),
+			req({ author: 'Bob Smith' }),
+			req({ body: '   ' }),
+			req({ anchor: { start: 5, end: 4 } }),
+			req({ anchor: { start: 0, end: 99999 } }),
+		]);
+		expect(made).toEqual([]);
+		expect(parseAll(h.content)).toHaveLength(0);
+	});
+
+	it('writes nothing at all for an empty request list', async () => {
+		const h = makeHarnessWith(PLAIN, false);
+		expect(await h.service.promote('note.md', [])).toEqual([]);
+		expect(h.content).toBe(PLAIN);
 	});
 });

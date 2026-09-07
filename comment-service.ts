@@ -20,17 +20,32 @@ import { MarkdownView, Notice, TFile } from 'obsidian';
 
 import type AnnotecaPlugin from './main';
 import type { ImportResult } from './imports';
-import type { Addressed, Comment, MarkerRange, Reply } from './types';
+import type {
+	Addressed,
+	Comment,
+	CreatedComment,
+	MarkerRange,
+	PromoteRequest,
+	Reply,
+} from './types';
+import { ConfirmPromotionModal } from './confirm-modal';
 import {
 	findRemovalBlocker,
 	parseAll,
 	serialize,
+	serializeLeanMarker,
 	nowISO,
+	generateId,
+	buildAnchorFromSelection,
+	isAuthorToken,
+	isCommentSource,
+	isSerializableCategory,
 	type MalformedMarker,
 } from './parser';
 import {
 	parseDocument,
 	resolveEofTarget,
+	resolveStorageModeForNewComment,
 	storeEntriesWith,
 	type EofTarget,
 } from './document';
@@ -39,6 +54,7 @@ import {
 	writeStoreRegion,
 	diffToSplice,
 	type SpliceRange,
+	type StoredComment,
 } from './store';
 
 // What a lifecycle write actually did. Three outcomes rather than a boolean,
@@ -109,6 +125,26 @@ export function markerDamageMessage(finding: MalformedMarker): string {
 // unqueued form. Queueing at both layers would deadlock: resolveComment waiting
 // on resolveAndRemoveComment, which is waiting behind resolveComment in the same
 // queue.
+// Vetted before ANY write, so a bad request cannot leave a partial batch the
+// caller cannot reconcile. Every field is checked against the same rules the
+// format enforces, not looser ones: a category the parser cannot match makes the
+// whole marker invisible, and a source the serializer refuses would silently drop
+// the provenance that makes promotion idempotent.
+function isValidPromoteRequest(r: PromoteRequest, docLength: number): boolean {
+	if (!isSerializableCategory(r.category)) return false;
+	if (r.body.trim() === '') return false;
+	if (!isAuthorToken(r.author)) return false;
+	if (!isCommentSource({ tag: r.author, key: r.sourceKey })) return false;
+	const { start, end } = r.anchor;
+	return (
+		Number.isInteger(start) &&
+		Number.isInteger(end) &&
+		start >= 0 &&
+		end >= start &&
+		end <= docLength
+	);
+}
+
 export class CommentService {
 	private readonly writeQueue = new Map<string, Promise<void>>();
 
@@ -562,6 +598,165 @@ export class CommentService {
 
 	// Returns the resolved comments in `path` without modifying the file.
 	// Used by the delete-all-resolved command to size its confirmation modal.
+	// Create comments on behalf of another plugin (F-281, interop-contract 7).
+	//
+	// CREATE ONLY. There is no API path here to resolve, delete, edit or reply to
+	// a comment, and that is the design rather than an omission: resolution is a
+	// judgement about the writing, and machine tooling does not close a human's
+	// thread. A consumer that wants a finding retracted replies to it.
+	//
+	// The write goes through the same serializer and the same applySplices lock
+	// every other verb uses, per contract 4.1. A second writer is exactly the
+	// failure the format has been bitten by before, and it is why the exported
+	// skill spends a version teaching assistants not to hand-write markers.
+	async promote(
+		path: string,
+		requests: readonly PromoteRequest[],
+	): Promise<readonly CreatedComment[]> {
+		return this.enqueue(path, () => this.promoteUnqueued(path, requests));
+	}
+
+	private async promoteUnqueued(
+		path: string,
+		requests: readonly PromoteRequest[],
+	): Promise<readonly CreatedComment[]> {
+		if (requests.length === 0) return [];
+		const file = this.plugin.app.vault.getAbstractFileByPath(path);
+		if (!(file instanceof TFile)) return [];
+		const content = await this.readCurrentContent(file, path);
+
+		// Every request is vetted before anything is written. A partial write on a
+		// bad request would leave the caller unable to tell which of its findings
+		// landed, and the whole point of the source key is that it can.
+		const existing = new Set(
+			parseDocument(content)
+				.comments.filter((c) => c.source !== undefined)
+				.map((c) => `${c.source?.tag}:${c.source?.key}`),
+		);
+		const valid: PromoteRequest[] = [];
+		for (const r of requests) {
+			if (!isValidPromoteRequest(r, content.length)) continue;
+			// Idempotent by source key (contract 7.2): promoting a finding twice
+			// is a no-op, not a second marker. A consumer re-running over a note
+			// it already promoted is the normal case, not an error.
+			const key = `${r.author}:${r.sourceKey}`;
+			if (existing.has(key)) continue;
+			existing.add(key);
+			valid.push(r);
+		}
+		if (valid.length === 0) return [];
+
+		// The budget guards the note against EVERY consumer, not just this one
+		// (contract 3.4). Above it the user is asked, with the count and the note.
+		const budget = this.plugin.settings.promotionBudget;
+		if (valid.length > budget) {
+			const first = valid[0];
+			const approved = await new Promise<boolean>((resolve) => {
+				new ConfirmPromotionModal(
+					this.plugin.app,
+					valid.length,
+					first?.author ?? 'A plugin',
+					file.basename,
+					() => resolve(true),
+				).open();
+				// The modal resolves true only through its confirm button. Its
+				// close path has to resolve too, or a cancelled prompt leaves the
+				// caller awaiting forever.
+				const closer = window.setInterval(() => {
+					if (document.querySelector('.modal-container') === null) {
+						window.clearInterval(closer);
+						resolve(false);
+					}
+				}, 150);
+			});
+			if (!approved) return [];
+		}
+
+		const mode = resolveStorageModeForNewComment(
+			content,
+			undefined,
+			this.plugin.settings.storageMode,
+		);
+		const splices: SpliceRange[] = [];
+		const created: CreatedComment[] = [];
+		const stored: StoredComment[] = [];
+		for (const r of valid) {
+			const id = this.freshId(content, created);
+			const anchorText = buildAnchorFromSelection(
+				content.slice(r.anchor.start, r.anchor.end),
+			);
+			const comment = {
+				id,
+				category: r.category,
+				body: r.body,
+				date: nowISO(),
+				author: r.author,
+				anchor: anchorText,
+				source: { tag: r.author, key: r.sourceKey },
+			};
+			const text =
+				mode === 'eof'
+					? serializeLeanMarker(comment.category, id)
+					: serialize(comment);
+			if (mode === 'eof') {
+				stored.push({
+					id,
+					category: comment.category,
+					body: comment.body,
+					date: comment.date,
+					author: comment.author,
+					anchor: comment.anchor,
+					replies: [],
+					source: comment.source,
+				});
+			}
+			// Beginning-placement, the same as the composer: the marker goes at
+			// the START of the passage it concerns so the prose follows it.
+			splices.push({
+				from: r.anchor.start,
+				to: r.anchor.start,
+				insert: `${text} `,
+			});
+			created.push({ id, sourceKey: r.sourceKey });
+		}
+		if (stored.length > 0) {
+			// Appended to whatever the note already stores, not replacing it. The
+			// existing entries come from parseStore rather than being assumed
+			// empty, because a note in eof mode already has comments in it.
+			const merged = [
+				...parseStore(content).map((e) => e.comment),
+				...stored,
+			];
+			const storeSplice = diffToSplice(
+				content,
+				writeStoreRegion(content, merged),
+			);
+			if (storeSplice) splices.push(storeSplice);
+		}
+		const wrote = await this.applySplices(path, file, splices, content);
+		// Honoured, not assumed. applySplices refuses on a stale read, and a
+		// caller told it created comments that are not in the file would record
+		// them as promoted and never retry.
+		return wrote ? created : [];
+	}
+
+	// An id no comment in this note already uses, and none already minted in this
+	// batch. generateId is random, so a collision inside one promote call is
+	// unlikely and not impossible, and two markers sharing an id is the join-key
+	// corruption the store's whole design avoids.
+	private freshId(
+		content: string,
+		created: readonly CreatedComment[],
+	): string {
+		const taken = new Set([
+			...parseDocument(content).comments.map((c) => c.id),
+			...created.map((c) => c.id),
+		]);
+		let id = generateId();
+		while (taken.has(id)) id = generateId();
+		return id;
+	}
+
 	async listResolvedInFile(path: string): Promise<Comment[]> {
 		const file = this.plugin.app.vault.getAbstractFileByPath(path);
 		if (!(file instanceof TFile)) return [];

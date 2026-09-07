@@ -10,7 +10,10 @@
 // contentEl (the real one comes from the plugin host), so the test supplies the
 // one thing onClose touches.
 
-import { ConfirmDeleteCommentModal } from '../confirm-modal';
+import {
+	ConfirmDeleteCommentModal,
+	ConfirmPromotionModal,
+} from '../confirm-modal';
 import { DEFAULT_SETTINGS } from '../settings';
 import type { App } from 'obsidian';
 import type { Comment } from '../types';
@@ -77,5 +80,49 @@ describe('ConfirmDeleteCommentModal cancellation', () => {
 		modal.onClose();
 		expect(cancelled).toBe(0);
 		expect(confirmed).toBe(0);
+	});
+});
+
+// The promotion budget prompt (F-286). Same lifecycle hazard as the delete
+// modal above: comment-service awaits a promise this modal settles, so an exit
+// that answers nothing leaves a write pending for the life of the session.
+// Driven by calling the lifecycle methods directly, since the Jest Modal stub
+// has no contentEl.
+describe('ConfirmPromotionModal decision', () => {
+	function makeModal(onDecision: (approved: boolean) => void) {
+		const modal = new ConfirmPromotionModal(
+			{} as App,
+			12,
+			'plumbline',
+			'chapter-one',
+			onDecision,
+		);
+		(modal as unknown as { contentEl: { empty: () => void } }).contentEl = {
+			empty: () => undefined,
+		};
+		return modal;
+	}
+
+	it('answers false when dismissed without choosing', () => {
+		const seen: boolean[] = [];
+		makeModal((a) => seen.push(a)).onClose();
+		expect(seen).toEqual([false]);
+	});
+
+	// Every exit routes through onClose, including the Add button, so without the
+	// guard a confirmed prompt would answer twice and the second answer would be
+	// a refusal.
+	it('answers exactly once when confirmed then closed', () => {
+		const seen: boolean[] = [];
+		const modal = makeModal((a) => seen.push(a));
+		(
+			modal as unknown as {
+				decided: boolean;
+				onDecision: (a: boolean) => void;
+			}
+		).decided = true;
+		seen.push(true);
+		modal.onClose();
+		expect(seen).toEqual([true]);
 	});
 });

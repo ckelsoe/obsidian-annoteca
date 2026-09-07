@@ -1,7 +1,7 @@
 import type { EventRef } from 'obsidian';
 
 import type AnnotecaPlugin from './main';
-import type { Comment } from './types';
+import type { Comment, CreatedComment, PromoteRequest } from './types';
 import { parseDocument } from './document';
 import { ANCHOR_WINDOW, resolveAnchorRangeInWindows } from './view-utils';
 import { SKILL_SCHEMA_VERSION } from './skill-export';
@@ -95,6 +95,27 @@ export interface AnnotecaApi {
 	// missing or as covering the wrong words. Parsing the supplied text is the
 	// only version with no stale half.
 	anchorsFor(content: string): readonly AnchorRange[];
+	// Create comments on this consumer's behalf (F-281).
+	//
+	// CREATE ONLY, and that is the design. There is no path here to resolve,
+	// delete, edit or reply: resolution is a judgement about the writing, and
+	// machine tooling does not close a human's thread. A consumer that wants a
+	// finding retracted replies to it.
+	//
+	// Idempotent on `sourceKey`, so a consumer re-running over a note it already
+	// promoted creates nothing and gets back only what it made this time. Above
+	// the promotion budget the user is asked first, and a refusal returns an
+	// empty array rather than throwing: nothing was created, which is exactly
+	// what the return value says.
+	//
+	// Returns only the comments actually written. A stale-read refusal deep in
+	// the write path returns empty too, so a consumer that records what it got
+	// back can never believe a finding was promoted when it was not.
+	promote(
+		path: string,
+		requests: readonly PromoteRequest[],
+	): Promise<readonly CreatedComment[]>;
+
 	// Fires when the comment index changes. Returns its own unsubscribe; a
 	// consumer must call it on unload or the callback outlives the consumer.
 	onChange(cb: () => void): () => void;
@@ -188,6 +209,17 @@ export function createApi(plugin: AnnotecaPlugin): AnnotecaApi {
 				}
 			}
 			return out;
+		},
+
+		promote(
+			path: string,
+			requests: readonly PromoteRequest[],
+		): Promise<readonly CreatedComment[]> {
+			// Delegated, not reimplemented. comment-service owns every write:
+			// the serializer, the queue and the stale-read guard all live there,
+			// and contract 4.1 exists because a second writer is how this format
+			// has been damaged before.
+			return plugin.comments.promote(path, requests);
 		},
 
 		onChange(cb: () => void): () => void {
