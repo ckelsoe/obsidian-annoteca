@@ -1070,10 +1070,17 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		// obsidianmd sentence-case rule reads a placeholder as UI text and wants
 		// it capitalized, which would show a spelling the field itself folds. The
 		// example lives in the description above instead.
+		//
+		// `aria-label` because the stacked row's title is a sibling div, not a
+		// <label>, so nothing associates it with this input programmatically. A
+		// screen reader would otherwise announce an unlabelled text field. The
+		// declarative settings rows get this from Obsidian; a custom block has to
+		// supply it.
 		const input = content.createEl('input', {
 			cls: 'annoteca-namespace-allowlist-input',
 			attr: {
 				type: 'text',
+				'aria-label': 'Known comment namespaces',
 				value: this.plugin.settings.conflictNamespaceAllowlist.join(
 					', ',
 				),
