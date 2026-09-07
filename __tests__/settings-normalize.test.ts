@@ -921,6 +921,23 @@ describe('normalizeSettings: conflictNamespaceAllowlist', () => {
 		expect(restored.conflictNamespaceAllowlist).toEqual(['other-tool']);
 	});
 
+	// A restored list that lost every entry is not "suppress nothing", it is a
+	// list this build cannot read, and accepting it would wipe a configured
+	// allowlist on the restore path.
+	it('declines a non-empty list whose entries are all unusable', () => {
+		const live = {
+			...DEFAULT_SETTINGS,
+			conflictNamespaceAllowlist: ['plumbline', 'other-tool'],
+		};
+		const restored = mergeRestoredSettings(live, {
+			conflictNamespaceAllowlist: ['1bad', 'also/bad', ''],
+		});
+		expect(restored.conflictNamespaceAllowlist).toEqual([
+			'plumbline',
+			'other-tool',
+		]);
+	});
+
 	it('accepts a deliberately emptied list', () => {
 		expect(
 			normalizeSettings({ conflictNamespaceAllowlist: [] })

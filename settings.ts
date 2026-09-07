@@ -441,7 +441,18 @@ const validNamespaceAllowlist: SettingValidator<
 	'conflictNamespaceAllowlist'
 > = (raw) => {
 	const values = arrayOf(validNamespacePrefix)(raw);
-	return values === undefined ? undefined : [...new Set(values)];
+	if (values === undefined) return undefined;
+	// A list that arrived carrying entries and lost every one of them is not
+	// "suppress nothing", it is a list this build cannot read. Same reasoning as
+	// validAuthorStyles below, and the difference only shows on the RESTORE path,
+	// where an accepted value replaces the live one while `undefined` falls back
+	// to it: a backup holding nothing but unusable entries would otherwise wipe
+	// the namespaces the user configured and start reporting them as conflicts
+	// again. An explicitly empty list is still accepted, because that is what
+	// "suppress nothing" genuinely looks like.
+	if (values.length === 0 && Array.isArray(raw) && raw.length > 0)
+		return undefined;
+	return [...new Set(values)];
 };
 
 const validAuthorTag: SettingValidator<'authorTag'> = (raw) => {
