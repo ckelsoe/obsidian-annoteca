@@ -975,7 +975,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 					},
 					{
 						name: 'Ask before adding this many comments',
-						desc: 'When another plugin adds comments to a note through Annoteca, you are asked first if it wants to add more than this many at once. Lower asks more often; 1 asks every time.',
+						desc: 'When another plugin adds comments to a note through Annoteca, you are asked first if it wants to add more than this many at once. Lower asks more often. At 1 you are asked whenever a plugin adds more than one comment; a single comment is never confirmed.',
 						control: {
 							type: 'number',
 							key: 'promotionBudget',
