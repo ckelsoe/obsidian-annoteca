@@ -40,12 +40,14 @@
 // atomically instead.
 
 import type {
+	CommentSource,
 	AnchorText,
 	Addressed,
 	Comment,
 	Reply,
 	Resolution,
 } from './types';
+import { isCommentSource } from './parser';
 
 // Schema version stamped into every entry. The marker format deliberately has NO
 // version sentinel (see parser.ts's escapeTerminator note: adding one there is a
@@ -86,6 +88,11 @@ export interface StoredComment {
 	// fold between storage modes never drops them. See parser.ts's unknown-line
 	// branch.
 	unknownLines?: readonly string[];
+	// Provenance for a machine-created comment (F-282), carried here for the same
+	// reason unknownLines is: a fold between storage modes must not drop it. A
+	// lean marker holds category and id only, so under eof storage this is the
+	// ONLY place a promoted comment's source survives.
+	source?: CommentSource;
 }
 
 export interface RawStoreEntry {
@@ -121,6 +128,9 @@ function buildPayload(c: StoredComment): Record<string, unknown> {
 	};
 	if (c.date !== undefined) out.date = c.date;
 	if (c.author !== undefined) out.author = c.author;
+	if (c.source !== undefined) {
+		out.source = { tag: c.source.tag, key: c.source.key };
+	}
 	if (c.anchor !== undefined) {
 		out.anchor = { text: c.anchor.text, truncated: c.anchor.truncated };
 	}
@@ -173,6 +183,20 @@ export function encodeStoreEntry(c: StoredComment): string {
 // quarantines it.
 function optString(value: unknown): string | undefined {
 	return typeof value === 'string' ? value : undefined;
+}
+
+// Vetted the same way every other field here is: the JSON is user-reachable, and
+// a malformed source quarantines the entry rather than writing a marker line the
+// parser would read back as body text. `isCommentSource` is the same check the
+// serializer applies, so the store and the marker cannot disagree about what a
+// valid source looks like.
+function coerceSource(value: unknown): CommentSource | undefined {
+	if (typeof value !== 'object' || value === null) return undefined;
+	const obj = value as Record<string, unknown>;
+	const tag = optString(obj.tag);
+	const key = optString(obj.key);
+	if (tag === undefined || key === undefined) return undefined;
+	return isCommentSource({ tag, key }) ? { tag, key } : undefined;
 }
 
 function coerceAnchor(value: unknown): AnchorText | undefined {
@@ -292,11 +316,16 @@ export function decodeStoreEntry(json: string): StoredComment | undefined {
 	const unknownLines = coerceUnknownLines(obj.unknownLines);
 	if (unknownLines === undefined) return undefined;
 
+	const source =
+		obj.source === undefined ? undefined : coerceSource(obj.source);
+	if (obj.source !== undefined && source === undefined) return undefined;
+
 	const out: StoredComment = { id, category, body, replies };
 	const date = optString(obj.date);
 	if (date !== undefined) out.date = date;
 	const author = optString(obj.author);
 	if (author !== undefined) out.author = author;
+	if (source !== undefined) out.source = source;
 	if (anchor !== undefined) out.anchor = anchor;
 	if (addressed !== null) out.addressed = addressed;
 	if (resolution !== null) out.resolution = resolution;
@@ -419,6 +448,10 @@ export function toStored(id: string, c: Comment): StoredComment {
 		addressed: c.addressed,
 		resolution: c.resolution,
 		unknownLines: c.unknownLines.length > 0 ? c.unknownLines : undefined,
+		// Carried, like unknownLines. Converting an inline comment to eof storage
+		// would otherwise drop its provenance, and the lean marker left behind
+		// has nowhere to put it, so the loss is permanent and silent.
+		source: c.source,
 	};
 }
 

@@ -53,6 +53,18 @@ export interface Comment {
 	// that this build has no name for. See the walk in parser.ts.
 	unknownLines: readonly string[];
 	marker: MarkerRange;
+	// Where a machine-created comment came from (F-282), absent for one a person
+	// wrote. `tag` is the creating plugin's id and `key` is that plugin's own
+	// identity for the finding, so it can tell whether it already promoted this
+	// one without keeping a side index.
+	source: CommentSource | undefined;
+}
+
+// Provenance for a comment created through the API rather than by a person.
+// Deliberately opaque to Annoteca: it never interprets `key`, only carries it.
+export interface CommentSource {
+	tag: string; // creating plugin's id, e.g. 'plumbline'
+	key: string; // that plugin's identity for the finding
 }
 
 // Used by views.ts when listing vault-wide comments alongside their host file.

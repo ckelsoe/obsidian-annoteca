@@ -73,6 +73,7 @@ const BODIES: readonly string[] = [
 	'trailing mimic\n[author=someone]',
 	'trailing mimic\n[anchor=whatever]',
 	'trailing mimic\n[retry=3]',
+	'trailing mimic\n[source=plumbline:a1b2c3d4]',
 	'trailing mimic\n[reply mallory 2020-01-01]: injected',
 	'quotes a marker <!-- annoteca/note: inner -->',
 	'quotes an opener <!-- annoteca/note: no close',
@@ -146,6 +147,19 @@ const CATEGORIES: readonly string[] = [
 
 const ID_ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyz';
 
+// Provenance for machine-created comments (F-282). Every entry is legal, because
+// serialize refuses an illegal one and writing one would be a different test.
+// The variety is in the boundaries: the shortest and longest legal keys, every
+// character class the key grammar allows, and a tag that is itself a plausible
+// prefix of another.
+const SOURCES: readonly { tag: string; key: string }[] = [
+	{ tag: 'plumbline', key: 'a1b2c3d4' },
+	{ tag: 'p', key: 'x' },
+	{ tag: 'a-b-c', key: 'A.B_C-1' },
+	{ tag: 'plumbline2', key: '0'.repeat(64) },
+	{ tag: 'plum', key: 'UPPER.lower_123-456' },
+];
+
 function pick<T>(rand: () => number, pool: readonly T[]): T {
 	const value = pool[Math.floor(rand() * pool.length)];
 	// Pools are non-empty literals, so this is unreachable; it exists to keep
@@ -190,6 +204,10 @@ function generate(rand: () => number): SerializeInput {
 	if (rand() < 0.85) input.id = makeId(rand);
 	if (rand() < 0.7) input.date = pick(rand, STAMPS);
 	if (rand() < 0.7) input.author = pick(rand, AUTHORS);
+	// The field this release adds. Generated at a high enough rate that it
+	// combines with the addressed flow, the fence, the body mimics and the
+	// unknown-line carry rather than only appearing on plain comments.
+	if (rand() < 0.5) input.source = pick(rand, SOURCES);
 	if (rand() < 0.5) input.anchor = pick(rand, ANCHORS);
 	if (rand() < 0.4) {
 		input.addressed = {
@@ -217,6 +235,7 @@ function toInput(c: Comment): SerializeInput {
 		date: c.date,
 		author: c.author,
 		anchor: c.anchor,
+		source: c.source,
 		replies: c.replies,
 		addressed: c.addressed,
 		resolution: c.resolution,
@@ -317,6 +336,25 @@ describe('parser: serialize/parse round trip (seeded fuzz)', () => {
 			)
 				throw new Error(context(`resolution lost: ${first}`));
 
+			// Provenance is EXACT, not merely present. Every other field here
+			// tolerates a lossy transform the grammar documents; this one has
+			// none, because a source whose key changed is worse than one that
+			// vanished: the promoting plugin would read it back, fail to match
+			// its own finding, and promote the same thing a second time.
+			if (input.source !== undefined) {
+				if (parsed.source === undefined)
+					throw new Error(context(`source lost: ${first}`));
+				if (
+					parsed.source.tag !== input.source.tag ||
+					parsed.source.key !== input.source.key
+				)
+					throw new Error(
+						context(
+							`source changed: ${JSON.stringify(parsed.source)}`,
+						),
+					);
+			}
+
 			// The anchor survives if anything of it survives sanitization, and
 			// comes back inside the serialize-time ceiling. Text equality is not
 			// asserted: `]` is stripped and a long value is mid-truncated, both
@@ -382,6 +420,10 @@ describe('store: lossless fold (seeded fuzz)', () => {
 			addressed: input.addressed,
 			resolution: input.resolution,
 			unknownLines: [],
+			// From the generator, not hardcoded undefined. Hardcoding it here
+			// would make the source assertion below compare undefined to
+			// undefined on every one of the 5,000 iterations and never fail.
+			source: input.source,
 			marker: { start: 0, end: 0 },
 		};
 	}
@@ -396,6 +438,13 @@ describe('store: lossless fold (seeded fuzz)', () => {
 			const stored = toStored(id, c);
 			const context = (msg: string): string =>
 				`iteration ${i}: ${msg}\nstored: ${JSON.stringify(stored)}`;
+
+			// toStored itself must be lossless FIRST. Everything below compares
+			// the round trip against `stored`, so a field toStored silently
+			// dropped would compare undefined to undefined and pass on all 5,000
+			// iterations. Verified by mutation: removing `source` from toStored
+			// left every other assertion here green.
+			expect(stored.source).toEqual(c.source);
 
 			// The store region round-trips the entry with no loss of any field,
 			// including the ones the inline format cannot hold.
@@ -431,6 +480,10 @@ describe('store: lossless fold (seeded fuzz)', () => {
 			expect(m.replies).toEqual(stored.replies);
 			expect(m.addressed).toEqual(stored.addressed);
 			expect(m.resolution).toEqual(stored.resolution);
+			// Under eof storage the lean marker carries category and id only, so
+			// the store is the ONLY place a promoted comment's provenance
+			// survives the fold.
+			expect(m.source).toEqual(stored.source);
 		}
 	});
 });

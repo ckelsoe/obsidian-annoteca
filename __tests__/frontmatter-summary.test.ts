@@ -30,6 +30,7 @@ function mk(over: Partial<Comment>): Comment {
 		addressed: undefined,
 		resolution: undefined,
 		unknownLines: [],
+		source: undefined,
 		marker: {} as Comment['marker'],
 		...over,
 	};

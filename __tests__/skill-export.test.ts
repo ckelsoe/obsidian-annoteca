@@ -252,3 +252,35 @@ describe('skill staleness detection (F-277)', () => {
 		);
 	});
 });
+
+describe('skill v8: machine-created comments', () => {
+	const skill = buildSkillMarkdown(CATEGORIES, undefined);
+
+	// A version bump with no teaching behind it would pass every other test here,
+	// because they all reference SKILL_SCHEMA_VERSION symbolically.
+	it('teaches the [source=...] line', () => {
+		expect(skill).toContain('[source=');
+		expect(skill).toContain('plumbline');
+	});
+
+	// The rule the line exists for. A machine finding stops being reported the
+	// moment the prose changes, which is not the same as the prose being right.
+	it('forbids resolving a machine-created comment on the author behalf', () => {
+		expect(skill).toMatch(/Never resolve one on the author's behalf/i);
+	});
+
+	it('says a no-longer-detected finding gets a reply, not a deletion', () => {
+		expect(skill).toMatch(/no longer detected/i);
+		expect(skill).toMatch(/Do not remove the comment/i);
+	});
+
+	// An assistant writing by hand is an author, not a source.
+	it('tells an assistant not to write a source line itself', () => {
+		expect(skill).toContain('you are the author');
+		expect(skill).toContain('leave `[source=...]` off');
+	});
+
+	it('lists the line in the structured-line order', () => {
+		expect(skill).toContain('`[author=]`, `[source=]`, `[anchor=]`');
+	});
+});

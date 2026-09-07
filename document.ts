@@ -70,6 +70,9 @@ function merge(marker: Comment, stored: StoredComment): Comment {
 		category: marker.category,
 		body: stored.body,
 		date: stored.date,
+		// From the store, like every other field the lean marker dropped. A lean
+		// marker carries category and id only, so it never holds a source line.
+		source: stored.source,
 		author: stored.author,
 		anchor: stored.anchor,
 		replies: stored.replies.slice(),

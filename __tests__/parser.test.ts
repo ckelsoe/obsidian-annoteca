@@ -288,6 +288,7 @@ describe('parser: round-trip property', () => {
 			addressed: undefined,
 			resolution: undefined,
 			unknownLines: [],
+			source: undefined,
 			marker: { start: 0, end: 0 },
 		},
 		{
@@ -304,6 +305,7 @@ describe('parser: round-trip property', () => {
 			addressed: undefined,
 			resolution: undefined,
 			unknownLines: [],
+			source: undefined,
 			marker: { start: 0, end: 0 },
 		},
 		{
@@ -321,6 +323,7 @@ describe('parser: round-trip property', () => {
 				note: 'added in revision pass',
 			},
 			unknownLines: [],
+			source: undefined,
 			marker: { start: 0, end: 0 },
 		},
 		{
@@ -334,6 +337,7 @@ describe('parser: round-trip property', () => {
 			addressed: undefined,
 			resolution: undefined,
 			unknownLines: [],
+			source: undefined,
 			marker: { start: 0, end: 0 },
 		},
 		// F-270/F-271: addressed state with a single-line note and a multi-line
@@ -358,6 +362,7 @@ describe('parser: round-trip property', () => {
 			},
 			resolution: undefined,
 			unknownLines: [],
+			source: undefined,
 			marker: { start: 0, end: 0 },
 		},
 	];
@@ -2586,6 +2591,101 @@ describe('parser: isAuthorToken', () => {
 			// Whatever the repair produces must itself be a token, or the repair
 			// is not a repair.
 			expect(isAuthorToken(sanitizeAuthorToken(raw))).toBe(true);
+		}
+	});
+});
+
+describe('the [source=...] line (F-282)', () => {
+	const toInput = (c: Comment | undefined) => ({
+		category: c?.category ?? 'tone',
+		body: c?.body ?? '',
+		id: c?.id,
+		source: c?.source,
+		unknownLines: c?.unknownLines,
+	});
+
+	it('round-trips provenance through serialize and parseAll', () => {
+		const s = serialize({
+			category: 'prose-check',
+			body: 'Flagged register.',
+			id: 'a3b9c2x7',
+			source: { tag: 'plumbline', key: 'a1b2c3d4' },
+		});
+		expect(s).toContain('[source=plumbline:a1b2c3d4]');
+		expect(parseAll(s)[0]?.source).toEqual({
+			tag: 'plumbline',
+			key: 'a1b2c3d4',
+		});
+	});
+
+	it('leaves a human comment without one', () => {
+		const s = serialize({ category: 'tone', body: 'needs work' });
+		expect(s).not.toContain('[source=');
+		expect(parseAll(s)[0]?.source).toBeUndefined();
+	});
+
+	// The forward-compatibility property the contract relies on: a build that
+	// predates the field carries the line verbatim rather than deleting it.
+	//
+	// Demonstrated with a line in the SAME shape that this build does not know,
+	// since the real one is now understood here. `[source=...]` matches the
+	// unknown key-value grammar, so this is the path it took before the field
+	// existed and the path it takes on a downgrade: understanding is lost, the
+	// line is not.
+	it('carries a line of this shape it does not understand', () => {
+		const text = [
+			'<!-- annoteca/tone: body',
+			'[id=a3b9c2x7]',
+			'[source-v2=plumbline:a1b2c3d4]',
+			'-->',
+		].join('\n');
+		const c = parseAll(text)[0];
+		expect(c?.unknownLines).toEqual(['[source-v2=plumbline:a1b2c3d4]']);
+		expect(c?.body).toBe('body');
+		expect(serialize(toInput(c))).toContain(
+			'[source-v2=plumbline:a1b2c3d4]',
+		);
+	});
+
+	// At most one, like every other single-valued field in the walk.
+	it('keeps the first of two and stops the walk', () => {
+		const text = [
+			'<!-- annoteca/tone: body',
+			'[source=plumbline:first111]',
+			'[source=plumbline:second22]',
+			'-->',
+		].join('\n');
+		const c = parseAll(text)[0];
+		// The walk runs bottom-up, so the LAST line it consumes before breaking
+		// is the one nearest the terminator.
+		expect(c?.source?.key).toBe('second22');
+		expect(c?.body).toContain('[source=plumbline:first111]');
+	});
+
+	// A source whose halves do not match the grammar is never written, because a
+	// line the parser cannot read back becomes visible body text on the next
+	// parse: provenance turning into prose in the user's note.
+	it('refuses to write an ungrammatical source', () => {
+		for (const bad of [
+			{ tag: 'Plumbline', key: 'ok' },
+			{ tag: 'plumbline', key: 'has space' },
+			{ tag: 'plumbline', key: 'has]bracket' },
+			{ tag: '1plugin', key: 'ok' },
+			{ tag: '', key: 'ok' },
+		]) {
+			const s = serialize({ category: 'tone', body: 'x', source: bad });
+			expect(s).not.toContain('[source=');
+		}
+	});
+
+	it('accepts the boundaries the grammar allows', () => {
+		for (const good of [
+			{ tag: 'p', key: 'x' },
+			{ tag: 'a-b-c', key: 'A.B_C-1' },
+			{ tag: 'plum2', key: '0'.repeat(64) },
+		]) {
+			const s = serialize({ category: 'tone', body: 'x', source: good });
+			expect(parseAll(s)[0]?.source).toEqual(good);
 		}
 	});
 });

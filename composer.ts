@@ -342,6 +342,9 @@ export class ComposerForm {
 				? this.plugin.settings.authorTag
 				: undefined;
 		return {
+			// A person is typing this one. `source` is provenance for a comment
+			// created through the API, so a composer comment never carries it.
+			source: undefined,
 			id,
 			category,
 			body,

@@ -2,6 +2,7 @@
 // The format contract this implements is in dev-docs/annoteca/data-format.md.
 
 import type {
+	CommentSource,
 	AnchorText,
 	Addressed,
 	Comment,
@@ -79,6 +80,24 @@ const DATE_LINE_RE = new RegExp(`^\\s*\\[date=(${STAMP_SRC})\\]\\s*$`);
 const AUTHOR_SRC = '[^\\s\\]<>]{1,32}';
 const AUTHOR_LINE_RE = new RegExp(`^\\s*\\[author=(${AUTHOR_SRC})\\]\\s*$`);
 const AUTHOR_TOKEN_RE = new RegExp(`^${AUTHOR_SRC}$`);
+
+// Provenance for a machine-created comment (F-282): `[source=plumbline:a1b2c3d4]`.
+//
+// Both halves are deliberately narrow. The tag is a plugin id, matching the
+// namespace grammar the marker-conflict scan already uses, so the two cannot
+// disagree about what a plugin id looks like. The key is opaque to this plugin
+// and only has to survive a round trip, so it is restricted to characters that
+// cannot end the line early, close the bracket, or open a nested marker.
+//
+// This shape already round-trips on an OLDER build, because it matches
+// UNKNOWN_KV_LINE_RE and is carried through unknownLines. That is what makes the
+// field forward-compatible: a build that predates it re-emits the line byte for
+// byte instead of deleting it. Verified before the field existed.
+const SOURCE_TAG_SRC = '[a-z][a-z0-9-]*';
+const SOURCE_KEY_SRC = '[A-Za-z0-9._-]{1,64}';
+const SOURCE_LINE_RE = new RegExp(
+	`^\\s*\\[source=(${SOURCE_TAG_SRC}):(${SOURCE_KEY_SRC})\\]\\s*$`,
+);
 
 // Is this string usable as an author token as it stands? The settings tab asks
 // this before storing a tag and before offering it in the collaborator list, so
@@ -473,10 +492,20 @@ const KNOWN_LINE_RES = [
 	DATE_LINE_RE,
 	AUTHOR_LINE_RE,
 	ANCHOR_LINE_RE,
+	SOURCE_LINE_RE,
 	REPLY_LINE_RE,
 	ADDRESSED_LINE_RE,
 	RESOLVED_LINE_RE,
 ];
+
+// Both halves valid, checked before a write. Exported because the API's promote
+// path (AN-C2) has to reject a bad source before it reaches a note, not after.
+export function isCommentSource(value: { tag: string; key: string }): boolean {
+	return (
+		new RegExp(`^${SOURCE_TAG_SRC}$`).test(value.tag) &&
+		new RegExp(`^${SOURCE_KEY_SRC}$`).test(value.key)
+	);
+}
 
 function looksStructured(line: string): boolean {
 	return (
@@ -654,6 +683,7 @@ interface ParsedTail {
 	addressed: Addressed | undefined;
 	resolution: Resolution | undefined;
 	unknownLines: string[];
+	source: CommentSource | undefined;
 }
 
 interface FenceBlock {
@@ -860,6 +890,7 @@ function walkTrailingLines(
 	let id: string | undefined;
 	let date: string | undefined;
 	let author: string | undefined;
+	let source: CommentSource | undefined;
 	let anchor: AnchorText | undefined;
 	const replies: Reply[] = [];
 	let addressed: Addressed | undefined;
@@ -872,6 +903,7 @@ function walkTrailingLines(
 	let seenId = false;
 	let seenDate = false;
 	let seenAuthor = false;
+	let seenSource = false;
 	let seenAnchor = false;
 	let seenAddressed = false;
 	let seenResolution = false;
@@ -910,6 +942,23 @@ function walkTrailingLines(
 			if (seenAuthor) break;
 			seenAuthor = true;
 			author = authorMatch[1];
+			bodyEndExclusive = i;
+			continue;
+		}
+
+		const sourceMatch = SOURCE_LINE_RE.exec(line);
+		if (
+			sourceMatch &&
+			sourceMatch[1] !== undefined &&
+			sourceMatch[2] !== undefined
+		) {
+			// First one wins and a second breaks the walk, matching every other
+			// at-most-once field here. Two [source=...] lines is a hand edit or a
+			// merge, and guessing which is authoritative would be worse than
+			// stopping and leaving the rest as body.
+			if (seenSource) break;
+			seenSource = true;
+			source = { tag: sourceMatch[1], key: sourceMatch[2] };
 			bodyEndExclusive = i;
 			continue;
 		}
@@ -1030,6 +1079,7 @@ function walkTrailingLines(
 		addressed,
 		resolution,
 		unknownLines,
+		source,
 	};
 }
 
@@ -1048,6 +1098,7 @@ export function parseAll(content: string): Comment[] {
 			addressed: tail.addressed,
 			resolution: tail.resolution,
 			unknownLines: tail.unknownLines,
+			source: tail.source,
 			marker: { start: raw.start, end: raw.end },
 		});
 	}
@@ -1078,6 +1129,7 @@ export function parseAt(content: string, start: number): Comment | undefined {
 		addressed: tail.addressed,
 		resolution: tail.resolution,
 		unknownLines: tail.unknownLines,
+		source: tail.source,
 		marker: { start: match.index, end: match.index + match[0].length },
 	};
 }
@@ -1088,6 +1140,7 @@ export interface SerializeInput {
 	body: string;
 	date?: string;
 	author?: string;
+	source?: CommentSource;
 	anchor?: AnchorText;
 	replies?: readonly Reply[];
 	addressed?: Addressed;
@@ -1136,6 +1189,7 @@ export function serialize(c: SerializeInput): string {
 		c.id !== undefined ||
 		c.date !== undefined ||
 		c.author !== undefined ||
+		c.source !== undefined ||
 		c.anchor !== undefined;
 	const hasReplies = (c.replies?.length ?? 0) > 0;
 	const hasAddressed = c.addressed !== undefined;
@@ -1159,6 +1213,11 @@ export function serialize(c: SerializeInput): string {
 	if (c.date !== undefined) lines.push(`[date=${c.date}]`);
 	if (c.author !== undefined)
 		lines.push(`[author=${sanitizeAuthorToken(c.author)}]`);
+	// Next to [author=...], because both answer "who made this". Written only
+	// when both halves match the grammar: an unmatchable one would be re-read as
+	// body text on the next parse, turning provenance into visible prose.
+	if (c.source !== undefined && isCommentSource(c.source))
+		lines.push(`[source=${c.source.tag}:${c.source.key}]`);
 	if (c.anchor !== undefined) {
 		// `]` closes the bracket, so it is to the anchor what `-->` is to the
 		// marker: not escapable within the line grammar, only removable.
