@@ -438,11 +438,21 @@ function validNamespacePrefix(raw: unknown): string | undefined {
 // conflict report would name the namespace twice in its allowlisted summary.
 //
 // Spread of a Set, so first occurrence wins and the user's ordering survives.
-// A whole number of comments, at least 1. Zero would prompt on every single
-// promotion, which trains the user to click through the one prompt that matters.
+
+// The most comments a plugin may add before the prompt is skipped entirely.
+// Well past any realistic finding count, so it reads as "stop asking" rather
+// than as a limit anyone bumps into.
+const PROMOTION_BUDGET_MAX = 500;
+
+// A whole number of comments, from 1 to PROMOTION_BUDGET_MAX. Zero would prompt
+// on every single promotion, which trains the user to click through the one
+// prompt that matters. The ceiling is the same one the settings control offers,
+// so a hand-edited data.json cannot hold a value the UI would refuse.
 const validPromotionBudget: SettingValidator<'promotionBudget'> = (raw) => {
 	const n = num(raw);
-	return n !== undefined && n >= 1 ? Math.floor(n) : undefined;
+	return n !== undefined && n >= 1 && n <= PROMOTION_BUDGET_MAX
+		? Math.floor(n)
+		: undefined;
 };
 
 const validNamespaceAllowlist: SettingValidator<
@@ -980,7 +990,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 							type: 'number',
 							key: 'promotionBudget',
 							min: 1,
-							max: 500,
+							max: PROMOTION_BUDGET_MAX,
 						},
 					},
 					this.customBlock((host) => this.renderSkillExport(host)),
