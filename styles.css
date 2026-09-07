@@ -2086,6 +2086,13 @@ settings:
 	flex: 1;
 }
 
+/* Marker-conflict namespace allowlist (F-285). Full width inside its stacked
+   row: the value is a comma-separated line that grows with each namespace, so a
+   default-width input would scroll a two-entry list out of sight. */
+.annoteca-namespace-allowlist-input {
+	width: 100%;
+}
+
 /* Exported-skill staleness indicator (F-277). */
 .annoteca-skill-status {
 	margin-top: 4px;

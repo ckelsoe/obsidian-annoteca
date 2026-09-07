@@ -37,6 +37,7 @@ import {
 	createColorPicker,
 	createIconPicker,
 } from './ui-helpers';
+import { isNamespacePrefix } from './diagnostics';
 import { supportsDragAndDrop } from './platform';
 import { isReservedProperty } from './frontmatter-summary';
 
@@ -85,6 +86,10 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 
 	debugMode: false,
 	debugLogTarget: 'console',
+	// Seeded rather than empty. Plumbline is a sibling this project ships and
+	// its directives are a known non-conflict, so a user who installs both
+	// should not have to dismiss a diagnostic to learn that.
+	conflictNamespaceAllowlist: ['plumbline'],
 
 	settingsBackupPath: undefined,
 
@@ -380,6 +385,49 @@ function repairAuthorTag(raw: string): string {
 	return sanitizeAuthorToken(raw);
 }
 
+// Splits the allowlist field into entries the scan can actually match. Commas
+// and whitespace both separate, because a user pasting prefixes will use either.
+// Case is folded because the scan's grammar is lowercase-only, so accepting
+// 'Plumbline' verbatim would store a permanently dead entry; folding it is the
+// repair, and only what is still unmatchable afterwards is rejected and named.
+export function parseNamespaceAllowlist(raw: string): {
+	accepted: string[];
+	rejected: string[];
+} {
+	const accepted: string[] = [];
+	const rejected: string[] = [];
+	const seen = new Set<string>();
+	for (const token of raw.split(/[,\s]+/)) {
+		if (token === '') continue;
+		const value = token.toLowerCase();
+		if (!isNamespacePrefix(value)) {
+			if (!rejected.includes(token)) rejected.push(token);
+			continue;
+		}
+		if (seen.has(value)) continue;
+		seen.add(value);
+		accepted.push(value);
+	}
+	return { accepted, rejected };
+}
+
+// Gated against the scan's OWN prefix grammar (isNamespacePrefix), not a copy.
+// An entry the scan can never match would sit in the settings file looking
+// configured while suppressing nothing, which is worse than being rejected.
+//
+// Repaired through the SAME funnel as the settings field, which is the asymmetry
+// this closes and the one validAuthorStyle documents one validator below: the
+// UI folds case with a Notice, but data.json is untrusted and arrives here
+// instead. Rejecting a synced 'Plumbline' would silently delete a suppression
+// the user believes they configured, and the next conflict scan would report
+// the namespace they had already dismissed. Case is the only repair, because it
+// is the only one with a single right answer; anything still unmatchable after
+// folding is declined.
+function validNamespacePrefix(raw: unknown): string | undefined {
+	const s = str(raw)?.trim().toLowerCase();
+	return s !== undefined && isNamespacePrefix(s) ? s : undefined;
+}
+
 const validAuthorTag: SettingValidator<'authorTag'> = (raw) => {
 	if (typeof raw !== 'string') return undefined;
 	return repairAuthorTag(raw);
@@ -426,6 +474,7 @@ const SETTING_VALIDATORS: {
 	markerScrollAlign: oneOf('top', 'center', 'minimal'),
 	debugMode: bool,
 	debugLogTarget: oneOf('console', 'vault'),
+	conflictNamespaceAllowlist: arrayOf(validNamespacePrefix),
 	settingsBackupPath: str,
 	driftSnapshots: validDriftSnapshots,
 	starredComments: arrayOf(str),
@@ -969,6 +1018,9 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 							},
 						},
 					},
+					this.customBlock((host) =>
+						this.renderNamespaceAllowlist(host),
+					),
 					this.customBlock((host) => this.renderFooter(host)),
 				],
 			},
@@ -981,6 +1033,72 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 	// does after a mutation.
 	private rerender(): void {
 		this.update();
+	}
+
+	// Marker-conflict allowlist (F-285). One comma-separated field rather than an
+	// add/remove list like the author styles above it: the expected content is
+	// one or two prefixes, so rows would cost more chrome than they earn, and a
+	// line is what a user pastes when copying a prefix out of the conflict report.
+	//
+	// Saved on blur rather than per keystroke. Mid-typing, "plumb" is a valid
+	// prefix that suppresses nothing, and persisting each of those would leave
+	// whatever the user stopped on if they navigated away mid-word.
+	private renderNamespaceAllowlist(host: HTMLElement): void {
+		const { content } = createStackedRow(host, {
+			name: 'Known comment namespaces',
+			description:
+				'Namespaces the marker-conflict check should not report, separated by commas. Other tools that write <!-- prefix/... --> comments belong here, so their markers are not reported as conflicts. For example: plumbline. Lowercase letters, digits and hyphens only.',
+		});
+
+		// No placeholder. Every valid value is a lowercase prefix, and the
+		// obsidianmd sentence-case rule reads a placeholder as UI text and wants
+		// it capitalized, which would show a spelling the field itself folds. The
+		// example lives in the description above instead.
+		const input = content.createEl('input', {
+			cls: 'annoteca-namespace-allowlist-input',
+			attr: {
+				type: 'text',
+				value: this.plugin.settings.conflictNamespaceAllowlist.join(
+					', ',
+				),
+			},
+		});
+
+		input.addEventListener('blur', () => {
+			const { accepted, rejected } = parseNamespaceAllowlist(input.value);
+			const current = this.plugin.settings.conflictNamespaceAllowlist;
+			const unchanged =
+				accepted.length === current.length &&
+				accepted.every((v, i) => v === current[i]);
+
+			// Echo the normalized value back either way, so the field shows what
+			// was actually stored rather than what was typed.
+			input.value = accepted.join(', ');
+
+			// Nothing changed is the common blur: every click-through that never
+			// touched the field, and every modal close. Returning here keeps
+			// those off the save path entirely.
+			if (unchanged) {
+				if (rejected.length > 0) this.noticeRejected(rejected);
+				return;
+			}
+
+			this.plugin.settings.conflictNamespaceAllowlist = accepted;
+			void this.plugin.saveSettings();
+			if (rejected.length > 0) this.noticeRejected(rejected);
+
+			// Deliberately no rerender. Blur fires when the settings modal
+			// closes, so a user who edits the field and closes the modal in one
+			// action would rebuild a tab that is on its way out. Nothing else in
+			// the tab displays this setting, and the line above already shows the
+			// stored value, so there is nothing a rerender would fix.
+		});
+	}
+
+	private noticeRejected(rejected: readonly string[]): void {
+		new Notice(
+			`Ignored ${rejected.join(', ')}. Use lowercase letters, digits and hyphens, starting with a letter.`,
+		);
 	}
 
 	// Version + links footer, the same trailing row the workspace's reference

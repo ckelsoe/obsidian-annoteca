@@ -18,15 +18,35 @@ export interface ConflictFinding {
 // prefixes) sharing the namespace shape so the user can rename them.
 const NAMESPACED_COMMENT_RE = /<!--\s*([a-z][a-z0-9-]*)\//g;
 
+// The prefix grammar, as a standalone predicate so the settings validator gates
+// allowlist entries against the SAME shape the scan matches rather than a second
+// hand-written copy. parser.ts carries a worked example of what a drifted second
+// copy costs: OPENER_ANYWHERE_RE was hand-written, disagreed with MARKER_RE about
+// whitespace before the colon, and went from a cosmetic gap to a real one the
+// moment two consumers keyed on it. An allowlist entry the scan can never match
+// is the same failure in miniature, silently doing nothing.
+const NAMESPACE_PREFIX_RE = /^[a-z][a-z0-9-]*$/;
+
+export function isNamespacePrefix(value: string): boolean {
+	return NAMESPACE_PREFIX_RE.test(value);
+}
+
+// `allowlist` holds namespaces the user has declared known (F-285), and defaults
+// to empty so every existing caller and test keeps today's behaviour. Annoteca's
+// own prefix is skipped unconditionally and is not an allowlist entry: it is not
+// a foreign namespace the user could choose to hear about.
 export function detectMarkerConflicts(
 	content: string,
 	path: string,
+	allowlist: readonly string[] = [],
 ): ConflictFinding[] {
+	const allowed = new Set(allowlist);
 	const out: ConflictFinding[] = [];
 	for (const match of content.matchAll(NAMESPACED_COMMENT_RE)) {
 		const prefix = match[1];
 		if (prefix === undefined) continue;
 		if (prefix === 'annoteca') continue;
+		if (allowed.has(prefix)) continue;
 		const offset = match.index ?? 0;
 		out.push({
 			path,

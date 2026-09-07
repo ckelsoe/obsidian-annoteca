@@ -1,6 +1,7 @@
 import {
 	AnnotecaSettingTab,
 	normalizeSettings,
+	parseNamespaceAllowlist,
 	reconcileDefaultCategory,
 	mergeRestoredSettings,
 	resolveSettingsCategories,
@@ -791,5 +792,100 @@ describe('normalizeSettings: frontmatter class property', () => {
 			frontmatterFileclassProperty: 'fileClass',
 		});
 		expect(s.frontmatterFileclassProperty).toBe('fileClass');
+	});
+});
+
+describe('parseNamespaceAllowlist', () => {
+	it('splits on commas and on whitespace', () => {
+		expect(
+			parseNamespaceAllowlist('plumbline, other-tool').accepted,
+		).toEqual(['plumbline', 'other-tool']);
+		expect(
+			parseNamespaceAllowlist('plumbline other-tool').accepted,
+		).toEqual(['plumbline', 'other-tool']);
+	});
+
+	// Folded, not rejected. The scan's grammar is lowercase-only, so storing
+	// 'Plumbline' verbatim would look configured and suppress nothing.
+	it('folds case rather than rejecting it', () => {
+		const { accepted, rejected } = parseNamespaceAllowlist('Plumbline');
+		expect(accepted).toEqual(['plumbline']);
+		expect(rejected).toEqual([]);
+	});
+
+	it('drops duplicates, keeping the first spelling', () => {
+		expect(
+			parseNamespaceAllowlist('plumbline, Plumbline, plumbline').accepted,
+		).toEqual(['plumbline']);
+	});
+
+	// Reported rather than silently discarded, and reported as the user typed
+	// them so the notice names something recognizable.
+	it('names what it could not accept', () => {
+		const { accepted, rejected } = parseNamespaceAllowlist(
+			'plumbline, 1tool, plumbline/, ok-one',
+		);
+		expect(accepted).toEqual(['plumbline', 'ok-one']);
+		expect(rejected).toEqual(['1tool', 'plumbline/']);
+	});
+
+	it('treats an empty or whitespace-only field as an empty list', () => {
+		expect(parseNamespaceAllowlist('')).toEqual({
+			accepted: [],
+			rejected: [],
+		});
+		expect(parseNamespaceAllowlist('  ,  , ')).toEqual({
+			accepted: [],
+			rejected: [],
+		});
+	});
+});
+
+describe('normalizeSettings: conflictNamespaceAllowlist', () => {
+	it('ships seeded with plumbline', () => {
+		expect(DEFAULT_SETTINGS.conflictNamespaceAllowlist).toEqual([
+			'plumbline',
+		]);
+	});
+
+	// Same repair the settings field applies, so a synced or hand-edited
+	// data.json cannot end up with a suppression that looks set and does nothing.
+	it('folds a stored entry rather than dropping it', () => {
+		expect(
+			normalizeSettings({
+				conflictNamespaceAllowlist: ['Plumbline', '  other-tool  '],
+			}).conflictNamespaceAllowlist,
+		).toEqual(['plumbline', 'other-tool']);
+	});
+
+	it('drops only the entries no folding can rescue', () => {
+		const out = normalizeSettings({
+			conflictNamespaceAllowlist: [
+				'plumbline',
+				'',
+				42,
+				'1tool',
+				'plumbline/',
+				'third-party',
+			],
+		});
+		expect(out.conflictNamespaceAllowlist).toEqual([
+			'plumbline',
+			'third-party',
+		]);
+	});
+
+	it('falls back to the default when the stored value is not a list', () => {
+		expect(
+			normalizeSettings({ conflictNamespaceAllowlist: 'plumbline' })
+				.conflictNamespaceAllowlist,
+		).toEqual(['plumbline']);
+	});
+
+	it('accepts a deliberately emptied list', () => {
+		expect(
+			normalizeSettings({ conflictNamespaceAllowlist: [] })
+				.conflictNamespaceAllowlist,
+		).toEqual([]);
 	});
 });

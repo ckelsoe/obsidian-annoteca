@@ -1,5 +1,6 @@
 import {
 	detectMarkerConflicts,
+	isNamespacePrefix,
 	detectOrphans,
 	detectStoreOrphans,
 	MarkerDamageReporter,
@@ -25,6 +26,47 @@ describe('detectMarkerConflicts', () => {
 	it('does not flag annoteca itself', () => {
 		const text = `<!-- annoteca/tone: ok -->`;
 		expect(detectMarkerConflicts(text, 'note.md')).toHaveLength(0);
+	});
+
+	it('suppresses an allowlisted namespace and keeps the rest', () => {
+		const text = `<!-- other-tool/foo: bar -->
+<!-- third-party/baz: qux -->`;
+		const findings = detectMarkerConflicts(text, 'note.md', ['other-tool']);
+		expect(findings.map((f) => f.prefix)).toEqual(['third-party']);
+	});
+
+	it('treats an absent allowlist as the previous behaviour', () => {
+		const text = `<!-- other-tool/foo: bar -->`;
+		expect(detectMarkerConflicts(text, 'note.md')).toEqual(
+			detectMarkerConflicts(text, 'note.md', []),
+		);
+	});
+
+	// The allowlist matches the prefix the scan captured, so an entry carrying
+	// the surrounding syntax matches nothing. Pinned because it is the shape a
+	// user copying out of the report is most likely to paste, and the settings
+	// field rejects it up front rather than storing a dead entry.
+	it('does not match an entry carrying marker syntax', () => {
+		const text = `<!-- other-tool/foo: bar -->`;
+		expect(
+			detectMarkerConflicts(text, 'note.md', ['other-tool/']),
+		).toHaveLength(1);
+	});
+});
+
+describe('isNamespacePrefix', () => {
+	it('accepts the shape the scan captures', () => {
+		expect(isNamespacePrefix('plumbline')).toBe(true);
+		expect(isNamespacePrefix('other-tool')).toBe(true);
+		expect(isNamespacePrefix('a1')).toBe(true);
+	});
+
+	it('rejects what the scan can never produce', () => {
+		expect(isNamespacePrefix('')).toBe(false);
+		expect(isNamespacePrefix('Plumbline')).toBe(false);
+		expect(isNamespacePrefix('1tool')).toBe(false);
+		expect(isNamespacePrefix('plumbline/')).toBe(false);
+		expect(isNamespacePrefix('two words')).toBe(false);
 	});
 });
 

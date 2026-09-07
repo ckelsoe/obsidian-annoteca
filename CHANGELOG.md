@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- A "Known comment namespaces" setting under Diagnostics. The marker-conflict check reports any `<!-- prefix/... -->` comment that is not Annoteca's, which is right for a mistyped marker and wrong for another tool you installed on purpose. List those prefixes here and the check stays quiet about them. Seeded with `plumbline`, the prose linter that pairs with Annoteca. The conflict report now also opens with the namespaces it found and the ones already listed, so you can copy a prefix out of the report instead of guessing at its spelling.
+
+### Fixed
+- Plumbline's `<!-- plumbline: off -->` style directives were never reported as conflicts or as damaged markers, and now there is a test making sure they stay that way. Both plugins write HTML comments into the same notes, and Annoteca's marker scans look only for its own `annoteca/` prefix. That has always been true; nothing had been pinning it, so a later change to the scan patterns could have started reporting a sibling plugin's directives as problems in your vault.
+
 ## [1.16.0] - 2026-08-18
 
 ### Added
