@@ -172,7 +172,7 @@ What you may do with one: reply to it, address it by proposing a replacement thr
 
 If a finding is no longer detected, the useful response is a reply saying so. Do not remove the comment; the thread is the record of what was raised and what happened to it.
 
-Write \`[source=...]\` only if you are a plugin creating a comment through Annoteca's API. If you are an assistant writing a comment by hand, you are the author: use \`[author=...]\` and leave \`[source=...]\` off.
+Do not write \`[source=...]\` yourself. It is written by the plugin that created the comment. If you are an assistant writing a comment by hand, you are the author: use \`[author=...]\` and leave \`[source=...]\` off.
 
 Field rules (match these exactly; the plugin's parser enforces them):
 
