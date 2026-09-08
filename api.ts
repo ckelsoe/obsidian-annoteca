@@ -56,6 +56,17 @@ export interface AnchorRange {
 	readonly end: number;
 	readonly category: string;
 	readonly resolved: boolean;
+	// A proposed edit is sitting in the note awaiting accept, revise or reject.
+	// Such a comment is NOT resolved, so `resolved` alone cannot tell the two
+	// apart, and a consumer that yields to open comments needs to: interop
+	// contract 5.1 has a prose linter suppress its underline under an open
+	// comment but NOT under an addressed one, because that passage is back in
+	// play and worth checking again.
+	//
+	// Additive: added after apiVersion 2 without bumping it, because a new field
+	// on a returned object breaks no existing consumer. A consumer that wants it
+	// should feature-detect rather than assume a version.
+	readonly addressed: boolean;
 	readonly commentId: string | undefined;
 }
 
@@ -215,6 +226,7 @@ export function createApi(plugin: AnnotecaPlugin): AnnotecaApi {
 						end: range.to,
 						category: c.category,
 						resolved: c.resolution !== undefined,
+						addressed: c.addressed !== undefined,
 						commentId: c.id,
 					});
 				}

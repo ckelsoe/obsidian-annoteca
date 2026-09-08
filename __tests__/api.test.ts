@@ -153,6 +153,7 @@ describe('AnnotecaApi.anchorsFor', () => {
 			expect(NOTE.slice(r.start, r.end)).toBe('the rough draft');
 			expect(r.category).toBe('tone');
 			expect(r.resolved).toBe(false);
+			expect(r.addressed).toBe(false);
 			expect(r.commentId).toBe('aaaa1111');
 			// The anchor sits AFTER the marker, which is the whole reason this
 			// is not just the marker range.
@@ -237,5 +238,52 @@ describe('AnnotecaApi.onChange', () => {
 		off();
 		events.trigger('index-changed');
 		expect(calls).toBe(1);
+	});
+});
+
+// `resolved` alone cannot tell an untouched comment from one with a proposed
+// edit sitting in the note: both are unresolved. Interop-contract 5.1 needs them
+// apart, because a prose linter yields its underline under an OPEN comment and
+// not under an addressed one, whose passage is back in play.
+describe('AnchorRange.addressed', () => {
+	const addressedNote = [
+		'Prose before it. <!-- annoteca/tone: soften this',
+		'[id=bbbb2222]',
+		'[anchor=the rough draft]',
+		'[addressed charles 2026-09-08T10:00:00]: proposed a rewrite',
+		'--> the rough draft carries on here.',
+		'',
+	].join('\n');
+
+	const resolvedNote = [
+		'Prose before it. <!-- annoteca/tone: soften this',
+		'[id=cccc3333]',
+		'[anchor=the rough draft]',
+		'[resolved charles 2026-09-08T10:00:00]: done',
+		'--> the rough draft carries on here.',
+		'',
+	].join('\n');
+
+	it('is true for a comment awaiting accept, revise or reject', () => {
+		const { api, index } = harness();
+		index.rebuild('a.md', addressedNote);
+		const r = api.anchorsFor(addressedNote)[0];
+		expect(r?.addressed).toBe(true);
+		// Still unresolved: the two flags answer different questions.
+		expect(r?.resolved).toBe(false);
+	});
+
+	it('is false for a resolved comment', () => {
+		const { api, index } = harness();
+		index.rebuild('a.md', resolvedNote);
+		const r = api.anchorsFor(resolvedNote)[0];
+		expect(r?.resolved).toBe(true);
+		expect(r?.addressed).toBe(false);
+	});
+
+	it('is false for an untouched comment', () => {
+		const { api, index } = harness();
+		index.rebuild('a.md', NOTE);
+		expect(api.anchorsFor(NOTE)[0]?.addressed).toBe(false);
 	});
 });
