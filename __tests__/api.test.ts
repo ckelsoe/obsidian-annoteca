@@ -7,6 +7,7 @@ import {
 	type ApiFilter,
 } from '../api';
 import { CommentIndex } from '../index';
+import { normalizeSettings } from '../settings';
 import { parseAll, serializeLeanMarker } from '../parser';
 import { writeStoreRegion, type StoredComment } from '../store';
 import { SKILL_SCHEMA_VERSION } from '../skill-export';
@@ -36,6 +37,9 @@ function harness(): {
 			scans.push('indexUnseenFiles');
 			return Promise.resolve();
 		},
+		// The real settings, because categories() resolves through the same
+		// path the composer uses and a stub list would test the stub.
+		settings: normalizeSettings({}),
 	} as unknown as AnnotecaPlugin);
 	return { api, index, events, scans };
 }
@@ -285,5 +289,45 @@ describe('AnchorRange.addressed', () => {
 		const { api, index } = harness();
 		index.rebuild('a.md', NOTE);
 		expect(api.anchorsFor(NOTE)[0]?.addressed).toBe(false);
+	});
+});
+
+// A consumer that creates comments has to offer a choice of category. Without
+// this it would hardcode the list across a repo boundary, where it drifts the
+// first time the user adds or renames one.
+describe('AnnotecaApi.categories', () => {
+	it('returns the ids and names a comment can be created in', () => {
+		const { api } = harness();
+		const cats = api.categories();
+		expect(cats.length).toBeGreaterThan(0);
+		for (const c of cats) {
+			expect(typeof c.id).toBe('string');
+			expect(typeof c.displayName).toBe('string');
+		}
+	});
+
+	// The category promoted findings land in has to be offerable, or a consumer
+	// cannot put a comment where the contract says it goes.
+	it('includes prose-check', () => {
+		expect(
+			harness()
+				.api.categories()
+				.map((c) => c.id),
+		).toContain('prose-check');
+	});
+
+	// Narrowed on purpose. Icon and colour are this plugin's rendering concern,
+	// and exposing them would make them things this API can never change.
+	it('exposes only the id and the display name', () => {
+		const first = harness().api.categories()[0];
+		expect(Object.keys(first ?? {}).sort()).toEqual(['displayName', 'id']);
+	});
+
+	it('hands back copies, not the definitions themselves', () => {
+		const { api } = harness();
+		const a = api.categories()[0];
+		const b = api.categories()[0];
+		expect(a).not.toBe(b);
+		expect(a).toEqual(b);
 	});
 });

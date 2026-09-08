@@ -5,6 +5,7 @@ import type { Comment, CreatedComment, PromoteRequest } from './types';
 import { parseDocument } from './document';
 import { ANCHOR_WINDOW, resolveAnchorRangeInWindows } from './view-utils';
 import { SKILL_SCHEMA_VERSION } from './skill-export';
+import { resolveSettingsCategories } from './settings';
 
 // The read-only API other plugins call (F-284, interop-contract section 7).
 //
@@ -70,6 +71,11 @@ export interface AnchorRange {
 	readonly commentId: string | undefined;
 }
 
+export interface ApiCategory {
+	readonly id: string;
+	readonly displayName: string;
+}
+
 export interface ApiFilter {
 	readonly paths?: readonly string[];
 	readonly categories?: readonly string[];
@@ -98,6 +104,15 @@ export interface AnnotecaApi {
 	// session silently returns a fraction of the vault and looks like a correct
 	// answer. This awaits the vault scan first, which is the only way the
 	// vault-wide promise in the name is true.
+	// The categories a comment may be created in, in the user's own order, with
+	// their display names.
+	//
+	// Exposed because a consumer that creates comments has to offer a choice, and
+	// the alternative is hardcoding this list on the other side of a repo
+	// boundary, where it drifts the first time the user adds or renames one.
+	// Copies, and resolved through the same path the composer uses, so a consumer
+	// sees exactly the set the user sees.
+	categories(): readonly ApiCategory[];
 	queryComments(filter?: ApiFilter): Promise<readonly ApiComment[]>;
 	// Pure over the content it is given: it parses that text rather than reading
 	// the vault OR consulting the index, and takes no path for that reason.
@@ -168,6 +183,16 @@ export function createApi(plugin: AnnotecaPlugin): AnnotecaApi {
 	return {
 		apiVersion: API_VERSION,
 		skillSchemaVersion: SKILL_SCHEMA_VERSION,
+
+		categories(): readonly ApiCategory[] {
+			// Narrowed to id and name. The internal definition also carries an
+			// icon and a colour, which are this plugin's rendering concern and
+			// would become things this API can never change.
+			return resolveSettingsCategories(plugin.settings).map((c) => ({
+				id: c.id,
+				displayName: c.displayName,
+			}));
+		},
 
 		async queryComments(
 			filter?: ApiFilter,
