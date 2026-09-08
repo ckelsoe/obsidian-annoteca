@@ -2343,3 +2343,97 @@ settings:
 	border: none;
 	border-top: 1px solid var(--background-modifier-border);
 }
+
+/* Findings lane (F-283). Plumbline's findings for the active note, read live and
+   never written. Severity colours match the ones Plumbline uses in the editor,
+   so the same finding reads the same on both surfaces. */
+.annoteca-findings-summary {
+	margin: 0 0 var(--size-4-2);
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.annoteca-findings-list {
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-2);
+}
+
+.annoteca-finding {
+	padding: var(--size-4-2);
+	border-left: 3px solid var(--text-accent);
+	background: var(--background-secondary);
+	border-radius: var(--radius-s);
+}
+
+.annoteca-finding-error {
+	border-left-color: var(--text-error);
+}
+
+.annoteca-finding-warning {
+	border-left-color: var(--text-warning);
+}
+
+.annoteca-finding-suggestion {
+	border-left-color: var(--text-accent);
+}
+
+.annoteca-finding-head {
+	display: flex;
+	align-items: baseline;
+	gap: var(--size-4-2);
+	width: 100%;
+	padding: 0;
+	background: transparent;
+	border: none;
+	box-shadow: none;
+	color: inherit;
+	font-size: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.annoteca-finding-line {
+	font-weight: var(--font-semibold);
+	font-variant-numeric: tabular-nums;
+	flex: 0 0 auto;
+}
+
+.annoteca-finding-text {
+	flex: 1 1 auto;
+	/* Without min-width a flex item refuses to shrink below its content, so the
+	   ellipsis never engages and the row overflows a narrow sidebar instead. */
+	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+.annoteca-finding-count {
+	flex: 0 0 auto;
+	color: var(--text-muted);
+	font-size: var(--font-smallest);
+}
+
+/* An identifier, not prose: it is copied into Plumbline's disabled-rules list,
+   so it must never wrap mid-token. */
+.annoteca-finding-rule {
+	display: block;
+	font-family: var(--font-monospace);
+	font-size: var(--font-smallest);
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+
+.annoteca-finding-message {
+	margin: var(--size-4-1) 0 0;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.annoteca-finding-promote {
+	margin-top: var(--size-4-2);
+	padding: var(--size-4-1) var(--size-4-2);
+	font-size: var(--font-ui-smaller);
+	cursor: pointer;
+}

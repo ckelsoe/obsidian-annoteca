@@ -525,7 +525,7 @@ const SETTING_VALIDATORS: {
 	settingsBackupPath: str,
 	driftSnapshots: validDriftSnapshots,
 	starredComments: arrayOf(str),
-	lastHubTab: oneOf('thread', 'outline', 'starred'),
+	lastHubTab: oneOf('thread', 'outline', 'starred', 'findings'),
 	hubTabAutoCreated: bool,
 	scopeState: validScopeState,
 	statusFilter: oneOf('open', 'resolved', 'all'),
