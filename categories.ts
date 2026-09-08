@@ -95,6 +95,27 @@ export const INDEX_ENTRY_CATEGORY: CategoryDefinition = {
 	color: 'var(--text-accent)',
 };
 
+// The category a prose linter's findings are promoted into (interop-contract
+// section 8). Added when Plumbline shipped promotion.
+//
+// NOT a preset and NOT optional, unlike `index-entry`. A promoted comment writes
+// `<!-- annoteca/prose-check: ... -->` into the NOTE, and notes are shared. Someone
+// opening that file needs the category to resolve whether or not they run the
+// linter that created it, or a real comment renders as uncategorized in a vault
+// that did nothing wrong. That is why resolveSettingsCategories appends it with
+// no toggle in front of it.
+//
+// Cyan is shared with `verse-needed`, which lives in the optional scholarly
+// preset. Obsidian ships eight category colours and the other seven are taken by
+// the defaults, so some collision is unavoidable; this is the pair least likely
+// to be on at once.
+export const PROSE_CHECK_CATEGORY: CategoryDefinition = {
+	id: 'prose-check',
+	displayName: 'Prose check',
+	icon: 'spell-check',
+	color: 'var(--color-cyan)',
+};
+
 // Built-in presets the user can browse and cherry-pick categories from. Each
 // preset is a curated set of categories for a common writing or review
 // workflow. Selecting a preset does not replace the user's working list;

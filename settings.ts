@@ -21,6 +21,7 @@ import {
 	DEFAULT_CATEGORIES,
 	DEFAULT_PRESETS,
 	INDEX_ENTRY_CATEGORY,
+	PROSE_CHECK_CATEGORY,
 	isValidCategoryName,
 	resolveEnabledCategories,
 	reorderCategories,
@@ -632,6 +633,14 @@ export function resolveSettingsCategories(
 		s.categories,
 		s.enableScholarlyPreset,
 	);
+	// Unconditional, with no toggle in front of it. A promoted comment puts
+	// `annoteca/prose-check` in the note itself, and notes get shared, so this
+	// category has to resolve for a reader who never installed the linter that
+	// wrote it. A toggle here would render someone else's real comment as
+	// uncategorized.
+	if (!base.find((c) => c.id === 'prose-check')) {
+		base.push({ ...PROSE_CHECK_CATEGORY });
+	}
 	if (s.enableIndexEntryPreset && !base.find((c) => c.id === 'index-entry')) {
 		// A fresh copy, not the shared constant: the category editor mutates
 		// these objects in place (displayName/icon/color), which would otherwise
