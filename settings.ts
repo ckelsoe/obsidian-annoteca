@@ -438,11 +438,21 @@ function validNamespacePrefix(raw: unknown): string | undefined {
 // conflict report would name the namespace twice in its allowlisted summary.
 //
 // Spread of a Set, so first occurrence wins and the user's ordering survives.
-// A whole number of comments, at least 1. Zero would prompt on every single
-// promotion, which trains the user to click through the one prompt that matters.
+
+// The most comments a plugin may add before the prompt is skipped entirely.
+// Well past any realistic finding count, so it reads as "stop asking" rather
+// than as a limit anyone bumps into.
+const PROMOTION_BUDGET_MAX = 500;
+
+// A whole number of comments, from 1 to PROMOTION_BUDGET_MAX. Zero would prompt
+// on every single promotion, which trains the user to click through the one
+// prompt that matters. The ceiling is the same one the settings control offers,
+// so a hand-edited data.json cannot hold a value the UI would refuse.
 const validPromotionBudget: SettingValidator<'promotionBudget'> = (raw) => {
 	const n = num(raw);
-	return n !== undefined && n >= 1 ? Math.floor(n) : undefined;
+	return n !== undefined && n >= 1 && n <= PROMOTION_BUDGET_MAX
+		? Math.floor(n)
+		: undefined;
 };
 
 const validNamespaceAllowlist: SettingValidator<
@@ -973,6 +983,16 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 							},
 						},
 					},
+					{
+						name: 'Ask before adding this many comments',
+						desc: 'When another plugin adds comments to a note through Annoteca, you are asked first if it wants to add more than this many at once. Lower asks more often. At 1 you are asked whenever a plugin adds more than one comment; a single comment is never confirmed.',
+						control: {
+							type: 'number',
+							key: 'promotionBudget',
+							min: 1,
+							max: PROMOTION_BUDGET_MAX,
+						},
+					},
 					this.customBlock((host) => this.renderSkillExport(host)),
 				],
 			},
@@ -1192,6 +1212,10 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 	}
 
 	async setControlValue(key: string, value: unknown): Promise<void> {
+		// Set when an entry was repaired, so the field can be snapped back to
+		// what was actually stored. Only then: re-rendering the tab on every
+		// valid edit rebuilds it for no reason.
+		let repaired = false;
 		if (key === 'authorTag') {
 			// Preserve the tag's casing; the parser accepts mixed-case authors.
 			//
@@ -1203,6 +1227,21 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			// assumption that normalizeSettings is the only way in.
 			this.plugin.settings.authorTag =
 				typeof value === 'string' ? repairAuthorTag(value.trim()) : '';
+		} else if (key === 'promotionBudget') {
+			// Same second-ingress hazard as authorTag above. The control's `min`
+			// and `max` do hold, but a number input reports a cleared or
+			// unparseable field as 0, and a typed `3.7` arrives as 3.7. Both were
+			// saved and used for the rest of the session, and 0 is the value this
+			// setting must never hold: it prompts on every single promotion,
+			// which trains the user to click through the one prompt that matters.
+			// Repaired through the load path's own validator, so the two ingresses
+			// cannot disagree. An unusable entry keeps the value already stored
+			// rather than jumping to the default, and the re-render below snaps
+			// the field back to what was kept.
+			const stored = this.plugin.settings.promotionBudget;
+			this.plugin.settings.promotionBudget =
+				validPromotionBudget(value) ?? stored;
+			repaired = this.plugin.settings.promotionBudget !== value;
 		} else {
 			(this.plugin.settings as unknown as Record<string, unknown>)[key] =
 				value;
@@ -1226,7 +1265,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		// fire for the same change (switching the index-entry preset off both
 		// hides a row and moves the default), and the Hub already paid for a
 		// double repaint once.
-		let repaint = defaultMoved;
+		let repaint = defaultMoved || repaired;
 		switch (key) {
 			case 'indicatorSize':
 				this.plugin.applyIndicatorSize();

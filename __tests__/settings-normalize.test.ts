@@ -945,3 +945,139 @@ describe('normalizeSettings: conflictNamespaceAllowlist', () => {
 		).toEqual([]);
 	});
 });
+
+// The promotion budget is the count above which another plugin's write is put to
+// the user. It is a number a hand-edited data.json can hold anything in, and the
+// settings control offers 1 to 500, so the loader has to agree with the control:
+// a value the UI would refuse must not survive a load.
+describe('normalizeSettings: promotionBudget', () => {
+	const budget = (raw: unknown): number =>
+		normalizeSettings({ promotionBudget: raw }).promotionBudget;
+
+	it('keeps a value inside the range the control offers', () => {
+		expect(budget(1)).toBe(1);
+		expect(budget(25)).toBe(25);
+		expect(budget(500)).toBe(500);
+	});
+
+	it('rounds a fractional count down', () => {
+		expect(budget(3.9)).toBe(3);
+	});
+
+	// Zero would prompt on every single promotion, which trains the user to click
+	// through the one prompt that matters.
+	it('falls back to the default below 1', () => {
+		for (const raw of [0, -5, 0.4]) {
+			expect(budget(raw)).toBe(DEFAULT_SETTINGS.promotionBudget);
+		}
+	});
+
+	it('falls back to the default above the control ceiling', () => {
+		expect(budget(501)).toBe(DEFAULT_SETTINGS.promotionBudget);
+		expect(budget(1e9)).toBe(DEFAULT_SETTINGS.promotionBudget);
+	});
+
+	it('falls back to the default for a value that is not a number', () => {
+		for (const raw of ['10', null, NaN, Infinity, {}, []]) {
+			expect(budget(raw)).toBe(DEFAULT_SETTINGS.promotionBudget);
+		}
+	});
+});
+
+// The promotion budget's second ingress. Same hazard as authorTag: this path
+// does not go through normalizeSettings, so whatever it stores is used for the
+// rest of the session and only repaired on the next load.
+//
+// Measured live in Obsidian before this was written: the control's `min` and
+// `max` do hold, so 0 and 501 never arrive here, but a cleared or unparseable
+// number field arrives as 0 and a typed 3.7 arrives as 3.7. Zero is the one
+// value this setting must never hold; it prompts on every single promotion.
+describe('AnnotecaSettingTab.setControlValue: the promotion budget ingress', () => {
+	function makeTab(): {
+		tab: { setControlValue(key: string, value: unknown): Promise<void> };
+		settings: AnnotecaSettings;
+		repaints: () => number;
+	} {
+		const settings = normalizeSettings({});
+		let repaints = 0;
+		const plugin = {
+			settings,
+			saveSettings: () => Promise.resolve(),
+			applyIndicatorSize: () => undefined,
+			applyAnchorAppearance: () => undefined,
+		};
+		const tab = new AnnotecaSettingTab(
+			{} as never,
+			plugin as never,
+		) as unknown as {
+			setControlValue(key: string, value: unknown): Promise<void>;
+		};
+		// A repaired entry re-renders the tab so the field snaps back to what was
+		// stored. `update` comes from the real PluginSettingTab, which the Jest
+		// stub does not have, so it is counted here instead.
+		Object.assign(tab, {
+			update: () => {
+				repaints += 1;
+			},
+		});
+		return { tab, settings, repaints: () => repaints };
+	}
+
+	it('stores a value inside the range and does not re-render', async () => {
+		const { tab, settings, repaints } = makeTab();
+		await tab.setControlValue('promotionBudget', 25);
+		expect(settings.promotionBudget).toBe(25);
+		// Rebuilding the tab on every valid edit would be pointless churn.
+		expect(repaints()).toBe(0);
+	});
+
+	it('rounds a fractional entry down', async () => {
+		const { tab, settings } = makeTab();
+		await tab.setControlValue('promotionBudget', 3.7);
+		expect(settings.promotionBudget).toBe(3);
+	});
+
+	// A cleared number field arrives as 0. Storing it would prompt on every
+	// single promotion, which trains the user to click through the one prompt
+	// that matters.
+	it('keeps the stored value when the field is cleared or unparseable', async () => {
+		for (const raw of [0, NaN, '', 'abc', null, undefined]) {
+			const { tab, settings } = makeTab();
+			await tab.setControlValue('promotionBudget', 7);
+			await tab.setControlValue('promotionBudget', raw);
+			expect(settings.promotionBudget).toBe(7);
+		}
+	});
+
+	it('keeps the stored value for an entry past the ceiling', async () => {
+		const { tab, settings } = makeTab();
+		await tab.setControlValue('promotionBudget', 7);
+		await tab.setControlValue('promotionBudget', 501);
+		expect(settings.promotionBudget).toBe(7);
+	});
+
+	// Without the re-render the field keeps showing the rejected text while the
+	// setting holds something else, which reads as the entry having been taken.
+	it('re-renders after a repaired entry so the field snaps back', async () => {
+		const { tab, repaints } = makeTab();
+		await tab.setControlValue('promotionBudget', 7);
+		expect(repaints()).toBe(0);
+		await tab.setControlValue('promotionBudget', 'abc');
+		expect(repaints()).toBe(1);
+		await tab.setControlValue('promotionBudget', 3.7);
+		expect(repaints()).toBe(2);
+	});
+
+	// The two ingresses must not disagree: whatever this path stores has to
+	// survive a reload unchanged, or the session and the restart differ.
+	it('stores only values normalizeSettings would keep', async () => {
+		for (const raw of [1, 3.7, 25, 500, 0, 'abc', 501]) {
+			const { tab, settings } = makeTab();
+			await tab.setControlValue('promotionBudget', raw);
+			const reloaded = normalizeSettings({
+				promotionBudget: settings.promotionBudget,
+			});
+			expect(reloaded.promotionBudget).toBe(settings.promotionBudget);
+		}
+	});
+});
