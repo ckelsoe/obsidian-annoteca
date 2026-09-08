@@ -7,7 +7,11 @@ import {
 	resolveSettingsCategories,
 	DEFAULT_SETTINGS,
 } from '../settings';
-import { resolveEnabledCategories, DEFAULT_CATEGORIES } from '../categories';
+import {
+	resolveEnabledCategories,
+	DEFAULT_CATEGORIES,
+	isValidCategoryName,
+} from '../categories';
 import type { AnnotecaSettings } from '../types';
 
 // data.json is user-editable and also arrives over sync and out of a restored
@@ -1079,5 +1083,73 @@ describe('AnnotecaSettingTab.setControlValue: the promotion budget ingress', () 
 			});
 			expect(reloaded.promotionBudget).toBe(settings.promotionBudget);
 		}
+	});
+});
+
+// The category promoted findings land in (interop-contract 8). A promoted
+// comment writes `annoteca/prose-check` into the note, and notes are shared, so
+// this has to resolve for a reader who never installed the linter that wrote it.
+describe('resolveSettingsCategories: prose-check', () => {
+	it('is available on the shipped defaults', () => {
+		const ids = resolveSettingsCategories(DEFAULT_SETTINGS).map(
+			(c) => c.id,
+		);
+		expect(ids).toContain('prose-check');
+	});
+
+	// The decisive case: someone whose stored list predates this, or who never
+	// installed the linter. A stored list otherwise wins outright over the
+	// defaults, so without the append their vault would render a real comment as
+	// uncategorized.
+	it('is added to a stored list that does not have it', () => {
+		const settings = normalizeSettings({
+			categories: [{ id: 'tone', displayName: 'Tone' }],
+		});
+		const ids = resolveSettingsCategories(settings).map((c) => c.id);
+		expect(ids).toContain('tone');
+		expect(ids).toContain('prose-check');
+	});
+
+	// No toggle stands in front of it, unlike index-entry.
+	it('does not depend on any preset being enabled', () => {
+		const settings = normalizeSettings({
+			enableScholarlyPreset: false,
+			enableIndexEntryPreset: false,
+		});
+		expect(resolveSettingsCategories(settings).map((c) => c.id)).toContain(
+			'prose-check',
+		);
+	});
+
+	it('is not duplicated when the stored list already has it', () => {
+		const settings = normalizeSettings({
+			categories: [
+				{ id: 'tone', displayName: 'Tone' },
+				{ id: 'prose-check', displayName: 'My own name for it' },
+			],
+		});
+		const found = resolveSettingsCategories(settings).filter(
+			(c) => c.id === 'prose-check',
+		);
+		expect(found).toHaveLength(1);
+		// The user's own naming wins; this appends, it does not overwrite.
+		expect(found[0]?.displayName).toBe('My own name for it');
+	});
+
+	// The category editor mutates these objects in place, so handing back the
+	// module-level constant would corrupt it for the rest of the session.
+	it('hands back a copy, not the shared definition', () => {
+		const a = resolveSettingsCategories(normalizeSettings({})).find(
+			(c) => c.id === 'prose-check',
+		);
+		const b = resolveSettingsCategories(normalizeSettings({})).find(
+			(c) => c.id === 'prose-check',
+		);
+		expect(a).not.toBe(b);
+		expect(a).toEqual(b);
+	});
+
+	it('is a valid category name by the parser rules', () => {
+		expect(isValidCategoryName('prose-check')).toBe(true);
 	});
 });
