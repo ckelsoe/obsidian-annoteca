@@ -8,13 +8,14 @@ import { extractIndexTerm } from './view-utils';
 import { ThreadTabRenderer } from './hub-thread-tab';
 import { OutlineTabRenderer } from './hub-outline-tab';
 import { StarredTabRenderer } from './hub-starred-tab';
+import { FindingsTabRenderer } from './hub-findings-tab';
 
 export const VAULT_UNRESOLVED_VIEW_TYPE = 'annoteca-vault-unresolved-view';
 export const INDEX_VIEW_TYPE = 'annoteca-index-view';
 export const COMPOSER_PANEL_VIEW_TYPE = 'annoteca-composer-panel-view';
 export const ANNOTECA_HUB_VIEW_TYPE = 'annoteca-hub-view';
 
-export type HubTab = 'thread' | 'outline' | 'starred';
+export type HubTab = 'thread' | 'outline' | 'starred' | 'findings';
 
 // Resolve a stored tab to one the panel can actually draw. `lastHubTab` is
 // validated on the way out of data.json, so this should never have work to do;
@@ -23,7 +24,9 @@ export type HubTab = 'thread' | 'outline' | 'starred';
 // scope change, which reads as the plugin being broken rather than as a bad
 // stored value.
 export function normalizeHubTab(tab: unknown): HubTab {
-	return tab === 'outline' || tab === 'starred' ? tab : 'thread';
+	return tab === 'outline' || tab === 'starred' || tab === 'findings'
+		? tab
+		: 'thread';
 }
 
 // Shared scaffolding for every Annoteca ItemView: plugin injection in the
@@ -341,8 +344,12 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 	private readonly threadRenderer: ThreadTabRenderer;
 	private readonly outlineRenderer: OutlineTabRenderer;
 	private readonly starredRenderer: StarredTabRenderer;
+	private readonly findingsRenderer: FindingsTabRenderer;
 	private refreshQueued = false;
 	private closed = false;
+	// Plumbline's unsubscribe, held so the panel stops listening when it goes
+	// away. Null when Plumbline is absent or was not there at open time.
+	private unsubscribeFindings: (() => void) | null = null;
 
 	constructor(leaf: WorkspaceLeaf, plugin: AnnotecaPlugin) {
 		super(leaf, plugin);
@@ -357,6 +364,16 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 			if (this.activeTab === 'outline') this.scheduleRefresh();
 		});
 		this.starredRenderer = new StarredTabRenderer(plugin);
+		this.findingsRenderer = new FindingsTabRenderer(
+			plugin,
+			this.app,
+			() => {
+				// Only repaint if the lane is still on screen. A promote finishing
+				// after the user moved to Thread would otherwise rebuild a tab they
+				// are not looking at and disconnect whatever they had focused.
+				if (this.activeTab === 'findings') this.scheduleRefresh();
+			},
+		);
 	}
 
 	getViewType(): string {
@@ -384,6 +401,18 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 		// current file only; when the scan completes it emits "index-changed"
 		// and the listener below triggers a second refresh with full data.
 		void this.plugin.scanVaultIfNeeded();
+
+		// The lane is LIVE: Plumbline recomputes on every edit and config change,
+		// and without this the panel would show findings from whenever it last
+		// happened to render. Subscribed once at open, because the API is
+		// resolved at call time and holding the handle across a reload is what
+		// contract 4.5 forbids; the unsubscribe below is the only thing kept.
+		this.unsubscribeFindings = this.findingsRenderer.subscribe((path) => {
+			if (this.closed) return;
+			if (this.activeTab !== 'findings') return;
+			if (this.app.workspace.getActiveFile()?.path !== path) return;
+			this.scheduleRefresh();
+		});
 
 		this.registerEvent(
 			this.plugin.events.on('active-comment-changed', (payload) => {
@@ -447,6 +476,8 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 		// Unload the last render's markdown lifetime. contentEl.empty() in
 		// super.onClose() removes the DOM but not the components attached to it.
 		this.threadRenderer.dispose();
+		this.unsubscribeFindings?.();
+		this.unsubscribeFindings = null;
 		await super.onClose();
 	}
 
@@ -492,6 +523,20 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 		container.empty();
 		container.addClass('annoteca-hub-root');
 
+		// A stored 'findings' tab outlives Plumbline being uninstalled. Without
+		// this the strip draws three tabs with none lit and the content area
+		// says the plugin is missing, which reads as Annoteca being broken
+		// rather than as a pairing that went away. Same failure normalizeHubTab
+		// exists to prevent, arriving through availability instead of a bad
+		// stored value.
+		if (
+			this.activeTab === 'findings' &&
+			!this.findingsRenderer.available()
+		) {
+			this.activeTab = 'thread';
+			void this.plugin.setLastHubTab('thread');
+		}
+
 		this.renderTabStrip(container);
 
 		const content = container.createDiv({ cls: 'annoteca-hub-content' });
@@ -501,6 +546,9 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 				break;
 			case 'starred':
 				this.starredRenderer.render(content);
+				break;
+			case 'findings':
+				this.findingsRenderer.render(content);
 				break;
 			// Thread is the default arm, not a case of its own. `activeTab` is
 			// already normalized at both places that set it, so this arm should be
@@ -521,6 +569,12 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 			{ id: 'outline', label: 'Outline' },
 			{ id: 'starred', label: 'Starred' },
 		];
+		// Offered only when Plumbline is installed and speaking a version this
+		// build understands. A solo Annoteca user sees exactly what they saw
+		// before, which is the whole point of the pairing being additive.
+		if (this.findingsRenderer.available()) {
+			tabs.push({ id: 'findings', label: 'Findings' });
+		}
 		for (const t of tabs) {
 			const btn = strip.createEl('button', {
 				cls: `annoteca-hub-tab${this.activeTab === t.id ? ' is-active' : ''}`,

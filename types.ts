@@ -270,7 +270,7 @@ export interface AnnotecaSettings {
 
 	// Last-active tab in the Annoteca hub panel. Restored on manual panel open.
 	// Marker clicks force the "thread" tab regardless.
-	lastHubTab: 'thread' | 'outline' | 'starred';
+	lastHubTab: 'thread' | 'outline' | 'starred' | 'findings';
 
 	// Whether the hub's right-sidebar tab has ever been auto-created. Set once,
 	// on the first load that creates it, so closing the tab makes it stay
