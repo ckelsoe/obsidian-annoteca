@@ -1212,6 +1212,10 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 	}
 
 	async setControlValue(key: string, value: unknown): Promise<void> {
+		// Set when an entry was repaired, so the field can be snapped back to
+		// what was actually stored. Only then: re-rendering the tab on every
+		// valid edit rebuilds it for no reason.
+		let repaired = false;
 		if (key === 'authorTag') {
 			// Preserve the tag's casing; the parser accepts mixed-case authors.
 			//
@@ -1223,6 +1227,21 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			// assumption that normalizeSettings is the only way in.
 			this.plugin.settings.authorTag =
 				typeof value === 'string' ? repairAuthorTag(value.trim()) : '';
+		} else if (key === 'promotionBudget') {
+			// Same second-ingress hazard as authorTag above. The control's `min`
+			// and `max` do hold, but a number input reports a cleared or
+			// unparseable field as 0, and a typed `3.7` arrives as 3.7. Both were
+			// saved and used for the rest of the session, and 0 is the value this
+			// setting must never hold: it prompts on every single promotion,
+			// which trains the user to click through the one prompt that matters.
+			// Repaired through the load path's own validator, so the two ingresses
+			// cannot disagree. An unusable entry keeps the value already stored
+			// rather than jumping to the default, and the re-render below snaps
+			// the field back to what was kept.
+			const stored = this.plugin.settings.promotionBudget;
+			this.plugin.settings.promotionBudget =
+				validPromotionBudget(value) ?? stored;
+			repaired = this.plugin.settings.promotionBudget !== value;
 		} else {
 			(this.plugin.settings as unknown as Record<string, unknown>)[key] =
 				value;
@@ -1246,7 +1265,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		// fire for the same change (switching the index-entry preset off both
 		// hides a row and moves the default), and the Hub already paid for a
 		// double repaint once.
-		let repaint = defaultMoved;
+		let repaint = defaultMoved || repaired;
 		switch (key) {
 			case 'indicatorSize':
 				this.plugin.applyIndicatorSize();
