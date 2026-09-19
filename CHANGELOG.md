@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-09-19
+
 ### Added
 - The plugin API is now public and documented for other developers, with a copyable type file (`annoteca-api.d.ts`) and an integration guide (`INTEGRATING.md`). A companion plugin can read your open comments and create new ones through it, and it can detect that a passage has a comment with no dependency on Annoteca at all. There is no hard dependency in either direction, so either plugin works on its own, and Annoteca stays the only thing that writes markers into your notes.
 - The API gained a `reveal` call that opens the note holding a comment and scrolls to its thread, given the comment's id. A companion plugin that draws its own indicator, like a bookmark or a node badge, can now turn a click on it into a jump straight to the comment. It navigates only and never writes.
