@@ -112,8 +112,20 @@ The whole contract. Resolve `api` as above, then:
 - `onChange(cb): () => void`. Fires when the comment index changes. Returns its own
   unsubscribe; call it on unload.
 
-The `ApiComment`, `AnchorRange`, `PromoteRequest`, and `CreatedComment` shapes are in
-`annoteca-api.d.ts` if you want the exact fields.
+Return and argument shapes, so you can build against this page alone:
+
+- `ApiComment` (from `queryComments`): `id?`, `path`, `category`, `body`, `author?`,
+  `date?`, `resolved`, `addressed` (a proposed edit is awaiting accept/revise/reject, so
+  the comment is still open), `replyCount`, `anchor?` as `{text, truncated}` (the prose
+  captured at creation), and `marker` as `{start, end}` (where the marker sits, which is
+  the head of the passage, not where the prose is: use `anchorsFor` for that).
+- `AnchorRange` (from `anchorsFor`): `start`, `end`, `category`, `resolved`, `addressed`,
+  `commentId?`. Where the prose actually sits in the content you passed.
+- `PromoteRequest` (into `promote`): `category`, `body`, `anchor` as `{start, end}`,
+  `author`, `sourceKey`. Shown in Creating below.
+- `CreatedComment` (from `promote`): `id`, `sourceKey`.
+
+The exact declarations, with `readonly` and optionality, are in `annoteca-api.d.ts`.
 
 ## Detecting comments without the API
 
@@ -149,8 +161,18 @@ const api = annoteca(this.app); // or the plain getPlugin lookup, untyped
 if (!api) return; // Annoteca absent, degrade
 
 const open = await api.queryComments({ paths: [file.path] });
-const ranges = api.anchorsFor(editorText); // live editor text
-const categories = api.categories();
+for (const c of open) {
+	// c.category, c.body, c.resolved, c.replyCount, c.anchor?.text, c.marker.start
+	console.log(`${c.category}: ${c.body} (${c.replyCount} replies)`);
+}
+
+// Where the prose actually sits, in the text you pass (live editor text).
+const ranges = api.anchorsFor(editorText);
+for (const r of ranges) {
+	const words = editorText.slice(r.start, r.end); // r.category, r.resolved, r.commentId
+}
+
+const categories = api.categories(); // [{ id, displayName }]
 
 const off = api.onChange(() => this.refresh());
 this.register(off);
