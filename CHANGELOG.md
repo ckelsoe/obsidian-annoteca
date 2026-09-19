@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.1] - 2026-09-19
+
+### Changed
+- The public API is now clearly marked and fully documented. The README has a "Public API" section; the developer guide (renamed to `API.md`) leads with zero-setup usage, lists every method, and gives the return shapes so you can build without the type file; and `examples/api-consumer.ts` is a compilable walkthrough. No plugin behavior changed.
+
 ### Removed
 - `skillSchemaVersion` is gone from the public API. It reported the generation of the exported AI skill, which is about teaching an assistant the marker format, not about a plugin reading or creating comments, so it did not belong on the plugin API. Nothing consumed it.
 
