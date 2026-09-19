@@ -15,7 +15,9 @@ export const SUPPORTED_PLUMBLINE_API = 1;
 
 export type FindingSeverity = 'error' | 'warning' | 'suggestion';
 
-export interface FindingOccurrence {
+// Module-local: only PlumblineFinding.occurrences below references it, so it is
+// not exported.
+interface FindingOccurrence {
 	start: number;
 	end: number;
 	key: string;

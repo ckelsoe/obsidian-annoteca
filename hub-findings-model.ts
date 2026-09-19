@@ -12,7 +12,8 @@ const ABOVE_FLOOR: readonly FindingSeverity[] = ['error', 'warning'];
 
 // Rows drawn before the lane stops. A pathological note should not freeze the
 // sidebar, and nobody reads past the first screen of a side panel.
-export const LANE_ROW_CAP = 40;
+// Module-local: used only by the rollup below, so it is not exported.
+const LANE_ROW_CAP = 40;
 
 export interface FindingRow {
 	key: string;
