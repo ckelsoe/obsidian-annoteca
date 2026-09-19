@@ -111,6 +111,18 @@ export class CommentIndex {
 		return false;
 	}
 
+	// The comment carrying this id, with the file it sits in, or undefined when
+	// no indexed file has one. Companion to hasId, for a caller that needs the
+	// located comment rather than just its existence (the API's reveal()).
+	locateById(id: string): LocatedComment | undefined {
+		for (const idx of this.files.values()) {
+			for (const c of idx.comments) {
+				if (c.id === id) return { path: idx.path, comment: c };
+			}
+		}
+		return undefined;
+	}
+
 	stats(): {
 		fileCount: number;
 		commentCount: number;

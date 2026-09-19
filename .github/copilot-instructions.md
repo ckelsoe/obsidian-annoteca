@@ -118,6 +118,16 @@ it landed as a shock to the whole team
 
 ---
 
+## The public plugin API (a committed contract)
+
+`api.ts` exposes `AnnotecaApi` on the plugin instance, reached at `app.plugins.getPlugin('annoteca')?.api`. `annoteca-api.d.ts` is the standalone, import-free copy a consumer imports for types. The two are locked in step by a test in `__tests__/api.test.ts`: change one and change the other, or the build fails. `INTEGRATING.md` is the public developer guide and must track both.
+
+`apiVersion` is an integer capability floor, not the semver in `manifest.json`. It is additive within a version: a new field on a returned object does not bump it (`AnchorRange.addressed` did not), and an additive method a consumer feature-detects can ride alongside without a bump (`categories` shipped with `promote`). Bump it when a method consumers are expected to gate on lands: `promote` moved it to 2, `reveal` to 3. Never remove a method or change a signature inside a version, because a released consumer depends on it.
+
+The surface reads and creates comments and can reveal one; it does no more. A consumer never resolves or otherwise changes a comment it did not create, because resolution is a judgement about the writing. `promote` is idempotent on `author:sourceKey` and is gated by the user's promotion budget, and `reveal` navigates only.
+
+---
+
 ## Coding conventions
 
 These are enforced by CI and the Obsidian marketplace review — violating them will fail the build or block a release.
