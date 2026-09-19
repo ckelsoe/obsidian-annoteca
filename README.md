@@ -82,9 +82,9 @@ Because comments are plain text in the file, an AI assistant needs no plugin API
 
 To teach an assistant the format, run **Export AI skill**. It writes a skill file into the vault describing the marker grammar, the reply, address, and resolve conventions, and the exact categories you have configured. The exported skill instructs the assistant never to delete markers or resolve comments unprompted, so your review queue is never quietly cleared. The destination is a setting: `.claude/skills/` for Claude Code, a `.agent/skills/` folder for other assistants, or both. The skill is versioned; when an update changes the guidance, the plugin flags the exported file as out of date so you can re-export.
 
-## For plugin developers
+## Public API
 
-Annoteca has a public API so another plugin can attach comments and AI-readable notes to a place in a document without building its own comment store. It goes from detecting a comment marker with no dependency at all, up to reading comments and creating them through the API. There is no hard dependency in either direction, and Annoteca stays the only writer of note markers. See [INTEGRATING.md](./INTEGRATING.md).
+Annoteca has a public, versioned API for other plugins. A companion plugin can attach comments and AI-readable notes to a place in a document without building its own comment store: detect a comment marker with no dependency at all, read your comments, then create and jump to them through the API. There is no hard dependency in either direction, and Annoteca stays the only writer of note markers. Full guide and copyable types: [API.md](./API.md).
 
 ## Settings overview
 
