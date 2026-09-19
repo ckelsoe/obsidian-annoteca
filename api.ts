@@ -19,11 +19,20 @@ import { resolveSettingsCategories } from './settings';
 // `isEnabled()` is not an availability test: it reports saved config, so it
 // answers true for a disabled, unloaded plugin. See contract 4.5.
 
+// The number is a capability floor a consumer can gate on, and it moves when a
+// method consumers are expected to gate on lands. A consumer still feature-detects
+// the exact method it calls: additive helpers ride alongside a gated method without
+// their own bump (categories() shipped with promote() and did not move the number),
+// and a new field on a returned object never moves it (AnchorRange.addressed did not).
+//
 // 1 = read only: queryComments, anchorsFor, onChange.
 // 2 = adds promote(). Bumped because a consumer checking `apiVersion` to decide
 //     whether it can promote would otherwise treat a read-only build and this one
 //     as the same thing and call a method that is not there.
-export const API_VERSION = 2;
+// 3 = adds reveal(). Bumped for the same reason: a consumer checking `apiVersion`
+//     before it wires a "jump to this comment" action must be able to tell a build
+//     that has reveal() from one that does not.
+export const API_VERSION = 3;
 
 // The shape a consumer sees. Deliberately NOT the internal `Comment`: that
 // carries the marker grammar, `unknownLines`, reply and addressed structures
@@ -153,6 +162,17 @@ export interface AnnotecaApi {
 		expected: string,
 	): Promise<readonly CreatedComment[]>;
 
+	// Open the note holding a comment, scroll to it, and open its thread. For a
+	// consumer that draws its own indicator (a mindmap node badge, a bookmark
+	// row) and wants a click to land the reader on the comment.
+	//
+	// Read and navigate only: it never writes. Resolves `false` when no indexed
+	// file carries that id, so a caller can fall back rather than assume the jump
+	// worked; the comment may have been deleted since the caller read it. The
+	// vault is warmed the same way queryComments warms it, so a fresh session
+	// reveals a comment in a note nobody has opened yet.
+	reveal(commentId: string): Promise<boolean>;
+
 	// Fires when the comment index changes. Returns its own unsubscribe; a
 	// consumer must call it on unload or the callback outlives the consumer.
 	onChange(cb: () => void): () => void;
@@ -269,6 +289,27 @@ export function createApi(plugin: AnnotecaPlugin): AnnotecaApi {
 			// and contract 4.1 exists because a second writer is how this format
 			// has been damaged before.
 			return plugin.comments.promote(path, requests, expected);
+		},
+
+		async reveal(commentId: string): Promise<boolean> {
+			// The same warm-up queryComments does: the index is populated lazily
+			// from files touched this session, so a fresh session would miss a
+			// comment in a note nobody has opened. scanVaultIfNeeded is one-shot;
+			// indexUnseenFiles catches files added since it ran.
+			await plugin.scanVaultIfNeeded();
+			await plugin.indexUnseenFiles();
+			const located = plugin.commentIndex.locateById(commentId);
+			if (!located) return false;
+			// Delegated to the plugin's own navigation, so a consumer's jump lands
+			// exactly where a hub click does: the marker scrolled into view and the
+			// reviewer opened on the comment. The marker start, not the anchor: the
+			// marker is what the editor decorations and the reviewer key on.
+			await plugin.navigateToComment(
+				located.path,
+				located.comment.marker.start,
+				located.comment,
+			);
+			return true;
 		},
 
 		onChange(cb: () => void): () => void {
