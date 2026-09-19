@@ -21,7 +21,6 @@ import { CommentIndex } from '../index';
 import { normalizeSettings } from '../settings';
 import { parseAll, serializeLeanMarker } from '../parser';
 import { writeStoreRegion, type StoredComment } from '../store';
-import { SKILL_SCHEMA_VERSION } from '../skill-export';
 import { Events } from 'obsidian';
 import type AnnotecaPlugin from '../main';
 
@@ -95,16 +94,13 @@ describe('AnnotecaApi: the published shape', () => {
 });
 
 describe('AnnotecaApi: version surface', () => {
-	it('reports its own version and the exported-skill version', () => {
+	it('reports its own version', () => {
 		const { api } = harness();
 		expect(api.apiVersion).toBe(API_VERSION);
 		// 3 since reveal() landed. A consumer checking this before it wires a
 		// "jump to this comment" action must be able to tell a build that has
 		// reveal() from one that does not.
 		expect(api.apiVersion).toBe(3);
-		// The exported-skill generation, not the marker format. Named for what
-		// it is: SKILL_SCHEMA_VERSION bumps on teaching changes too.
-		expect(api.skillSchemaVersion).toBe(SKILL_SCHEMA_VERSION);
 	});
 });
 

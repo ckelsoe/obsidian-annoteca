@@ -96,8 +96,7 @@ treat it as a floor:
 
 The whole contract. Resolve `api` as above, then:
 
-- `apiVersion: number`, `skillSchemaVersion: number`. The capability level, and the
-  generation of the exported AI skill (not the marker format).
+- `apiVersion: number`. The capability level the running build supports.
 - `categories(): {id, displayName}[]`. The user's own comment categories, in their order.
   Offer these rather than hardcoding a list that goes stale.
 - `queryComments(filter?): Promise<ApiComment[]>`. Open comments for a note or the whole
