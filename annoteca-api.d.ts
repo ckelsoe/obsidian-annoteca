@@ -97,9 +97,6 @@ export interface AnnotecaApi {
 	// A capability floor to gate on. Feature-detect the exact method you call as
 	// well; unknown or lower than you need means degrade to unpaired behaviour.
 	readonly apiVersion: number;
-	// The generation of the exported assistant guidance (SKILL.md), NOT the marker
-	// format. Use it to tell which SKILL.md a build ships, not as a format gate.
-	readonly skillSchemaVersion: number;
 
 	// The categories a comment may be created in, in the user's own order, with
 	// their display names. Offer these rather than hardcoding a list that drifts

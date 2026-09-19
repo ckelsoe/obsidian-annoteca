@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- `skillSchemaVersion` is gone from the public API. It reported the generation of the exported AI skill, which is about teaching an assistant the marker format, not about a plugin reading or creating comments, so it did not belong on the plugin API. Nothing consumed it.
+
 ## [1.17.0] - 2026-09-19
 
 ### Added
