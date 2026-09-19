@@ -138,8 +138,8 @@ export interface AnnotecaApi {
 	//
 	// CREATE ONLY, and that is the design. There is no path here to resolve,
 	// delete, edit or reply: resolution is a judgement about the writing, and
-	// machine tooling does not close a human's thread. A consumer that wants a
-	// finding retracted replies to it.
+	// machine tooling does not close a human's thread. If a finding needs
+	// retracting, the user replies to it by hand; this API has no reply.
 	//
 	// Idempotent on `sourceKey`, so a consumer re-running over a note it already
 	// promoted creates nothing and gets back only what it made this time. Above

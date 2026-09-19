@@ -154,8 +154,8 @@ const created = await api.promote(
 
 Notes on `promote`:
 
-- Create only. There is no path to resolve, edit, delete, or reply. A consumer that
-  wants a finding retracted replies to it (as a person would).
+- Create only. There is no path to resolve, edit, delete, or reply. If a finding needs
+  retracting, the user replies to it by hand; the API has no reply.
 - Idempotent on `author:sourceKey`. Promoting the same finding twice is a no-op, not a
   second marker, so re-running over a note you already commented on is safe.
 - Budget-gated. Above the user's promotion budget (default 10 in one call) the user is
