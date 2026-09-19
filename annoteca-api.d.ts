@@ -1,14 +1,14 @@
-// Annoteca's public plugin API, as a standalone declaration.
+// Annoteca's public plugin API, as a standalone type declaration.
 //
-// This is the file another plugin copies to get types for Annoteca's API. It has
-// no imports and no runtime, so copying it adds no dependency on Annoteca: the
-// consumer still resolves the live object at call time and works when Annoteca is
-// absent. See INTEGRATING.md for the full guide.
+// OPTIONAL. Using the API needs nothing copied: it is a plain runtime object reached
+// at `app.plugins.getPlugin('annoteca')?.api`, callable in plain JS. This file only
+// gives TypeScript consumers the types, with no imports and no runtime, so copying it
+// adds no dependency. See API.md for the full guide.
 //
 // Resolve the API at CALL time, never in your onload. `app.plugins` is an Obsidian
 // internal the official types do not declare, so reach it through a minimal local
-// shape; INTEGRATING.md has a lookup that compiles against the stock types plus this
-// file alone. Gate on `apiVersion >= 3` and degrade below it.
+// shape; API.md has a lookup that compiles against the stock types plus this file
+// alone. Gate on `apiVersion >= 3` and degrade below it.
 //
 // Caching it is the only thing that makes plugin load order matter, and
 // `isEnabled('annoteca')` is not an availability test (it reports saved config, so
