@@ -3,9 +3,20 @@ import {
 	API_VERSION,
 	type AnchorRange,
 	type AnnotecaApi,
+	type ApiCategory,
 	type ApiComment,
 	type ApiFilter,
 } from '../api';
+import type { CreatedComment, PromoteRequest } from '../types';
+import type {
+	AnchorRange as PubAnchorRange,
+	AnnotecaApi as PubAnnotecaApi,
+	ApiCategory as PubApiCategory,
+	ApiComment as PubApiComment,
+	ApiFilter as PubApiFilter,
+	CreatedComment as PubCreatedComment,
+	PromoteRequest as PubPromoteRequest,
+} from '../annoteca-api';
 import { CommentIndex } from '../index';
 import { normalizeSettings } from '../settings';
 import { parseAll, serializeLeanMarker } from '../parser';
@@ -21,10 +32,16 @@ function harness(): {
 	index: CommentIndex;
 	events: Events;
 	scans: string[];
+	navs: { path: string; start: number; commentId: string | undefined }[];
 } {
 	const index = new CommentIndex();
 	const events = new Events();
 	const scans: string[] = [];
+	const navs: {
+		path: string;
+		start: number;
+		commentId: string | undefined;
+	}[] = [];
 	const api = createApi({
 		commentIndex: index,
 		events,
@@ -37,11 +54,21 @@ function harness(): {
 			scans.push('indexUnseenFiles');
 			return Promise.resolve();
 		},
+		// reveal() delegates here; the harness records the jump instead of driving
+		// the real workspace, which would need the whole Obsidian app.
+		navigateToComment: (
+			path: string,
+			start: number,
+			comment?: { id: string | undefined },
+		) => {
+			navs.push({ path, start, commentId: comment?.id });
+			return Promise.resolve();
+		},
 		// The real settings, because categories() resolves through the same
 		// path the composer uses and a stub list would test the stub.
 		settings: normalizeSettings({}),
 	} as unknown as AnnotecaPlugin);
-	return { api, index, events, scans };
+	return { api, index, events, scans, navs };
 }
 
 const NOTE = [
@@ -71,9 +98,10 @@ describe('AnnotecaApi: version surface', () => {
 	it('reports its own version and the exported-skill version', () => {
 		const { api } = harness();
 		expect(api.apiVersion).toBe(API_VERSION);
-		// 2 since promote() landed. A consumer checking this to decide whether it
-		// can promote must be able to tell a read-only build from this one.
-		expect(api.apiVersion).toBe(2);
+		// 3 since reveal() landed. A consumer checking this before it wires a
+		// "jump to this comment" action must be able to tell a build that has
+		// reveal() from one that does not.
+		expect(api.apiVersion).toBe(3);
 		// The exported-skill generation, not the marker format. Named for what
 		// it is: SKILL_SCHEMA_VERSION bumps on teaching changes too.
 		expect(api.skillSchemaVersion).toBe(SKILL_SCHEMA_VERSION);
@@ -245,6 +273,49 @@ describe('AnnotecaApi.onChange', () => {
 	});
 });
 
+describe('AnnotecaApi.reveal', () => {
+	it('navigates to the comment carrying the id', async () => {
+		const { api, index, navs } = harness();
+		index.rebuild('a.md', NOTE);
+		const ok = await api.reveal('aaaa1111');
+		expect(ok).toBe(true);
+		expect(navs).toHaveLength(1);
+		expect(navs[0]?.path).toBe('a.md');
+		expect(navs[0]?.commentId).toBe('aaaa1111');
+		// The marker start, not the anchor: the marker is what the editor
+		// decorations and the reviewer key on.
+		const marker = index.get('a.md')?.comments[0]?.marker;
+		expect(navs[0]?.start).toBe(marker?.start);
+	});
+
+	it('returns false and does not navigate for an unknown id', async () => {
+		const { api, index, navs } = harness();
+		index.rebuild('a.md', NOTE);
+		const ok = await api.reveal('nosuchid');
+		expect(ok).toBe(false);
+		expect(navs).toHaveLength(0);
+	});
+
+	// Same lazy-index warm-up as queryComments, so a fresh session reveals a
+	// comment in a note nobody has opened yet.
+	it('warms the index before looking', async () => {
+		const { api, index, scans } = harness();
+		index.rebuild('a.md', NOTE);
+		await api.reveal('aaaa1111');
+		expect(scans).toEqual(['scanVaultIfNeeded', 'indexUnseenFiles']);
+	});
+
+	// Finds a comment in any indexed file, not just the first.
+	it('locates a comment in a second file', async () => {
+		const { api, index, navs } = harness();
+		index.rebuild('a.md', 'Plain prose, no markers.\n');
+		index.rebuild('b.md', NOTE);
+		const ok = await api.reveal('aaaa1111');
+		expect(ok).toBe(true);
+		expect(navs[0]?.path).toBe('b.md');
+	});
+});
+
 // `resolved` alone cannot tell an untouched comment from one with a proposed
 // edit sitting in the note: both are unresolved. Interop-contract 5.1 needs them
 // apart, because a prose linter yields its underline under an OPEN comment and
@@ -329,5 +400,39 @@ describe('AnnotecaApi.categories', () => {
 		const b = api.categories()[0];
 		expect(a).not.toBe(b);
 		expect(a).toEqual(b);
+	});
+});
+
+// annoteca-api.d.ts is the file a consumer copies to get types. It has to stay
+// byte-for-byte compatible with the runtime surface, or a consumer builds against
+// a shape the plugin does not expose. This locks the two together at compile time:
+// each pair must be mutually assignable, so any field, return type or method that
+// drifts on one side turns a `true` below into a type error and fails the build.
+type Extends<A, B> = [A] extends [B] ? true : false;
+type Mutual<A, B> =
+	Extends<A, B> extends true
+		? Extends<B, A> extends true
+			? true
+			: false
+		: false;
+
+describe('annoteca-api.d.ts: the published surface matches the runtime', () => {
+	it('is mutually assignable with the runtime types', () => {
+		const apiLock: Mutual<AnnotecaApi, PubAnnotecaApi> = true;
+		const commentLock: Mutual<ApiComment, PubApiComment> = true;
+		const anchorLock: Mutual<AnchorRange, PubAnchorRange> = true;
+		const categoryLock: Mutual<ApiCategory, PubApiCategory> = true;
+		const filterLock: Mutual<ApiFilter, PubApiFilter> = true;
+		const promoteLock: Mutual<PromoteRequest, PubPromoteRequest> = true;
+		const createdLock: Mutual<CreatedComment, PubCreatedComment> = true;
+		expect(
+			apiLock &&
+				commentLock &&
+				anchorLock &&
+				categoryLock &&
+				filterLock &&
+				promoteLock &&
+				createdLock,
+		).toBe(true);
 	});
 });
