@@ -42,6 +42,9 @@ config, so it answers `true` for a disabled, unloaded plugin. Availability is
 Annoteca is enabled or disabled mid-session, subscribe to `app.plugins.on('changed', ...)`
 and re-resolve.
 
+A complete, compilable walkthrough of every call is in
+[`examples/api-consumer.ts`](./examples/api-consumer.ts).
+
 ## Types (optional)
 
 Everything works untyped, as above. If you want TypeScript type-checking and
