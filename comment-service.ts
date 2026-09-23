@@ -1250,9 +1250,16 @@ export class CommentService {
 			const c = parsed[i];
 			const r = raw[i];
 			if (c === undefined || r === undefined) return { kind: 'missing' };
+			if (c === r) return { kind: 'found', comment: c };
+			// The one field that must stay raw: the original fence is the text
+			// Reject writes back, so it keeps the note's own line endings.
+			const addressed =
+				c.addressed && r.addressed?.original !== undefined
+					? { ...c.addressed, original: r.addressed.original }
+					: c.addressed;
 			return {
 				kind: 'found',
-				comment: c === r ? c : { ...c, marker: r.marker },
+				comment: { ...c, addressed, marker: r.marker },
 			};
 		};
 		if (comment.id !== undefined) {

@@ -550,6 +550,37 @@ describe('#12: actions build from current file state, not a cached snapshot', ()
 		);
 	});
 
+	// Reject writes the original fence back into the prose, so on a CRLF note
+	// it must carry the note's own line endings through a reply and back out.
+	it('keeps a multiline CRLF original verbatim through a reply and Reject', async () => {
+		const raw = [
+			'Intro.',
+			'',
+			'<!-- annoteca/clarify: tighten this',
+			'[id=crlf0002]',
+			'[addressed claude 2026-06-20]: rewrote it',
+			'````annoteca-original',
+			'Old line one.',
+			'Old line two.',
+			'````',
+			'--> New text.',
+		].join('\r\n');
+		const h = makeHarnessWith(raw);
+
+		await h.service.appendReply(
+			'note.md',
+			firstComment(toEditorText(h.content)),
+			{ author: 'charles', date: '2026-06-22', body: 'ok' },
+		);
+		await h.service.rejectAddressed(
+			'note.md',
+			firstComment(toEditorText(h.content)),
+		);
+
+		expect(h.content).toContain('--> Old line one.\r\nOld line two.');
+		expect(firstComment(toEditorText(h.content)).addressed).toBeUndefined();
+	});
+
 	it('refuses an id-less marker whose body changed underneath', async () => {
 		const h = makeHarnessWith(IDLESS);
 		const snapshot = firstComment(h.content);
