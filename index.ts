@@ -2,7 +2,11 @@
 // Owners call rebuild(path, content) on file events; queries are read-only.
 
 import type { Comment, LocatedComment } from './types';
-import { findMalformedMarkers, type MalformedMarker } from './parser';
+import {
+	findMalformedMarkers,
+	toEditorText,
+	type MalformedMarker,
+} from './parser';
 import { parseDocument } from './document';
 
 export interface FileIndex {
@@ -41,7 +45,10 @@ export class CommentIndex {
 		return this.files.values();
 	}
 
-	rebuild(path: string, content: string): FileIndex {
+	rebuild(path: string, raw: string): FileIndex {
+		// Callers pass the editor buffer or the vault's bytes depending on
+		// whether the note is open. Both must yield the same offsets.
+		const content = toEditorText(raw);
 		const idx: FileIndex = {
 			path,
 			// parseDocument, not parseAll: an eof comment's body, thread and

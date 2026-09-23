@@ -40,7 +40,9 @@ export interface ApiComment {
 		{ readonly text: string; readonly truncated: boolean } | undefined;
 	// Where the marker itself sits in the file. A marker is written at the HEAD
 	// of the passage it concerns, which is not where the prose sits: use
-	// anchorsFor for that.
+	// anchorsFor for that. Offsets are into the note's editor text, where every
+	// line break is one character, even in a file saved with Windows (CRLF)
+	// line endings.
 	readonly marker: { readonly start: number; readonly end: number };
 }
 

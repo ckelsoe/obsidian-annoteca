@@ -32,6 +32,7 @@ import { ConfirmPromotionModal } from './confirm-modal';
 import {
 	findRemovalBlocker,
 	parseAll,
+	toEditorText,
 	serialize,
 	serializeLeanMarker,
 	nowISO,
@@ -1232,7 +1233,28 @@ export class CommentService {
 	// This is the predicate rejectAddressed worked out across four review rounds
 	// in PR A; it is shared now rather than written twice.
 	private freshComment(content: string, comment: Comment): FreshLookup {
-		const parsed = parseAll(content);
+		// Two coordinate systems meet here. The caller's comment came from the
+		// index, which holds editor text (line breaks normalized), while a
+		// closed note's content is its raw bytes, and the splices that follow
+		// are applied to those bytes. So every field is read from the editor
+		// text, where the raw parser would leave a trailing \r on each line of
+		// a CRLF note and a write would turn it into a space, and only the
+		// marker's range comes from the raw parse. The marker span is found the
+		// same way whatever the line breaks are, so the two parses list the
+		// same markers in the same order.
+		const raw = parseAll(content);
+		const normalized = toEditorText(content);
+		const parsed = normalized === content ? raw : parseAll(normalized);
+		if (parsed.length !== raw.length) return { kind: 'missing' };
+		const inRaw = (i: number): FreshLookup => {
+			const c = parsed[i];
+			const r = raw[i];
+			if (c === undefined || r === undefined) return { kind: 'missing' };
+			return {
+				kind: 'found',
+				comment: c === r ? c : { ...c, marker: r.marker },
+			};
+		};
 		if (comment.id !== undefined) {
 			// Exactly one, or refuse. Ids live in file text, so copy-pasting a
 			// marker inside a note produces two markers carrying the same id,
@@ -1244,24 +1266,24 @@ export class CommentService {
 			// words. "Moved or deleted, reopen the note" is false for a
 			// duplicated id, and reopening cannot fix it, so it would leave
 			// every action dead with no way to understand why.
-			const matches = parsed.filter((c) => c.id === comment.id);
+			const matches: number[] = [];
+			parsed.forEach((c, i) => {
+				if (c.id === comment.id) matches.push(i);
+			});
 			const only = matches[0];
-			if (matches.length === 1 && only !== undefined)
-				return { kind: 'found', comment: only };
+			if (matches.length === 1 && only !== undefined) return inRaw(only);
 			return matches.length > 1
 				? { kind: 'ambiguous', id: comment.id }
 				: { kind: 'missing' };
 		}
-		const found = parsed.find(
+		const i = parsed.findIndex(
 			(c) =>
 				c.marker.start === comment.marker.start &&
 				c.marker.end === comment.marker.end &&
 				c.category === comment.category &&
 				c.body === comment.body,
 		);
-		return found === undefined
-			? { kind: 'missing' }
-			: { kind: 'found', comment: found };
+		return i < 0 ? { kind: 'missing' } : inRaw(i);
 	}
 
 	// Look the marker up and narrate the failure, so the four write paths do not

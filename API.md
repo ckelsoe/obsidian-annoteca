@@ -121,7 +121,9 @@ Return and argument shapes, so you can build against this page alone:
   `date?`, `resolved`, `addressed` (a proposed edit is awaiting accept/revise/reject, so
   the comment is still open), `replyCount`, `anchor?` as `{text, truncated}` (the prose
   captured at creation), and `marker` as `{start, end}` (where the marker sits, which is
-  the head of the passage, not where the prose is: use `anchorsFor` for that).
+  the head of the passage, not where the prose is: use `anchorsFor` for that). Marker
+  offsets are into the note's editor text, so a line break counts as one character even in a
+  file saved with Windows (CRLF) line endings.
 - `AnchorRange` (from `anchorsFor`): `start`, `end`, `category`, `resolved`, `addressed`,
   `commentId?`. Where the prose actually sits in the content you passed.
 - `PromoteRequest` (into `promote`): `category`, `body`, `anchor` as `{start, end}`,

@@ -55,3 +55,46 @@ describe('drift: detectDrift', () => {
 		expect(secondRun.findings).toHaveLength(0);
 	});
 });
+
+// Baselines taken before the index normalized line endings were captured from
+// raw CRLF text at raw offsets. On a note whose lines are short enough that the
+// 80-character window spans line breaks, the two captures differ. An unchanged
+// note must not report drift on the first check after upgrading.
+describe('drift: CRLF baselines from the raw-text basis', () => {
+	const lines = Array.from({ length: 12 }, (_, i) => `Line ${i} words.`);
+	const lf = `${lines.join('\n')}\nX<!-- annoteca/tone: t\n[id=drift001]\n-->\n${lines.join('\n')}\n`;
+	const raw = lf.replace(/\n/g, '\r\n');
+	const rawComment = parseAll(raw)[0]!;
+	const editorComment = parseAll(lf)[0]!;
+	const legacyBaseline = { drift001: captureSnapshot(raw, rawComment) };
+
+	it('the two bases really do capture different windows here', () => {
+		expect(captureSnapshot(lf, editorComment)).not.toEqual(
+			legacyBaseline.drift001,
+		);
+	});
+
+	it('refreshes a raw-basis baseline without reporting drift', () => {
+		const r = detectDrift(lf, 'n.md', [editorComment], legacyBaseline, {
+			content: raw,
+			comments: parseAll(raw),
+		});
+		expect(r.findings).toHaveLength(0);
+		expect(r.refreshedSnapshots.drift001).toEqual(
+			captureSnapshot(lf, editorComment),
+		);
+	});
+
+	it('still reports real drift on a CRLF note', () => {
+		const movedLf = lf.replace('Line 11 words.\nX', 'Rewritten.\nX');
+		const movedRaw = movedLf.replace(/\n/g, '\r\n');
+		const r = detectDrift(
+			movedLf,
+			'n.md',
+			parseAll(movedLf),
+			legacyBaseline,
+			{ content: movedRaw, comments: parseAll(movedRaw) },
+		);
+		expect(r.findings).toHaveLength(1);
+	});
+});
