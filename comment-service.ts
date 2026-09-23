@@ -651,9 +651,16 @@ export class CommentService {
 		new Notice('Reverted to the original text.');
 	}
 
+	// Any line break ends the line, not only \n. Stopping at \n alone ran a
+	// lone-CR note's Reject splice to the end of the note, and on a CRLF note
+	// took the \r with it.
 	private endOfLine(content: string, from: number): number {
-		const idx = content.indexOf('\n', from);
-		return idx === -1 ? content.length : idx;
+		const lf = content.indexOf('\n', from);
+		const cr = content.indexOf('\r', from);
+		if (lf === -1 && cr === -1) return content.length;
+		if (lf === -1) return cr;
+		if (cr === -1) return lf;
+		return Math.min(lf, cr);
 	}
 
 	// Returns the resolved comments in `path` without modifying the file.
@@ -1252,11 +1259,14 @@ export class CommentService {
 			if (c === undefined || r === undefined) return { kind: 'missing' };
 			if (c === r) return { kind: 'found', comment: c };
 			// The one field that must stay raw: the original fence is the text
-			// Reject writes back, so it keeps the note's own line endings. The
-			// raw parse has it on a CRLF note. On a lone-CR note it has no
+			// Reject writes back, so it keeps the marker's own line endings. The
+			// raw parse has it on a CRLF marker. On a lone-CR marker it has no
 			// fields at all (it splits lines on \n only), so the normalized copy
-			// is put back into the note's \r.
-			const loneCr = content.includes('\r') && !content.includes('\n');
+			// is put back into \r. Judged by the marker's text, not the note's,
+			// so a note with mixed line endings gets the marker's.
+			const markerText = content.slice(r.marker.start, r.marker.end);
+			const loneCr =
+				markerText.includes('\r') && !markerText.includes('\n');
 			const original =
 				r.addressed?.original ??
 				(loneCr

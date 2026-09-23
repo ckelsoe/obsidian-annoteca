@@ -594,6 +594,7 @@ describe('#12: actions build from current file state, not a cached snapshot', ()
 			'Old line two.',
 			'````',
 			'--> New text.',
+			'Following line stays.',
 		].join('\r');
 		const h = makeHarnessWith(raw);
 
@@ -602,8 +603,59 @@ describe('#12: actions build from current file state, not a cached snapshot', ()
 			firstComment(toEditorText(h.content)),
 		);
 
-		expect(h.content).toContain('--> Old line one.\rOld line two.');
+		expect(h.content).toContain(
+			'--> Old line one.\rOld line two.\rFollowing line stays.',
+		);
 		expect(firstComment(toEditorText(h.content)).addressed).toBeUndefined();
+	});
+
+	// A note with LF lines elsewhere and a CR-only marker: the marker's own
+	// line breaks decide, and Reject stops at the CR ending its line.
+	it('keeps a lone-CR original in a note with mixed line endings', async () => {
+		const marker = [
+			'<!-- annoteca/clarify: tighten this',
+			'[id=mixd0001]',
+			'[addressed claude 2026-06-20]: rewrote it',
+			'````annoteca-original',
+			'Old line one.',
+			'Old line two.',
+			'````',
+			'--> New text.',
+		].join('\r');
+		const raw = `Intro.\n\n${marker}\rAfter.\nLast.\n`;
+		const h = makeHarnessWith(raw);
+
+		await h.service.rejectAddressed(
+			'note.md',
+			firstComment(toEditorText(h.content)),
+		);
+
+		expect(h.content).toContain(
+			'--> Old line one.\rOld line two.\rAfter.\nLast.\n',
+		);
+		expect(h.content.startsWith('Intro.\n\n<!-- annoteca/')).toBe(true);
+	});
+
+	// On a CRLF note Reject keeps the \r that ends the replaced line.
+	it('keeps the CRLF ending of the line Reject replaces', async () => {
+		const raw = [
+			'<!-- annoteca/clarify: tighten this',
+			'[id=crlf0004]',
+			'[addressed claude 2026-06-20]: rewrote it',
+			'````annoteca-original',
+			'Old text.',
+			'````',
+			'--> New text.',
+			'Next line.',
+		].join('\r\n');
+		const h = makeHarnessWith(raw);
+
+		await h.service.rejectAddressed(
+			'note.md',
+			firstComment(toEditorText(h.content)),
+		);
+
+		expect(h.content).toContain('--> Old text.\r\nNext line.');
 	});
 
 	it('refuses an id-less marker whose body changed underneath', async () => {
