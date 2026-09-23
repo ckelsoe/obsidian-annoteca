@@ -581,6 +581,31 @@ describe('#12: actions build from current file state, not a cached snapshot', ()
 		expect(firstComment(toEditorText(h.content)).addressed).toBeUndefined();
 	});
 
+	// Same through a lone-CR note, where the raw parse sees no fields at all.
+	it('keeps a multiline lone-CR original through Reject', async () => {
+		const raw = [
+			'Intro.',
+			'',
+			'<!-- annoteca/clarify: tighten this',
+			'[id=cr000003]',
+			'[addressed claude 2026-06-20]: rewrote it',
+			'````annoteca-original',
+			'Old line one.',
+			'Old line two.',
+			'````',
+			'--> New text.',
+		].join('\r');
+		const h = makeHarnessWith(raw);
+
+		await h.service.rejectAddressed(
+			'note.md',
+			firstComment(toEditorText(h.content)),
+		);
+
+		expect(h.content).toContain('--> Old line one.\rOld line two.');
+		expect(firstComment(toEditorText(h.content)).addressed).toBeUndefined();
+	});
+
 	it('refuses an id-less marker whose body changed underneath', async () => {
 		const h = makeHarnessWith(IDLESS);
 		const snapshot = firstComment(h.content);

@@ -1252,10 +1252,19 @@ export class CommentService {
 			if (c === undefined || r === undefined) return { kind: 'missing' };
 			if (c === r) return { kind: 'found', comment: c };
 			// The one field that must stay raw: the original fence is the text
-			// Reject writes back, so it keeps the note's own line endings.
+			// Reject writes back, so it keeps the note's own line endings. The
+			// raw parse has it on a CRLF note. On a lone-CR note it has no
+			// fields at all (it splits lines on \n only), so the normalized copy
+			// is put back into the note's \r.
+			const loneCr = content.includes('\r') && !content.includes('\n');
+			const original =
+				r.addressed?.original ??
+				(loneCr
+					? c.addressed?.original?.replace(/\n/g, '\r')
+					: c.addressed?.original);
 			const addressed =
-				c.addressed && r.addressed?.original !== undefined
-					? { ...c.addressed, original: r.addressed.original }
+				c.addressed && original !== undefined
+					? { ...c.addressed, original }
 					: c.addressed;
 			return {
 				kind: 'found',
