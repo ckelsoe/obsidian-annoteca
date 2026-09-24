@@ -237,7 +237,11 @@ export class ComposerForm {
 		const bodyArea = bodyContent.createEl('textarea', {
 			cls: 'annoteca-modal-body',
 			attr: {
-				placeholder: 'Type the comment here…',
+				// The category's default text, when it has one, because that is
+				// what an empty body saves as. Rebuilt on every category change.
+				placeholder:
+					this.defaultBodyFor(this.state.selectedCategory) ??
+					'Type the comment here…',
 				rows: '6',
 			},
 		});
@@ -319,14 +323,29 @@ export class ComposerForm {
 	}
 
 	private composeFinalBody(): string {
-		const trimmed = this.state.body.trim();
+		// The default stands in for the typed body, BEFORE any template: a
+		// template category with only its detail fields filled still gets the
+		// default as its body.
+		const typed = this.state.body.trim();
+		const body =
+			typed === ''
+				? (this.defaultBodyFor(this.state.selectedCategory) ?? '')
+				: typed;
 		const template = !this.request.editing
 			? getTemplate(this.state.selectedCategory)
 			: undefined;
 		if (template) {
-			return template.compose(this.state.templateValues, trimmed).trim();
+			return template.compose(this.state.templateValues, body).trim();
 		}
-		return trimmed;
+		return body;
+	}
+
+	// Only a NEW comment takes the default. Emptying an existing comment's body
+	// is refused as before, rather than silently replacing what was written.
+	private defaultBodyFor(category: string): string | undefined {
+		if (this.request.editing) return undefined;
+		return this.plugin.settings.categories.find((c) => c.id === category)
+			?.defaultBody;
 	}
 
 	private buildCommentForCreate(

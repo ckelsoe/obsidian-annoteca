@@ -173,6 +173,25 @@ describe('normalizeSettings: structural keys', () => {
 		});
 	});
 
+	it('keeps a category default text trimmed, and drops a blank one', () => {
+		const s = normalizeSettings({
+			categories: [
+				{
+					id: 'cut',
+					displayName: 'Cut',
+					defaultBody: '  Remove this.  ',
+				},
+				{ id: 'tone', displayName: 'Tone', defaultBody: '   ' },
+				{ id: 'expand', displayName: 'Expand', defaultBody: 7 },
+			],
+		});
+		expect(s.categories.map((c) => c.defaultBody)).toEqual([
+			'Remove this.',
+			undefined,
+			undefined,
+		]);
+	});
+
 	it('keeps only string ids in starredComments', () => {
 		// main.ts does `starredComments.includes(comment.id)` and the Starred tab
 		// walks it in reverse; a number in there is a card that can never draw.
