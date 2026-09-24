@@ -7,10 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.2] - 2026-09-24
+
 ### Fixed
 - On notes saved with Windows line endings (CRLF), clicking a comment marker selected the wrong card in the comments pane, usually the first one. The pane counted each line break as two characters and the editor counts it as one, so every comment after the first line was looked up a few characters off. Everything that reads a note's text for comment positions now counts line breaks the way the editor does, including reading view and the position drift check.
 - The API's `marker` offsets are now always editor offsets, as the API guide already implied by working against live editor text. Before, a note with Windows line endings that was not open gave offsets into the file bytes instead. Notes with plain LF line endings are unaffected.
 - Resolving, replying to or otherwise acting on a comment in a closed note with Windows line endings no longer adds a trailing space to each reply and note in that comment.
+- Rejecting a proposed edit in a closed note with Windows line endings keeps the line break at the end of the restored text as it was, instead of turning it into a plain LF.
 
 ## [1.17.1] - 2026-09-19
 
