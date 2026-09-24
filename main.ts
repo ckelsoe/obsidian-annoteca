@@ -96,7 +96,12 @@ import {
 	ConfirmDeleteResolvedModal,
 } from './confirm-modal';
 import { formatScripture } from './scripture';
-import { computeScopeFileSet, type ScopeFile } from './scope';
+import {
+	computeScopeFileSet,
+	effectiveScopeState,
+	rekeyScopeAnchor,
+	type ScopeFile,
+} from './scope';
 import { CommentService, fileGoneMessage } from './comment-service';
 import { DiagnosticsService } from './diagnostics-service';
 import {
@@ -456,6 +461,9 @@ export default class AnnotecaPlugin extends Plugin {
 		);
 		this.registerEvent(
 			this.app.vault.on('rename', (file, oldPath) => {
+				// Files and folders both: a folder scope, or a file scope inside
+				// a renamed folder, is anchored by path.
+				this.rekeyScopeOnRename(oldPath, file.path);
 				if (file instanceof TFile) {
 					this.commentIndex.rename(oldPath, file.path);
 					this.markerDamage.rename(oldPath, file.path);
@@ -1754,7 +1762,25 @@ export default class AnnotecaPlugin extends Plugin {
 	// current scope and the scope is not pinned.
 
 	getScopeState(): ScopeState {
-		return this.settings.scopeState;
+		// Markdown only, like the file-open handler: an image or PDF in front
+		// cannot hold comments, so it must not become the scope.
+		const active = this.app.workspace.getActiveFile();
+		return effectiveScopeState(
+			this.settings.scopeState,
+			active?.extension === 'md' ? active.path : undefined,
+		);
+	}
+
+	// A renamed note or folder takes the scope anchor with it. Without this
+	// the hub stayed scoped to the old path, which has no comments, until
+	// another note was opened.
+	private rekeyScopeOnRename(oldPath: string, newPath: string): void {
+		const state = this.settings.scopeState;
+		const next = rekeyScopeAnchor(state.anchorPath, oldPath, newPath);
+		if (next === undefined) return;
+		state.anchorPath = next;
+		void this.saveSettings();
+		this.events.trigger('scope-changed');
 	}
 
 	async setScopeShape(shape: ScopeShape, anchorPath: string): Promise<void> {
@@ -1768,6 +1794,9 @@ export default class AnnotecaPlugin extends Plugin {
 	}
 
 	async togglePinScope(): Promise<void> {
+		// Pin what the hub is showing, not a stale stored anchor, or pinning
+		// would lock the scope to a note the user has already left.
+		this.settings.scopeState = { ...this.getScopeState() };
 		this.settings.scopeState.pinned = !this.settings.scopeState.pinned;
 		await this.saveSettings();
 		this.events.trigger('scope-changed');
@@ -1785,7 +1814,7 @@ export default class AnnotecaPlugin extends Plugin {
 	// folder scope, prefix-matches against vault paths. For vault scope,
 	// returns every markdown file.
 	computeScopeFiles(): Set<string> {
-		const state = this.settings.scopeState;
+		const state = this.getScopeState();
 
 		// Single-file scope falls back to the active file when no anchor is
 		// stored. Resolve that here so the pure dispatch sees a concrete path.

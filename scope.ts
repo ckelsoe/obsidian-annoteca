@@ -3,7 +3,7 @@
 // Obsidian dependency — main.ts adapts the live workspace into ScopeFile
 // records, then delegates here. Kept pure so the dispatch is unit-testable.
 
-import type { ScopeShape } from './types';
+import type { ScopeShape, ScopeState } from './types';
 
 export interface ScopeFile {
 	path: string;
@@ -73,4 +73,34 @@ export function computeScopeFileSet(
 			return out;
 		}
 	}
+}
+
+// The scope the hub should actually use. An unpinned single-file scope means
+// "the note I am in", so it resolves to the active file whatever anchor is
+// stored. The stored anchor can be stale: renaming the note, or anything else
+// that moves the active file without a file-open event, left the hub scoped to
+// a path with no comments and showing "No comments match this scope".
+export function effectiveScopeState(
+	state: ScopeState,
+	activePath: string | undefined,
+): ScopeState {
+	if (state.pinned || state.shape.kind !== 'file') return state;
+	if (activePath === undefined || activePath === state.anchorPath)
+		return state;
+	return { ...state, anchorPath: activePath };
+}
+
+// Where a scope anchor points after `oldPath` was renamed to `newPath`, or
+// undefined when the rename does not touch it. A folder rename moves every
+// anchor inside it.
+export function rekeyScopeAnchor(
+	anchor: string,
+	oldPath: string,
+	newPath: string,
+): string | undefined {
+	if (anchor === '' || oldPath === '') return undefined;
+	if (anchor === oldPath) return newPath;
+	if (anchor.startsWith(oldPath + '/'))
+		return newPath + anchor.slice(oldPath.length);
+	return undefined;
 }
