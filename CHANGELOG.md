@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.19.0] - 2026-09-24
+
 ### Fixed
 - Notes saved with Windows (CRLF) or old Mac (CR) line endings kept their endings only in part. Resolve, reply, accept, reject, delete, end-of-file storage updates and comment conversion wrote their new lines with plain LF endings, so the note ended up with mixed line endings. Every write now uses the ending of the line it lands in and leaves the rest of the file byte for byte as it was.
 - "Delete all resolved comments" left a blank line where a comment had stood on its own line in a CRLF note.
