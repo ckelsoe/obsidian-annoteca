@@ -8,7 +8,7 @@ import {
 	markerDamageMessage,
 	VANISHED_MESSAGE,
 } from '../comment-service';
-import { parseAll, serializeLeanMarker } from '../parser';
+import { parseAll, serializeLeanMarker, toEditorText } from '../parser';
 import type { PromoteRequest } from '../types';
 import { convertAllComments } from '../imports';
 import {
@@ -491,6 +491,171 @@ describe('#12: actions build from current file state, not a cached snapshot', ()
 		const c = firstComment(h.content);
 		expect(c.resolution?.author).toBe('charles');
 		expect(c.replies.map((r) => r.body)).toEqual(['the first one']);
+	});
+
+	// The index holds editor offsets, but a closed note is read raw. On a CRLF
+	// note the two differ for any marker after a line break, and an id-less
+	// marker is found only by its offsets.
+	it('resolves an id-less marker in a CRLF note from the index snapshot', async () => {
+		const raw = `Intro line.\r\n\r\n${IDLESS.replace(/\n/g, '\r\n')}`;
+		const h = makeHarnessWith(raw);
+		const snapshot = firstComment(toEditorText(raw));
+
+		await h.service.resolveComment('note.md', snapshot);
+
+		const c = firstComment(h.content);
+		expect(c.resolution?.author).toBe('charles');
+		expect(h.content.startsWith('Intro line.\r\n\r\n<!-- annoteca/')).toBe(
+			true,
+		);
+	});
+
+	// A lone-CR note: the raw parser reads its field lines as body text, so
+	// the write must take the fields from the editor-text parse.
+	it('resolves an id-less marker in a lone-CR note with its fields intact', async () => {
+		const raw = `Intro line.\r\r${IDLESS.replace(/\n/g, '\r')}`;
+		const h = makeHarnessWith(raw);
+		const snapshot = firstComment(toEditorText(raw));
+
+		await h.service.resolveComment('note.md', snapshot);
+
+		const c = firstComment(toEditorText(h.content));
+		expect(c.body).toBe('which products?');
+		expect(c.replies.map((r) => r.body)).toEqual(['the first one']);
+		expect(c.resolution?.author).toBe('charles');
+	});
+
+	// The raw parse keeps a trailing \r on every field line of a CRLF note;
+	// written back, it became a trailing space on the reply.
+	it('keeps reply text exact when resolving in a CRLF note', async () => {
+		const raw = [
+			'Intro line.',
+			'',
+			'<!-- annoteca/clarify: which products?',
+			'[id=crlf0001]',
+			'[reply bob 2026-06-20]: hi',
+			'-->',
+		].join('\r\n');
+		const h = makeHarnessWith(raw);
+		const snapshot = firstComment(toEditorText(raw));
+
+		await h.service.resolveComment('note.md', snapshot);
+
+		const c = firstComment(toEditorText(h.content));
+		expect(c.resolution?.author).toBe('charles');
+		expect(c.replies.map((r) => r.body)).toEqual(['hi']);
+		expect(h.content).not.toContain('hi \n');
+		expect(h.content.startsWith('Intro line.\r\n\r\n<!-- annoteca/')).toBe(
+			true,
+		);
+	});
+
+	// Reject writes the original fence back into the prose, so on a CRLF note
+	// it must carry the note's own line endings through a reply and back out.
+	it('keeps a multiline CRLF original verbatim through a reply and Reject', async () => {
+		const raw = [
+			'Intro.',
+			'',
+			'<!-- annoteca/clarify: tighten this',
+			'[id=crlf0002]',
+			'[addressed claude 2026-06-20]: rewrote it',
+			'````annoteca-original',
+			'Old line one.',
+			'Old line two.',
+			'````',
+			'--> New text.',
+		].join('\r\n');
+		const h = makeHarnessWith(raw);
+
+		await h.service.appendReply(
+			'note.md',
+			firstComment(toEditorText(h.content)),
+			{ author: 'charles', date: '2026-06-22', body: 'ok' },
+		);
+		await h.service.rejectAddressed(
+			'note.md',
+			firstComment(toEditorText(h.content)),
+		);
+
+		expect(h.content).toContain('--> Old line one.\r\nOld line two.');
+		expect(firstComment(toEditorText(h.content)).addressed).toBeUndefined();
+	});
+
+	// Same through a lone-CR note, where the raw parse sees no fields at all.
+	it('keeps a multiline lone-CR original through Reject', async () => {
+		const raw = [
+			'Intro.',
+			'',
+			'<!-- annoteca/clarify: tighten this',
+			'[id=cr000003]',
+			'[addressed claude 2026-06-20]: rewrote it',
+			'````annoteca-original',
+			'Old line one.',
+			'Old line two.',
+			'````',
+			'--> New text.',
+			'Following line stays.',
+		].join('\r');
+		const h = makeHarnessWith(raw);
+
+		await h.service.rejectAddressed(
+			'note.md',
+			firstComment(toEditorText(h.content)),
+		);
+
+		expect(h.content).toContain(
+			'--> Old line one.\rOld line two.\rFollowing line stays.',
+		);
+		expect(firstComment(toEditorText(h.content)).addressed).toBeUndefined();
+	});
+
+	// A note with LF lines elsewhere and a CR-only marker: the marker's own
+	// line breaks decide, and Reject stops at the CR ending its line.
+	it('keeps a lone-CR original in a note with mixed line endings', async () => {
+		const marker = [
+			'<!-- annoteca/clarify: tighten this',
+			'[id=mixd0001]',
+			'[addressed claude 2026-06-20]: rewrote it',
+			'````annoteca-original',
+			'Old line one.',
+			'Old line two.',
+			'````',
+			'--> New text.',
+		].join('\r');
+		const raw = `Intro.\n\n${marker}\rAfter.\nLast.\n`;
+		const h = makeHarnessWith(raw);
+
+		await h.service.rejectAddressed(
+			'note.md',
+			firstComment(toEditorText(h.content)),
+		);
+
+		expect(h.content).toContain(
+			'--> Old line one.\rOld line two.\rAfter.\nLast.\n',
+		);
+		expect(h.content.startsWith('Intro.\n\n<!-- annoteca/')).toBe(true);
+	});
+
+	// On a CRLF note Reject keeps the \r that ends the replaced line.
+	it('keeps the CRLF ending of the line Reject replaces', async () => {
+		const raw = [
+			'<!-- annoteca/clarify: tighten this',
+			'[id=crlf0004]',
+			'[addressed claude 2026-06-20]: rewrote it',
+			'````annoteca-original',
+			'Old text.',
+			'````',
+			'--> New text.',
+			'Next line.',
+		].join('\r\n');
+		const h = makeHarnessWith(raw);
+
+		await h.service.rejectAddressed(
+			'note.md',
+			firstComment(toEditorText(h.content)),
+		);
+
+		expect(h.content).toContain('--> Old text.\r\nNext line.');
 	});
 
 	it('refuses an id-less marker whose body changed underneath', async () => {

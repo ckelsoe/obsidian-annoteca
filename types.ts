@@ -28,8 +28,8 @@ export interface Addressed {
 }
 
 export interface MarkerRange {
-	start: number; // byte offset of leading `<` of `<!--`
-	end: number; // byte offset one past the trailing `>` of `-->`
+	start: number; // offset of leading `<` of `<!--` in the parsed text (editor text in the index)
+	end: number; // offset one past the trailing `>` of `-->`
 }
 
 export interface AnchorText {

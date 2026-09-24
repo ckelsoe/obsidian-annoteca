@@ -39,6 +39,12 @@ export function detectDrift(
 	path: string,
 	comments: Comment[],
 	priorSnapshots: Record<string, PositionSnapshot>,
+	// The same note as raw file text, when it differs from `content` (Windows
+	// line endings). Snapshots were once captured from raw text at raw
+	// offsets, and on a CRLF note that window covers different characters. A
+	// baseline that still matches the raw capture is that older basis, not
+	// drift: it is refreshed without a finding.
+	legacy?: { content: string; comments: Comment[] },
 ): {
 	findings: DriftFinding[];
 	refreshedSnapshots: Record<string, PositionSnapshot>;
@@ -51,8 +57,8 @@ export function detectDrift(
 		const prev = priorSnapshots[c.id];
 		if (prev) {
 			if (
-				prev.before !== current.before ||
-				prev.after !== current.after
+				!sameSnapshot(prev, current) &&
+				!matchesLegacyBasis(prev, c.id, legacy)
 			) {
 				findings.push({ path, comment: c, prev, current });
 			}
@@ -60,4 +66,21 @@ export function detectDrift(
 		refreshed[c.id] = current;
 	}
 	return { findings, refreshedSnapshots: refreshed };
+}
+
+function sameSnapshot(a: PositionSnapshot, b: PositionSnapshot): boolean {
+	return a.before === b.before && a.after === b.after;
+}
+
+function matchesLegacyBasis(
+	prev: PositionSnapshot,
+	id: string,
+	legacy: { content: string; comments: Comment[] } | undefined,
+): boolean {
+	if (!legacy) return false;
+	const old = legacy.comments.find((c) => c.id === id);
+	return (
+		old !== undefined &&
+		sameSnapshot(prev, captureSnapshot(legacy.content, old))
+	);
 }

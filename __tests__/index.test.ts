@@ -1,5 +1,5 @@
 import { CommentIndex } from '../index';
-import { serializeLeanMarker } from '../parser';
+import { serializeLeanMarker, toEditorText } from '../parser';
 import { writeStoreRegion, type StoredComment } from '../store';
 
 describe('CommentIndex', () => {
@@ -194,5 +194,28 @@ describe('CommentIndex reads eof-mode storage', () => {
 		);
 		expect(built.comments).toHaveLength(1);
 		expect(built.comments[0]?.body).toBe('sounds off');
+	});
+
+	// A note saved with Windows line endings reaches rebuild as CRLF from the
+	// vault and as LF from the editor. The hub keys its selection on
+	// marker.start from the editor, so both must give editor offsets.
+	it('indexes CRLF content at the same offsets as the editor buffer', () => {
+		const LF =
+			'A.<!-- annoteca/tone: one\n[id=aaaa1111]\n-->\n\nB.<!-- annoteca/cut: two\n[id=bbbb2222]\n-->\n';
+		const idx = new CommentIndex();
+		const fromDisk = idx.rebuild('win.md', LF.replace(/\n/g, '\r\n'));
+		const diskStarts = fromDisk.comments.map((c) => c.marker.start);
+		const fromEditor = idx.rebuild('win.md', LF);
+		expect(diskStarts).toEqual(
+			fromEditor.comments.map((c) => c.marker.start),
+		);
+		expect(fromEditor.comments[1]?.marker.start).toBe(
+			LF.indexOf('<!-- annoteca/cut'),
+		);
+	});
+
+	it('toEditorText maps CRLF and lone CR to LF like CodeMirror', () => {
+		expect(toEditorText('a\r\nb\rc\nd')).toBe('a\nb\nc\nd');
+		expect(toEditorText('plain\ntext')).toBe('plain\ntext');
 	});
 });

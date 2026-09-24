@@ -14,7 +14,8 @@ import {
 	type ConflictFinding,
 } from './diagnostics';
 import { detectDrift, type DriftFinding, type PositionSnapshot } from './drift';
-import { todayISO } from './parser';
+import { todayISO, toEditorText } from './parser';
+import { parseDocument } from './document';
 
 export class DiagnosticsService {
 	constructor(private readonly plugin: AnnotecaPlugin) {}
@@ -155,14 +156,22 @@ export class DiagnosticsService {
 			// one: an open note with unsaved typing would have its markers sliced
 			// at buffer offsets out of cached text, inventing a drift finding and
 			// persisting the bad baseline it computed from it.
-			const content = await this.plugin.comments.currentContentFor(
-				f.path,
-				f,
-			);
+			// Normalized the way the index normalized it, so the offsets line up
+			// on a note saved with Windows line endings.
+			const raw = await this.plugin.comments.currentContentFor(f.path, f);
+			const content = toEditorText(raw);
 			const idx = this.plugin.commentIndex.get(f.path);
 			const comments = idx?.comments ?? [];
 			for (const c of comments) if (c.id) liveIds.add(c.id);
-			const r = detectDrift(content, f.path, comments, refreshed);
+			const r = detectDrift(
+				content,
+				f.path,
+				comments,
+				refreshed,
+				raw === content
+					? undefined
+					: { content: raw, comments: parseDocument(raw).comments },
+			);
 			refreshed = r.refreshedSnapshots;
 			allFindings.push(...r.findings);
 		}

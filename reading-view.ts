@@ -6,6 +6,7 @@
 
 import type AnnotecaPlugin from './main';
 import { parseDocument } from './document';
+import { toEditorText } from './parser';
 import type { Comment } from './types';
 
 export interface ThreadCounts {
@@ -70,12 +71,15 @@ export function registerReadingViewIndicator(plugin: AnnotecaPlugin): void {
 		// and the note-level banner totals. parseDocument, not parseAll: an eof
 		// comment's resolution lives in the store, so a lean marker read alone
 		// always looks open and the indicator counts would be wrong.
-		const all = parseDocument(info.text).comments;
+		// Editor offsets, like the index: a click here hands the comment to the
+		// hub, which keys its selection on marker.start.
+		const text = toEditorText(info.text);
+		const all = parseDocument(text).comments;
 		if (all.length === 0) {
 			return;
 		}
-		const sectionStart = offsetOfLine(info.text, info.lineStart);
-		const sectionEnd = offsetOfLine(info.text, info.lineEnd + 1);
+		const sectionStart = offsetOfLine(text, info.lineStart);
+		const sectionEnd = offsetOfLine(text, info.lineEnd + 1);
 		const inSection = all.filter(
 			(c) =>
 				c.marker.start >= sectionStart && c.marker.start < sectionEnd,
