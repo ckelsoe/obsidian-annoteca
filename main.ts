@@ -1127,8 +1127,8 @@ export default class AnnotecaPlugin extends Plugin {
 			// only in front of operations that DELETE persisted state on the
 			// strength of what the index holds, so an open note's unsaved buffer
 			// is the reading that must win if the two ever disagree.
-			const content = await this.comments.currentContentFor(f.path, f);
-			this.commentIndex.rebuild(f.path, content);
+			const { text } = await this.comments.currentNoteText(f.path, f);
+			this.commentIndex.rebuild(f.path, text);
 			added = true;
 		}
 		if (added) this.events.trigger('index-changed');
@@ -1230,8 +1230,8 @@ export default class AnnotecaPlugin extends Plugin {
 			// untouched, so the stale selection stayed valid and the hub never
 			// self-corrected. currentContentFor reads the open editor's buffer
 			// whether or not that editor is the active view.
-			const content = await this.comments.currentContentFor(path, file);
-			this.commentIndex.rebuild(path, content);
+			const { text } = await this.comments.currentNoteText(path, file);
+			this.commentIndex.rebuild(path, text);
 		}
 		this.events.trigger('index-changed', { path });
 		this.events.trigger('active-comment-changed', {
@@ -2380,8 +2380,8 @@ export default class AnnotecaPlugin extends Plugin {
 			// on the cache skipped a comment the user had just typed. This is
 			// still only a filter; the count that reaches the notice is recomputed
 			// inside the write, from the bytes actually written.
-			const source = await this.comments.currentContentFor(f.path, f);
-			if (convert(source).converted === 0) continue;
+			const { text } = await this.comments.currentNoteText(f.path, f);
+			if (convert(text).converted === 0) continue;
 			const converted = await this.comments.convertFileComments(
 				f.path,
 				f,

@@ -199,7 +199,7 @@ const created = await api.promote(
 			sourceKey: stableKeyForThisFinding,
 		},
 	],
-	expected, // the note content the anchors were computed against
+	expected, // the note's editor text the anchors were computed against
 );
 ```
 
@@ -211,6 +211,10 @@ Notes on `promote`:
   second marker, so re-running over a note you already commented on is safe.
 - Budget-gated. Above the user's promotion budget (default 10 in one call) the user is
   asked first, with the count and note named. A refusal returns an empty array.
+- `expected` is editor text, where a line break is one character. On a note saved with
+  Windows (CRLF) line endings the file's raw bytes are not the same text, and passing them
+  gets an empty array. Use the editor's value, or the vault's bytes with every `\r\n` and
+  lone `\r` turned into `\n`.
 - `expected` guards against a stale write. If the note moved on since you read it, the
   call returns an empty array rather than placing a marker in the wrong prose. Re-read
   and call again. A returned `CreatedComment` is the only proof a comment was written.

@@ -24,6 +24,7 @@ import { MarkdownView, TFile } from 'obsidian';
 import AnnotecaPlugin from '../main';
 import { CommentIndex } from '../index';
 import { serialize } from '../parser';
+import { noteText } from '../note-text';
 import { DEFAULT_SETTINGS } from '../settings';
 import type { Comment } from '../types';
 
@@ -174,7 +175,7 @@ function makePlugin(
 		settings: { ...DEFAULT_SETTINGS, markerScrollAlign: 'center' },
 		events: { trigger: () => undefined },
 		comments: {
-			currentContentFor: (p: string) => {
+			currentNoteText: (p: string) => {
 				// "What a write would see": the open editor's buffer if there
 				// is one, the vault otherwise. Mirrors CommentService.
 				const leaf = leaves.find(
@@ -182,9 +183,11 @@ function makePlugin(
 				);
 				const buffered = leaf?.view.editor.getValue();
 				return Promise.resolve(
-					buffered !== undefined && buffered !== ''
-						? buffered
-						: (files[p] ?? ''),
+					noteText(
+						buffered !== undefined && buffered !== ''
+							? buffered
+							: (files[p] ?? ''),
+					),
 				);
 			},
 		},

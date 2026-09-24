@@ -1,5 +1,6 @@
 import { CommentIndex } from '../index';
-import { serializeLeanMarker, toEditorText } from '../parser';
+import { serializeLeanMarker } from '../parser';
+import { toEditorText } from '../note-text';
 import { writeStoreRegion, type StoredComment } from '../store';
 
 describe('CommentIndex', () => {

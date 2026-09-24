@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Notes saved with Windows (CRLF) or old Mac (CR) line endings kept their endings only in part. Resolve, reply, accept, reject, delete, end-of-file storage updates and comment conversion wrote their new lines with plain LF endings, so the note ended up with mixed line endings. Every write now uses the ending of the line it lands in and leaves the rest of the file byte for byte as it was.
+- "Delete all resolved comments" left a blank line where a comment had stood on its own line in a CRLF note.
+- Adding a comment through the API, or from a Plumbline finding in the hub, was refused on a closed CRLF note.
+- Diagnostics reports read CRLF and CR notes in the same coordinates as the editor, so their offsets match the note you see.
+
+### Changed
+- API: `promote` takes the note's editor text as `expected`, where a line break is one character. On a CRLF note, passing the file's raw bytes now returns an empty array instead of placing markers at raw offsets. The API reference says how to get editor text from the vault.
+
 ## [1.18.1] - 2026-09-24
 
 ### Fixed

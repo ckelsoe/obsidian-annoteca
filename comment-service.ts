@@ -32,7 +32,6 @@ import { ConfirmPromotionModal } from './confirm-modal';
 import {
 	findRemovalBlocker,
 	parseAll,
-	toEditorText,
 	serialize,
 	serializeLeanMarker,
 	nowISO,
@@ -59,6 +58,7 @@ import {
 	type SpliceRange,
 	type StoredComment,
 } from './store';
+import { noteText, spliceRaw, type NoteText } from './note-text';
 
 // What a lifecycle write actually did. Three outcomes rather than a boolean,
 // because the caller's message differs: "declined" means the transition looked
@@ -147,7 +147,7 @@ function forbiddenRanges(content: string): { start: number; end: number }[] {
 	}
 	// Frontmatter, only when the document opens with it. A `---` fence anywhere
 	// else is a horizontal rule and is ordinary prose.
-	const fm = /^---\r?\n[\s\S]*?\r?\n---[ \t]*(\r?\n|$)/.exec(content);
+	const fm = /^---\n[\s\S]*?\n---[ \t]*(\n|$)/.exec(content);
 	if (fm) out.push({ start: 0, end: fm[0].length });
 	return out;
 }
@@ -285,7 +285,8 @@ export class CommentService {
 			this.noticeFileGone(path);
 			return 'missing';
 		}
-		const content = await this.readCurrentContent(file, path);
+		const note = await this.readNoteText(file, path);
+		const content = note.text;
 		// Removing a range is the least forgiving thing this service does, so a
 		// marker it cannot identify aborts rather than deleting whatever now
 		// occupies the cached offsets.
@@ -305,7 +306,7 @@ export class CommentService {
 		// with "Already resolved." about a comment that is still open.
 		if (this.refusesForDamage(content, [current.marker])) return 'blocked';
 		const splices = this.buildRemovalSplices(content, current, eof);
-		const wrote = await this.applySplices(path, file, splices, content);
+		const wrote = await this.applySplices(path, file, splices, note);
 		if (!wrote) return 'missing';
 		new Notice('Resolved and removed.');
 		return 'written';
@@ -351,7 +352,8 @@ export class CommentService {
 			this.noticeFileGone(path);
 			return;
 		}
-		const content = await this.readCurrentContent(file, path);
+		const note = await this.readNoteText(file, path);
+		const content = note.text;
 		const current = this.resolveFresh(content, comment);
 		if (!current) {
 			return;
@@ -361,7 +363,7 @@ export class CommentService {
 		// buildRemovalSplices returns both edits (and just the marker inline).
 		const eof = resolveEofTarget(content, current);
 		const splices = this.buildRemovalSplices(content, current, eof);
-		const wrote = await this.applySplices(path, file, splices, content);
+		const wrote = await this.applySplices(path, file, splices, note);
 		if (!wrote) return;
 		new Notice('Deleted.');
 	}
@@ -563,7 +565,8 @@ export class CommentService {
 			this.noticeFileGone(path);
 			return;
 		}
-		const content = await this.readCurrentContent(file, path);
+		const note = await this.readNoteText(file, path);
+		const content = note.text;
 
 		// This method splices directly instead of going through replaceMarker,
 		// so it re-resolves the marker itself. Reject is the only action that
@@ -646,21 +649,16 @@ export class CommentService {
 			insert: currentAddressed.original,
 		});
 
-		const wrote = await this.applySplices(path, file, splices, content);
+		const wrote = await this.applySplices(path, file, splices, note);
 		if (!wrote) return;
 		new Notice('Reverted to the original text.');
 	}
 
-	// Any line break ends the line, not only \n. Stopping at \n alone ran a
-	// lone-CR note's Reject splice to the end of the note, and on a CRLF note
-	// took the \r with it.
+	// `content` is editor text, where every line break is \n. The write maps the
+	// end back to the start of whatever break the file stores there.
 	private endOfLine(content: string, from: number): number {
 		const lf = content.indexOf('\n', from);
-		const cr = content.indexOf('\r', from);
-		if (lf === -1 && cr === -1) return content.length;
-		if (lf === -1) return cr;
-		if (cr === -1) return lf;
-		return Math.min(lf, cr);
+		return lf === -1 ? content.length : lf;
 	}
 
 	// Returns the resolved comments in `path` without modifying the file.
@@ -694,7 +692,8 @@ export class CommentService {
 		if (requests.length === 0) return [];
 		const file = this.plugin.app.vault.getAbstractFileByPath(path);
 		if (!(file instanceof TFile)) return [];
-		const content = await this.readCurrentContent(file, path);
+		const note = await this.readNoteText(file, path);
+		const content = note.text;
 
 		// The anchors are offsets into the content the CONSUMER read, and this
 		// task only reaches the front of the queue some time later. Another write
@@ -840,7 +839,7 @@ export class CommentService {
 			);
 			if (storeSplice) splices.push(storeSplice);
 		}
-		const wrote = await this.applySplices(path, file, splices, content);
+		const wrote = await this.applySplices(path, file, splices, note);
 		// Honoured, not assumed. applySplices refuses on a stale read, and a
 		// caller told it created comments that are not in the file would record
 		// them as promoted and never retry.
@@ -867,7 +866,8 @@ export class CommentService {
 	async listResolvedInFile(path: string): Promise<Comment[]> {
 		const file = this.plugin.app.vault.getAbstractFileByPath(path);
 		if (!(file instanceof TFile)) return [];
-		const content = await this.readCurrentContent(file, path);
+		const note = await this.readNoteText(file, path);
+		const content = note.text;
 		// parseDocument, not parseAll: an eof comment's resolution lives in its
 		// store entry, so a lean marker read on its own always looks open. A file
 		// with no store entries parses identically here, so inline notes are
@@ -905,7 +905,8 @@ export class CommentService {
 			this.noticeFileGone(path);
 			return null;
 		}
-		const content = await this.readCurrentContent(file, path);
+		const note = await this.readNoteText(file, path);
+		const content = note.text;
 		// parseDocument, not parseAll: an eof comment carries its resolution in the
 		// store, so a lean marker read alone never looks resolved. Inline notes
 		// (no store entries) parse identically, so their behaviour is unchanged.
@@ -964,7 +965,7 @@ export class CommentService {
 			if (storeSplice) splices.push(storeSplice);
 		}
 
-		const wrote = await this.applySplices(path, file, splices, content);
+		const wrote = await this.applySplices(path, file, splices, note);
 		// null, matching the file-is-gone case: the service has already said
 		// what happened, and a count here would claim a deletion that did not
 		// happen.
@@ -1012,7 +1013,8 @@ export class CommentService {
 			this.noticeFileGone(path);
 			return 'missing';
 		}
-		const content = await this.readCurrentContent(file, path);
+		const note = await this.readNoteText(file, path);
+		const content = note.text;
 		const current = this.resolveFresh(content, prev);
 		if (!current) return 'missing';
 
@@ -1034,12 +1036,7 @@ export class CommentService {
 			// A transition whose store bytes did not change is already persisted;
 			// report success rather than a phantom refusal.
 			if (!splice) return 'written';
-			const wrote = await this.applySplices(
-				path,
-				file,
-				[splice],
-				content,
-			);
+			const wrote = await this.applySplices(path, file, [splice], note);
 			return wrote ? 'written' : 'missing';
 		}
 
@@ -1068,7 +1065,7 @@ export class CommentService {
 					insert: serialized,
 				},
 			],
-			content,
+			note,
 		);
 		// 'missing' rather than 'written': applySplices has already narrated the
 		// refusal, and 'missing' is the outcome that makes appendReply return
@@ -1108,8 +1105,8 @@ export class CommentService {
 	// sweep that pre-filtered on it skipped the note a comment had just been
 	// typed into and reported that there had been nothing to convert. Bulk
 	// convert visits each file once, so there is no later pass to catch it.
-	async currentContentFor(path: string, file: TFile): Promise<string> {
-		return this.contentFor(path, file, (f) =>
+	async currentNoteText(path: string, file: TFile): Promise<NoteText> {
+		return this.noteTextFor(path, file, (f) =>
 			this.plugin.app.vault.cachedRead(f),
 		);
 	}
@@ -1155,10 +1152,19 @@ export class CommentService {
 		// when there is nothing to convert matters: the caller pre-filters off the
 		// cache, but the cache can be stale, and rewriting identical bytes would
 		// touch mtime on the file and hand every sync client a spurious change.
+		//
+		// Converted as editor text, the same text the open-note branch above
+		// converts, and written back as the one span that changed, in the
+		// ending of the line it starts on. Bytes outside that span keep theirs.
 		const updated = await this.plugin.app.vault.process(file, (current) => {
-			const result = convert(current);
+			const note = noteText(current);
+			const result = convert(note.text);
 			converted = result.converted;
-			return result.converted === 0 ? current : result.updated;
+			const splice =
+				result.converted === 0
+					? undefined
+					: diffToSplice(note.text, result.updated);
+			return splice ? spliceRaw(note, [splice]) : current;
 		});
 		if (converted === 0) return 0;
 		this.plugin.commentIndex.rebuild(path, updated);
@@ -1198,21 +1204,25 @@ export class CommentService {
 	// is open in an editor, the editor's value is the truth (it may have unsaved
 	// typing the user expects to keep). Otherwise it comes from the vault, and
 	// WHICH vault read is the only thing the two callers below disagree about.
-	private async contentFor(
+	//
+	// Either way it comes back as a NoteText, and every offset this service
+	// computes is into its `text`, which is what the editor, the index and the
+	// hub all count in.
+	private async noteTextFor(
 		path: string,
 		file: TFile,
 		read: (f: TFile) => Promise<string>,
-	): Promise<string> {
+	): Promise<NoteText> {
 		const view = this.getOpenMarkdownView(path);
-		if (view) return view.editor.getValue();
-		return read(file);
+		if (view) return noteText(view.editor.getValue());
+		return noteText(await read(file));
 	}
 
 	// Read the truth that a subsequent write must reconcile with, which is worth
 	// a fresh read: applySplices compares against it and refuses on a mismatch,
 	// so a cached copy would turn an ordinary write into a spurious refusal.
-	private readCurrentContent(file: TFile, path: string): Promise<string> {
-		return this.contentFor(path, file, (f) =>
+	private readNoteText(file: TFile, path: string): Promise<NoteText> {
+		return this.noteTextFor(path, file, (f) =>
 			this.plugin.app.vault.read(f),
 		);
 	}
@@ -1240,46 +1250,14 @@ export class CommentService {
 	// This is the predicate rejectAddressed worked out across four review rounds
 	// in PR A; it is shared now rather than written twice.
 	private freshComment(content: string, comment: Comment): FreshLookup {
-		// Two coordinate systems meet here. The caller's comment came from the
-		// index, which holds editor text (line breaks normalized), while a
-		// closed note's content is its raw bytes, and the splices that follow
-		// are applied to those bytes. So every field is read from the editor
-		// text, where the raw parser would leave a trailing \r on each line of
-		// a CRLF note and a write would turn it into a space, and only the
-		// marker's range comes from the raw parse. The marker span is found the
-		// same way whatever the line breaks are, so the two parses list the
-		// same markers in the same order.
-		const raw = parseAll(content);
-		const normalized = toEditorText(content);
-		const parsed = normalized === content ? raw : parseAll(normalized);
-		if (parsed.length !== raw.length) return { kind: 'missing' };
-		const inRaw = (i: number): FreshLookup => {
+		// `content` is editor text, the same text the caller's comment was
+		// parsed from, so offsets and fields compare directly.
+		const parsed = parseAll(content);
+		const found = (i: number): FreshLookup => {
 			const c = parsed[i];
-			const r = raw[i];
-			if (c === undefined || r === undefined) return { kind: 'missing' };
-			if (c === r) return { kind: 'found', comment: c };
-			// The one field that must stay raw: the original fence is the text
-			// Reject writes back, so it keeps the marker's own line endings. The
-			// raw parse has it on a CRLF marker. On a lone-CR marker it has no
-			// fields at all (it splits lines on \n only), so the normalized copy
-			// is put back into \r. Judged by the marker's text, not the note's,
-			// so a note with mixed line endings gets the marker's.
-			const markerText = content.slice(r.marker.start, r.marker.end);
-			const loneCr =
-				markerText.includes('\r') && !markerText.includes('\n');
-			const original =
-				r.addressed?.original ??
-				(loneCr
-					? c.addressed?.original?.replace(/\n/g, '\r')
-					: c.addressed?.original);
-			const addressed =
-				c.addressed && original !== undefined
-					? { ...c.addressed, original }
-					: c.addressed;
-			return {
-				kind: 'found',
-				comment: { ...c, addressed, marker: r.marker },
-			};
+			return c === undefined
+				? { kind: 'missing' }
+				: { kind: 'found', comment: c };
 		};
 		if (comment.id !== undefined) {
 			// Exactly one, or refuse. Ids live in file text, so copy-pasting a
@@ -1297,7 +1275,7 @@ export class CommentService {
 				if (c.id === comment.id) matches.push(i);
 			});
 			const only = matches[0];
-			if (matches.length === 1 && only !== undefined) return inRaw(only);
+			if (matches.length === 1 && only !== undefined) return found(only);
 			return matches.length > 1
 				? { kind: 'ambiguous', id: comment.id }
 				: { kind: 'missing' };
@@ -1309,7 +1287,7 @@ export class CommentService {
 				c.category === comment.category &&
 				c.body === comment.body,
 		);
-		return i < 0 ? { kind: 'missing' } : inRaw(i);
+		return i < 0 ? { kind: 'missing' } : found(i);
 	}
 
 	// Look the marker up and narrate the failure, so the four write paths do not
@@ -1434,8 +1412,11 @@ export class CommentService {
 	// avoids autosave clobber) and falling back to the vault otherwise.
 	// Always rebuilds the index and fires "index-changed" after the write.
 	//
-	// `expected` is the EXACT content the caller computed its offsets against,
-	// and this refuses to write when the file no longer matches it.
+	// `expected` is the note the caller computed its offsets against, and this
+	// refuses to write when the file's text no longer matches its `text`. The
+	// splices are in editor offsets. An open note takes them as they are; a
+	// closed one has them mapped into its stored bytes by spliceRaw, which also
+	// writes inserted line breaks in the ending of the line they land in.
 	//
 	// It used to read the file a SECOND time here and apply the caller's offsets
 	// to whatever came back. Every verb therefore had a window between its own
@@ -1458,7 +1439,7 @@ export class CommentService {
 		path: string,
 		file: TFile,
 		splices: SpliceRange[],
-		expected: string,
+		expected: NoteText,
 	): Promise<boolean> {
 		if (splices.length === 0) return false;
 
@@ -1485,25 +1466,17 @@ export class CommentService {
 			}
 		}
 
-		const spliced = (source: string): string => {
-			let out = source;
-			for (let i = sorted.length - 1; i >= 0; i--) {
-				const s = sorted[i];
-				if (!s) continue;
-				out = out.slice(0, s.from) + s.insert + out.slice(s.to);
-			}
-			return out;
-		};
-
 		const view = this.getOpenMarkdownView(path);
 		let updated: string;
 
 		if (view) {
-			if (view.editor.getValue() !== expected) {
+			// The editor's value is already editor text, so it maps to itself.
+			const current = noteText(view.editor.getValue());
+			if (current.text !== expected.text) {
 				this.noticeVanished();
 				return false;
 			}
-			updated = spliced(expected);
+			updated = spliceRaw(current, sorted);
 			// Via editor.replaceRange, the same API the edit composer uses. It
 			// keeps the CodeMirror EditorState authoritative; Obsidian persists
 			// the editor's content, so a vault write is not needed here and
@@ -1521,13 +1494,19 @@ export class CommentService {
 			// vault.process reads and writes under one lock, so nothing can land
 			// between the comparison and the write. read + modify could not
 			// promise that however carefully it compared.
+			//
+			// Compared as text, and mapped through the bytes read here rather
+			// than the caller's copy. A file whose line endings alone changed
+			// in between still reads the same, and its own bytes are the ones
+			// the offsets have to land in.
 			let stale = false;
-			updated = await this.plugin.app.vault.process(file, (current) => {
-				if (current !== expected) {
+			updated = await this.plugin.app.vault.process(file, (raw) => {
+				const current = noteText(raw);
+				if (current.text !== expected.text) {
 					stale = true;
-					return current;
+					return raw;
 				}
-				return spliced(current);
+				return spliceRaw(current, sorted);
 			});
 			if (stale) {
 				this.noticeVanished();

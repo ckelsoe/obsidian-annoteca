@@ -75,7 +75,10 @@ export interface ApiFilter {
 }
 
 // One comment a consumer asks Annoteca to create. Offsets are into the note's
-// CURRENT content, the same text passed to anchorsFor and to promote's `expected`.
+// CURRENT editor text, the same text passed to anchorsFor and to promote's
+// `expected`. A line break is one character there, even in a file saved with
+// Windows (CRLF) line endings, so pass the editor's value, or the vault's bytes
+// with every \r\n and lone \r turned into \n.
 export interface PromoteRequest {
 	category: string;
 	body: string;
@@ -118,8 +121,8 @@ export interface AnnotecaApi {
 	// delete, edit or reply, because resolution is a judgement about the writing.
 	// Idempotent on `author:sourceKey`. Above the user's promotion budget it asks
 	// first, and a refusal (or a stale `expected`) returns an empty array rather
-	// than throwing. `expected` is the note content the anchors were computed
-	// against; re-read and call again if it comes back empty.
+	// than throwing. `expected` is the note's editor text the anchors were
+	// computed against; re-read and call again if it comes back empty.
 	promote(
 		path: string,
 		requests: readonly PromoteRequest[],
