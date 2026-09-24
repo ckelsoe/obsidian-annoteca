@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- The comments pane could go blank with "No comments match this scope and filter" while the open note had comments. The pane stayed scoped to an old path after the note, or a folder above it, was renamed or moved, until you opened a different note. A renamed note or folder now takes the scope with it, and an unpinned "This file" scope always shows the note you are in.
+
 ## [1.18.0] - 2026-09-24
 
 ### Added
