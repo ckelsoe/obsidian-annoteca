@@ -1816,7 +1816,8 @@ settings:
 	overflow-wrap: anywhere;
 }
 
-.annoteca-category-name {
+.annoteca-category-name,
+.annoteca-category-default-body {
 	padding: 6px 10px;
 	background-color: var(--background-modifier-form-field, var(--background-primary));
 	border: 1px solid var(--background-modifier-border);

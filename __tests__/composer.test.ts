@@ -779,3 +779,113 @@ describe('composer: eof storage mode', () => {
 		);
 	});
 });
+
+// A category's default text stands in for an empty body on a NEW comment only.
+describe('composer: category default text', () => {
+	const NOTE = ['First paragraph.', '', 'Second paragraph.'].join('\n');
+
+	function openWith(
+		host: ReturnType<typeof makeEditor>,
+		editing?: Comment,
+	): { form: ComposerInternals; closed: () => boolean } {
+		const plugin = makePlugin();
+		plugin.settings.categories = plugin.settings.categories.map((c) =>
+			c.id === 'cut'
+				? { ...c, defaultBody: 'Remove this.' }
+				: c.id === 'source-needed'
+					? { ...c, defaultBody: 'Add a citation.' }
+					: { ...c },
+		);
+		let closed = false;
+		const request: ComposerRequest = {
+			editor: host.editor,
+			view: host.view,
+			filePath: 'note.md',
+			...(editing
+				? {
+						editing: {
+							comment: editing,
+							from: host.editor.offsetToPos(editing.marker.start),
+							to: host.editor.offsetToPos(editing.marker.end),
+						},
+					}
+				: {}),
+		};
+		const form = new ComposerForm(plugin, request, {
+			close: () => {
+				closed = true;
+			},
+		});
+		return {
+			form: form as unknown as ComposerInternals,
+			closed: () => closed,
+		};
+	}
+
+	it('saves the default text when a new comment is inserted empty', async () => {
+		const host = makeEditor(NOTE);
+		const { form, closed } = openWith(host);
+		form.state.selectedCategory = 'cut';
+		form.state.body = '   ';
+
+		await form.submit();
+
+		expect(only(host.content).body).toBe('Remove this.');
+		expect(closed()).toBe(true);
+	});
+
+	// A template category composes its detail fields around the body. With
+	// only a detail filled, the default must still become the body.
+	it('uses the default as the body of a template category', async () => {
+		const host = makeEditor(NOTE);
+		const { form } = openWith(host);
+		form.state.selectedCategory = 'source-needed';
+		(
+			form.state as unknown as { templateValues: Record<string, string> }
+		).templateValues = { citationFormat: 'APA' };
+		form.state.body = '';
+
+		await form.submit();
+
+		expect(only(host.content).body).toBe('Cite in APA: Add a citation.');
+	});
+
+	it('saves what was typed rather than the default', async () => {
+		const host = makeEditor(NOTE);
+		const { form } = openWith(host);
+		form.state.selectedCategory = 'cut';
+		form.state.body = 'Drop the whole aside.';
+
+		await form.submit();
+
+		expect(only(host.content).body).toBe('Drop the whole aside.');
+	});
+
+	it('still refuses an empty body in a category with no default', async () => {
+		const host = makeEditor(NOTE);
+		const { form, closed } = openWith(host);
+		form.state.selectedCategory = 'clarify';
+		form.state.body = '';
+
+		await form.submit();
+
+		expect(host.content).toBe(NOTE);
+		expect(noticeLog).toContain('Comment body is empty.');
+		expect(closed()).toBe(false);
+	});
+
+	it('refuses emptying an existing comment even when the category has a default', async () => {
+		const existing = [
+			'Prose.',
+			serialize({ id: 'cutx0001', category: 'cut', body: 'too long' }),
+		].join('\n');
+		const host = makeEditor(existing);
+		const { form } = openWith(host, only(existing));
+		form.state.body = '';
+
+		await form.submit();
+
+		expect(host.content).toBe(existing);
+		expect(noticeLog).toContain('Comment body is empty.');
+	});
+});

@@ -102,6 +102,10 @@ export interface CategoryDefinition {
 	icon?: string; // Obsidian icon name; falls back to category default
 	color?: string; // CSS variable name or hex; falls back to theme variable
 	tier?: AnchorTier; // anchor-underline urgency; undefined === "normal"
+	// Body saved when a new comment in this category is inserted with the body
+	// left empty, and shown as the body placeholder. Undefined: an empty body
+	// is refused, as before.
+	defaultBody?: string;
 }
 
 // Per-author / per-collaborator styling (F-274/F-275). `tag` is the author

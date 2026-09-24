@@ -228,6 +228,9 @@ function validCategory(raw: unknown): CategoryDefinition | undefined {
 	if (typeof raw.color === 'string') cat.color = raw.color;
 	const tier = oneOf('subtle', 'normal', 'strong')(raw.tier);
 	if (tier !== undefined) cat.tier = tier;
+	// Trimmed so a default of spaces cannot save a comment that looks empty.
+	if (typeof raw.defaultBody === 'string' && raw.defaultBody.trim() !== '')
+		cat.defaultBody = raw.defaultBody.trim();
 	return cat;
 }
 
@@ -1873,8 +1876,11 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			);
 			if (summaryName) summaryName.setText(v);
 			// The reorder buttons name the category too, and they are not
-			// rebuilt here either.
+			// rebuilt here either. Nor is the default-text field's label.
 			syncMoveLabels(v);
+			controls
+				.querySelector('.annoteca-category-default-body')
+				?.setAttribute('aria-label', `Default text for ${v}`);
 			void this.plugin.saveSettings();
 		});
 
@@ -1954,6 +1960,32 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		tierSelect.addEventListener('change', () => {
 			const next = tierSelect.value as 'subtle' | 'normal' | 'strong';
 			cat.tier = next === 'normal' ? undefined : next;
+			void this.plugin.saveSettings();
+		});
+
+		// Default text: saved as the body when a new comment in this category
+		// is inserted with the body left empty. Blank means no default, so an
+		// empty body is still refused.
+		const defaultWrap = controls.createDiv({
+			cls: 'annoteca-category-control',
+		});
+		defaultWrap.createDiv({
+			cls: 'annoteca-category-control-label',
+			text: 'Default text',
+		});
+		const defaultInput = defaultWrap.createEl('input', {
+			cls: 'annoteca-category-default-body',
+			attr: {
+				type: 'text',
+				value: cat.defaultBody ?? '',
+				placeholder: 'None: an empty comment is refused',
+				'aria-label': `Default text for ${cat.displayName}`,
+			},
+		});
+		defaultInput.addEventListener('input', () => {
+			const v = defaultInput.value.trim();
+			if (v === '') delete cat.defaultBody;
+			else cat.defaultBody = v;
 			void this.plugin.saveSettings();
 		});
 
