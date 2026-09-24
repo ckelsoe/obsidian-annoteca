@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.18.0] - 2026-09-24
+
 ### Added
 - Each category can have default text, set under Settings > Categories. When you insert a new comment and leave the body empty, the default is saved as the comment. The composer shows it as grey placeholder text in the body box, and it disappears as soon as you type. Categories without default text still refuse an empty body, and emptying an existing comment is still refused.
 
