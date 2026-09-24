@@ -2,11 +2,8 @@
 // Owners call rebuild(path, content) on file events; queries are read-only.
 
 import type { Comment, LocatedComment } from './types';
-import {
-	findMalformedMarkers,
-	toEditorText,
-	type MalformedMarker,
-} from './parser';
+import { findMalformedMarkers, type MalformedMarker } from './parser';
+import { toEditorText } from './note-text';
 import { parseDocument } from './document';
 
 export interface FileIndex {

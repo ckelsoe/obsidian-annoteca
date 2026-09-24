@@ -20,6 +20,7 @@ import { noticeLog } from '../__mocks__/obsidian';
 import AnnotecaPlugin from '../main';
 import { CommentIndex } from '../index';
 import { serialize } from '../parser';
+import { noteText } from '../note-text';
 
 beforeEach(() => {
 	noticeLog.length = 0;
@@ -66,8 +67,8 @@ function makeHarness(initial: Record<string, string>) {
 		events: { trigger: () => undefined },
 		// No note is open in these, so the service's answer is the vault's.
 		comments: {
-			currentContentFor: (path: string) =>
-				Promise.resolve(files.get(path) ?? ''),
+			currentNoteText: (path: string) =>
+				Promise.resolve(noteText(files.get(path) ?? '')),
 		},
 		app: {
 			vault: {
@@ -233,9 +234,9 @@ describe('runDriftCheck against a stale index', () => {
 			},
 			events: { trigger: () => undefined },
 			comments: {
-				currentContentFor: (path: string) => {
+				currentNoteText: (path: string) => {
 					reads.push(`service:${path}`);
-					return Promise.resolve(files.get(path) ?? '');
+					return Promise.resolve(noteText(files.get(path) ?? ''));
 				},
 			},
 			app: {
@@ -297,11 +298,13 @@ describe('indexUnseenFiles content source', () => {
 			// The service reaches the open note; the vault still holds the old
 			// bytes, which is what "unsaved" means.
 			comments: {
-				currentContentFor: (path: string) =>
+				currentNoteText: (path: string) =>
 					Promise.resolve(
-						path === 'unsaved.md'
-							? editorText
-							: (files.get(path) ?? ''),
+						noteText(
+							path === 'unsaved.md'
+								? editorText
+								: (files.get(path) ?? ''),
+						),
 					),
 			},
 			app: {

@@ -136,8 +136,8 @@ export interface AnnotecaApi {
 	// Returns only the comments actually written. A stale-read refusal deep in
 	// the write path returns empty too, so a consumer that records what it got
 	// back can never believe a finding was promoted when it was not.
-	// `expected` is the note content the anchors were computed against, the same
-	// text passed to anchorsFor. Promotion is queued behind any write already in
+	// `expected` is the note's editor text the anchors were computed against, the
+	// same text passed to anchorsFor. Promotion is queued behind any write already in
 	// flight for that path, so by the time it runs the note may have moved on;
 	// this refuses rather than placing markers at offsets that no longer mean
 	// what the consumer meant. A refusal returns an empty array, and re-reading

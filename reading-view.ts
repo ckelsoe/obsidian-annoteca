@@ -6,7 +6,7 @@
 
 import type AnnotecaPlugin from './main';
 import { parseDocument } from './document';
-import { toEditorText } from './parser';
+import { toEditorText } from './note-text';
 import type { Comment } from './types';
 
 export interface ThreadCounts {

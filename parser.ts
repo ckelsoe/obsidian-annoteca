@@ -593,17 +593,6 @@ function unescapeBody(text: string): string {
 	);
 }
 
-// Offsets into a note mean editor offsets everywhere in this plugin: marker
-// clicks, the cursor, the hub's selection and navigation all come from the
-// CodeMirror buffer. CodeMirror splits on \r\n, \r and \n and joins with \n, so
-// a note saved with Windows line endings is one character shorter per line in
-// the editor than on disk. Text read from the vault must go through this before
-// its offsets are compared with the editor's, or every comment after the first
-// line break is keyed a few characters late and a marker click matches no card.
-export function toEditorText(content: string): string {
-	return content.includes('\r') ? content.replace(/\r\n?/g, '\n') : content;
-}
-
 export interface RawMarker {
 	start: number;
 	end: number;

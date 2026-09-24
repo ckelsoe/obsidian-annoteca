@@ -14,7 +14,8 @@ import {
 	type ConflictFinding,
 } from './diagnostics';
 import { detectDrift, type DriftFinding, type PositionSnapshot } from './drift';
-import { todayISO, toEditorText } from './parser';
+import { todayISO } from './parser';
+import { toEditorText } from './note-text';
 import { parseDocument } from './document';
 
 export class DiagnosticsService {
@@ -46,7 +47,11 @@ export class DiagnosticsService {
 		const findings: T[] = [];
 		const files = this.plugin.app.vault.getMarkdownFiles();
 		for (const f of files) {
-			const content = await this.plugin.app.vault.cachedRead(f);
+			// Editor text, so every offset a report carries is one the editor,
+			// the index and the hub count in, and a lone-CR note has lines.
+			const content = toEditorText(
+				await this.plugin.app.vault.cachedRead(f),
+			);
 			findings.push(...options.detect(content, f.path));
 		}
 		if (findings.length === 0) {
@@ -158,8 +163,8 @@ export class DiagnosticsService {
 			// persisting the bad baseline it computed from it.
 			// Normalized the way the index normalized it, so the offsets line up
 			// on a note saved with Windows line endings.
-			const raw = await this.plugin.comments.currentContentFor(f.path, f);
-			const content = toEditorText(raw);
+			const note = await this.plugin.comments.currentNoteText(f.path, f);
+			const content = note.text;
 			const idx = this.plugin.commentIndex.get(f.path);
 			const comments = idx?.comments ?? [];
 			for (const c of comments) if (c.id) liveIds.add(c.id);
@@ -168,9 +173,12 @@ export class DiagnosticsService {
 				f.path,
 				comments,
 				refreshed,
-				raw === content
+				note.raw === content
 					? undefined
-					: { content: raw, comments: parseDocument(raw).comments },
+					: {
+							content: note.raw,
+							comments: parseDocument(note.raw).comments,
+						},
 			);
 			refreshed = r.refreshedSnapshots;
 			allFindings.push(...r.findings);

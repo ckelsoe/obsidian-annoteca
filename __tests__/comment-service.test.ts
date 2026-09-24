@@ -8,7 +8,8 @@ import {
 	markerDamageMessage,
 	VANISHED_MESSAGE,
 } from '../comment-service';
-import { parseAll, serializeLeanMarker, toEditorText } from '../parser';
+import { parseAll, serializeLeanMarker } from '../parser';
+import { toEditorText } from '../note-text';
 import type { PromoteRequest } from '../types';
 import { convertAllComments } from '../imports';
 import {
@@ -1605,20 +1606,20 @@ describe('convertFileComments', () => {
 // `cachedRead` lags an open editor by everything typed since the last save, and
 // bulk convert visits each file exactly once, so pre-filtering on the cache
 // dropped a comment the user had just typed and reported nothing to convert.
-describe('currentContentFor', () => {
+describe('currentNoteText', () => {
 	it("returns the editor's buffer when the note is open", async () => {
 		const h = makeEditorHarness('saved text only');
 		// What the user has typed but not saved. The vault still holds the old
 		// bytes; the editor is the truth.
 		h.setEditorValue('saved text plus %%a fresh comment%%');
-		const seen = await h.service.currentContentFor('note.md', new TFile());
-		expect(seen).toBe('saved text plus %%a fresh comment%%');
+		const seen = await h.service.currentNoteText('note.md', new TFile());
+		expect(seen.text).toBe('saved text plus %%a fresh comment%%');
 	});
 
 	it('falls back to the vault cache when no editor holds it', async () => {
 		const h = makeConvertHarness('on disk %%comment%%');
-		const seen = await h.service.currentContentFor('note.md', h.file);
-		expect(seen).toBe('on disk %%comment%%');
+		const seen = await h.service.currentNoteText('note.md', h.file);
+		expect(seen.text).toBe('on disk %%comment%%');
 	});
 });
 
@@ -2418,5 +2419,251 @@ describe('promote: hostile and mixed input', () => {
 		);
 		expect(made).toHaveLength(1);
 		expect(made[0]?.sourceKey).toBe('bbbb2222');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Line endings. Every offset in the service is an editor offset, and a closed
+// note is written back through one boundary (note-text.ts) that maps those
+// offsets into the stored bytes. The LF run of each lifecycle action is the
+// spec: the same action on the same note saved with CRLF or lone-CR endings must
+// produce the same result in that note's own endings, with every byte outside
+// the edit left as it was.
+// ---------------------------------------------------------------------------
+
+type EndingStyle = 'LF' | 'CRLF' | 'CR';
+const ENDING: Record<EndingStyle, string> = {
+	LF: '\n',
+	CRLF: '\r\n',
+	CR: '\r',
+};
+const withEndings = (lf: string, style: EndingStyle): string =>
+	lf.replace(/\n/g, ENDING[style]);
+// Timestamps come from the clock, so two runs a second apart differ there and
+// nowhere else.
+const scrubDates = (s: string): string =>
+	s.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/g, 'DATE');
+
+const MATRIX_PLAIN = [
+	'# Heading',
+	'',
+	'First paragraph of prose.',
+	'The rough draft carries on here.',
+	'',
+	'Last line.',
+	'',
+].join('\n');
+
+const MATRIX_RESOLVED = [
+	'Intro paragraph.',
+	'',
+	'<!-- annoteca/clarify: done already',
+	'[id=res00001]',
+	'[resolved charles 2026-06-20]: fixed',
+	'-->',
+	'Following paragraph.',
+	'',
+	'Tail. <!-- annoteca/clarify: inline and done',
+	'[id=res00002]',
+	'[resolved charles 2026-06-20]: ok',
+	'--> after.',
+	'',
+].join('\n');
+
+const MATRIX_ADDRESSED = [
+	'Intro.',
+	'',
+	'<!-- annoteca/clarify: tighten this',
+	'[id=addr0009]',
+	'[addressed claude 2026-06-20]: rewrote it',
+	'````annoteca-original',
+	'Old line one.',
+	'Old line two.',
+	'````',
+	'--> New text.',
+	'Next line stays.',
+	'',
+].join('\n');
+
+const MATRIX_EOF = writeStoreRegion(
+	[
+		'Line one.',
+		'',
+		`Prose under review. ${serializeLeanMarker('clarify', 'eof00001')} more.`,
+		'',
+	].join('\n'),
+	[
+		{
+			id: 'eof00001',
+			category: 'clarify',
+			body: 'which products?',
+			replies: [{ author: 'ai', date: '2026-01-01', body: 'first' }],
+		},
+	],
+);
+
+const editorComment = (content: string, index = 0) => {
+	const c = parseDocument(toEditorText(content)).comments[index];
+	if (!c) throw new Error(`no comment at ${index}`);
+	return c;
+};
+
+const MATRIX_ACTIONS: {
+	name: string;
+	doc: string;
+	run: (h: ReturnType<typeof makeHarnessWith>) => Promise<unknown>;
+}[] = [
+	{
+		name: 'resolve',
+		doc: `Intro line.\n\n${NOTE}\n`,
+		run: (h) =>
+			h.service.resolveComment('note.md', editorComment(h.content)),
+	},
+	{
+		name: 'reply',
+		doc: `Intro line.\n\n${NOTE}\n`,
+		run: (h) =>
+			h.service.appendReply('note.md', editorComment(h.content), {
+				author: 'charles',
+				date: '2026-06-22',
+				body: 'a reply',
+			}),
+	},
+	{
+		name: 'delete',
+		doc: `Intro line.\n\n${NOTE}\n`,
+		run: (h) =>
+			h.service.deleteComment('note.md', editorComment(h.content)),
+	},
+	{
+		name: 'reject',
+		doc: MATRIX_ADDRESSED,
+		run: (h) =>
+			h.service.rejectAddressed('note.md', editorComment(h.content)),
+	},
+	{
+		name: 'accept',
+		doc: MATRIX_ADDRESSED,
+		run: (h) =>
+			h.service.acceptAddressed('note.md', editorComment(h.content)),
+	},
+	{
+		name: 'delete all resolved',
+		doc: MATRIX_RESOLVED,
+		run: (h) => h.service.deleteAllResolvedInFile('note.md'),
+	},
+	{
+		name: 'eof reply',
+		doc: MATRIX_EOF,
+		run: (h) =>
+			h.service.appendReply('note.md', editorComment(h.content), {
+				author: 'charles',
+				date: '2026-06-22',
+				body: 'second',
+			}),
+	},
+	{
+		name: 'eof resolve',
+		doc: MATRIX_EOF,
+		run: (h) =>
+			h.service.resolveComment('note.md', editorComment(h.content)),
+	},
+	{
+		name: 'eof delete',
+		doc: MATRIX_EOF,
+		run: (h) =>
+			h.service.deleteComment('note.md', editorComment(h.content)),
+	},
+	{
+		name: 'convert',
+		doc: `${NOTE_WITH_NATIVE}\nAnother line.\n`,
+		run: (h) =>
+			h.service.convertFileComments('note.md', new TFile(), convertAll),
+	},
+];
+
+describe('lifecycle actions keep the note line endings', () => {
+	describe.each(MATRIX_ACTIONS)('$name', ({ doc, run }) => {
+		const lf = makeHarnessWith(doc);
+		const lfDone = run(lf).then(() => lf.content);
+
+		it('changes the LF note (the spec is not a no-op)', async () => {
+			expect(await lfDone).not.toBe(doc);
+		});
+
+		it.each(['CRLF', 'CR'] as const)(
+			'writes the same edit to a %s note in its own endings',
+			async (style) => {
+				const expected = withEndings(await lfDone, style);
+				const h = makeHarnessWith(withEndings(doc, style));
+				await run(h);
+				expect(scrubDates(h.content)).toBe(scrubDates(expected));
+			},
+		);
+	});
+});
+
+describe('promote into a closed note with Windows line endings', () => {
+	const one = (start: number, end: number): PromoteRequest => ({
+		category: 'prose-check',
+		body: 'Flagged register.',
+		anchor: { start, end },
+		author: 'plumbline',
+		sourceKey: 'crlf0001',
+	});
+
+	// Ids are random, so each run's minted id is scrubbed before comparing.
+	const promoteInto = async (style: EndingStyle) => {
+		const h = makeHarnessWith(withEndings(MATRIX_PLAIN, style));
+		// What a consumer holds: the editor's text, where a line break is one
+		// character whatever the file stores.
+		const expected = toEditorText(h.content);
+		const at = expected.indexOf('rough draft');
+		const made = await h.service.promote(
+			'note.md',
+			[one(at, at + 11)],
+			expected,
+		);
+		const id = made[0]?.id ?? 'none';
+		return {
+			made,
+			content: scrubDates(h.content).split(id).join('NEWID'),
+		};
+	};
+
+	it.each(['CRLF', 'CR'] as const)(
+		'takes editor-text offsets and writes %s-ended lines',
+		async (style) => {
+			const lf = await promoteInto('LF');
+			expect(lf.made).toHaveLength(1);
+			const got = await promoteInto(style);
+			expect(got.made).toHaveLength(1);
+			expect(got.content).toBe(withEndings(lf.content, style));
+		},
+	);
+
+	it('still refuses raw bytes as the expected text on a CRLF note', async () => {
+		// Raw offsets would place the marker a character late per line above it.
+		const h = makeHarnessWith(withEndings(MATRIX_PLAIN, 'CRLF'));
+		const before = h.content;
+		const at = before.indexOf('rough draft');
+		const made = await h.service.promote(
+			'note.md',
+			[one(at, at + 11)],
+			before,
+		);
+		expect(made).toEqual([]);
+		expect(h.content).toBe(before);
+	});
+});
+
+describe('delete all resolved on a CRLF note', () => {
+	it('leaves no blank line where a stand-alone marker was', async () => {
+		const h = makeHarnessWith(withEndings(MATRIX_RESOLVED, 'CRLF'));
+		const n = await h.service.deleteAllResolvedInFile('note.md');
+		expect(n).toBe(2);
+		expect(h.content).toBe(
+			'Intro paragraph.\r\n\r\nFollowing paragraph.\r\n\r\nTail. after.\r\n',
+		);
 	});
 });

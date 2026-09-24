@@ -87,7 +87,12 @@ export class FindingsTabRenderer {
 			.then(async (raw) => {
 				// The note may have changed while the promise was in flight.
 				if (this.renderedFor !== path) return;
-				const text = await this.app.vault.cachedRead(file);
+				// Editor text, the text Plumbline lints for an open note and
+				// the text its offsets count in.
+				const { text } = await this.plugin.comments.currentNoteText(
+					path,
+					file,
+				);
 				if (this.renderedFor !== path) return;
 				status.remove();
 				this.paint(
@@ -215,7 +220,12 @@ export class FindingsTabRenderer {
 			const found = this.app.vault.getAbstractFileByPath(note.path);
 			const text =
 				found instanceof TFile
-					? await this.app.vault.cachedRead(found)
+					? (
+							await this.plugin.comments.currentNoteText(
+								note.path,
+								found,
+							)
+						).text
 					: note.text;
 			const created = await this.plugin.api.promote(
 				note.path,
