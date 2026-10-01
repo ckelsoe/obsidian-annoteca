@@ -125,7 +125,41 @@ export class ThreadTabRenderer {
 		private readonly plugin: AnnotecaPlugin,
 		private readonly app: App,
 		private readonly refresh: () => void,
+		// #83: the renderer behind a comment's own tab. It is always focused on
+		// that one comment, so there is no list to go back to: no Show all, no
+		// Focus action, and no Open in tab, since it already is one.
+		private readonly standalone = false,
 	) {}
+
+	// Focus on the comment with this id in this note. The comment tab's way in:
+	// it is restored from saved workspace state, which carries an id and a path
+	// and nothing else. Only id-bearing comments get a tab, so the id alone is
+	// the identity.
+	focusOnId(path: string, id: string): void {
+		const found = this.plugin.commentIndex
+			.get(path)
+			?.comments.find((c) => c.id === id);
+		this.focus = {
+			path,
+			ident: {
+				id,
+				category: found?.category ?? '',
+				body: found?.body ?? '',
+			},
+			lastStart: found?.marker.start ?? -1,
+		};
+	}
+
+	// The focused comment's note, which a rename can change. The comment tab
+	// reads it back to keep its saved state current.
+	get focusedPath(): string | undefined {
+		return this.focus?.path;
+	}
+
+	// The focused comment as it stands now, for the comment tab's title.
+	get focusedComment(): Comment | undefined {
+		return this.focusedComments()[0];
+	}
 
 	// How the parent view moves the selection. It names an OFFSET, because the
 	// events it comes from (a marker clicked in the editor, the active file
@@ -608,16 +642,18 @@ export class ThreadTabRenderer {
 			cls: 'annoteca-focus-label',
 			text: `One comment in ${file instanceof TFile ? file.basename : path}`,
 		});
-		const back = bar.createEl('button', {
-			cls: 'annoteca-focus-exit',
-			attr: { 'aria-label': 'Show all comments' },
-		});
-		setIcon(back, 'list');
-		back.createSpan({ text: 'Show all' });
-		back.addEventListener('click', () => this.leaveFocus());
-		if (this.pendingKeyboardFocus === 'show-all') {
-			this.pendingKeyboardFocus = undefined;
-			back.focus();
+		if (!this.standalone) {
+			const back = bar.createEl('button', {
+				cls: 'annoteca-focus-exit',
+				attr: { 'aria-label': 'Show all comments' },
+			});
+			setIcon(back, 'list');
+			back.createSpan({ text: 'Show all' });
+			back.addEventListener('click', () => this.leaveFocus());
+			if (this.pendingKeyboardFocus === 'show-all') {
+				this.pendingKeyboardFocus = undefined;
+				back.focus();
+			}
 		}
 
 		const comments = this.focusedComments();
@@ -1305,6 +1341,20 @@ export class ThreadTabRenderer {
 				},
 			);
 		}
+		// #83. A comment with an id can have a tab of its own. Not from inside
+		// that tab, and not for an id-less comment, which has nothing a saved
+		// tab could find it by after a restart.
+		if (!this.standalone && c.id !== undefined)
+			this.createActionButton(
+				actions,
+				'Open in tab',
+				'app-window',
+				() => this.plugin.openCommentInTab(path, c),
+				{
+					ariaLabel: 'Open this comment in its own tab',
+					cls: 'annoteca-open-tab',
+				},
+			);
 		// #83. Hidden while focused, where the bar's "Show all" is the way out.
 		if (!this.focus)
 			this.createActionButton(

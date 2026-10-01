@@ -34,6 +34,7 @@ const three = (lead: string, resolveSecond = false) =>
 	`${serialize({ id: 'cccccccc', category: 'clarify', body: 'third one' })}`;
 
 function harness(text: string = three('')) {
+	const openedTabs: string[] = [];
 	const index = new CommentIndex();
 	index.rebuild(A, text);
 	index.rebuild(
@@ -62,6 +63,9 @@ function harness(text: string = three('')) {
 		}),
 		navigateToOffset: () => Promise.resolve(),
 		highlightActiveComment: () => undefined,
+		openCommentInTab: (path: string, c: Comment) => {
+			openedTabs.push(`${path}:${c.id ?? ''}`);
+		},
 		isStarred: () => false,
 		toggleStarred: () => undefined,
 		loadDraft: () => '',
@@ -86,7 +90,7 @@ function harness(text: string = three('')) {
 		render,
 	);
 	render();
-	return { renderer, render, container, index };
+	return { renderer, render, container, index, openedTabs };
 }
 
 const excerpts = (c: HTMLElement): string[] =>
@@ -311,5 +315,29 @@ describe('#83: focus survives editing a comment that has no id', () => {
 		h.index.rebuild(A, idless('after edit'));
 		h.renderer.leaveFocusUnlessSelected(A, start);
 		expect(h.renderer.isFocused).toBe(true);
+	});
+});
+
+describe('#83: Open in tab', () => {
+	it('a comment with an id offers its own tab, and opens it', () => {
+		const h = harness();
+		const btn = h.container.querySelector<HTMLElement>(
+			'.annoteca-reviewer-card.is-active .annoteca-open-tab',
+		);
+		expect(btn?.getAttribute('aria-label')).toBe(
+			'Open this comment in its own tab',
+		);
+		btn?.click();
+		expect(h.openedTabs).toEqual([`${A}:aaaaaaaa`]);
+	});
+
+	it('an id-less comment does not, since a saved tab could not find it', () => {
+		const h = harness(
+			serialize({ category: 'clarify', body: 'no id here' }),
+		);
+		expect(
+			h.container.querySelector('.annoteca-reviewer-expanded'),
+		).not.toBeNull();
+		expect(h.container.querySelector('.annoteca-open-tab')).toBeNull();
 	});
 });

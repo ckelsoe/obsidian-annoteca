@@ -1240,6 +1240,14 @@ settings:
 	border-bottom: 1px solid var(--background-modifier-border);
 }
 
+/* A comment in its own tab (#83). The main area is wide; cap the card at the
+ * editor's readable line width so the conversation reads like the note. */
+.annoteca-comment-tab .annoteca-hub-content {
+	max-width: var(--file-line-width);
+	margin: 0 auto;
+	padding: var(--size-4-4);
+}
+
 /* Focus mode (#83): takes the scope toolbar's place while the Thread tab shows
  * one comment. Same rule and spacing, so the card below does not shift. */
 .annoteca-focus-bar {
