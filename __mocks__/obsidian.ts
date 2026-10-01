@@ -314,4 +314,15 @@ export function installObsidianDomHelpers(): void {
 		callback?.(el);
 		return el;
 	};
+	// The same for spans: the marker icon widget builds its element with
+	// `win.createSpan()` (decorations.ts), so drawing it needs this.
+	window.createSpan = (
+		o?: DomElementInfo | string,
+		callback?: (el: HTMLSpanElement) => void,
+	): HTMLSpanElement => {
+		const el = cloneSeed('span');
+		applyInfo(el, o);
+		callback?.(el);
+		return el;
+	};
 }

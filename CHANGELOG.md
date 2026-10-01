@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Click the "Original text" of an addressed comment in the Thread tab to jump to that comment in the note. It also works from the keyboard (Tab to it, then Enter or Space). Selecting text in the block to copy it does not jump. (#82)
+- Jumping to a comment briefly highlights it, so you can see where you landed. For an addressed comment the highlight covers the edited text after the marker; otherwise it covers the commented passage, or the marker when there is none. With reduced motion turned on in your system, the highlight shows as a steady tint instead of a fade. (#82)
+
+### Fixed
+- Clicking a card in the Thread tab moved the cursor to its comment but left the editor highlight on the comment selected before. The highlight now follows the card you click.
+
 ## [1.19.0] - 2026-09-24
 
 ### Fixed

@@ -158,6 +158,26 @@ settings:
 	border-radius: 3px;
 }
 
+/* Arrival flash (#82): a short pulse over the passage a jump landed on, so the
+ * reader sees where it is. Fades out on its own; the plugin removes the class
+ * shortly after. Reduced motion gets a steady tint for the same span instead. */
+.annoteca-flash-comment {
+	border-radius: 3px;
+	animation: annoteca-flash 1.5s ease-out;
+}
+
+@keyframes annoteca-flash {
+	from { background-color: var(--text-highlight-bg-active, var(--text-highlight-bg)); }
+	to { background-color: transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.annoteca-flash-comment {
+		animation: none;
+		background-color: var(--text-highlight-bg);
+	}
+}
+
 .annoteca-icon:hover {
 	color: var(--text-normal);
 	transform: scale(1.15);
@@ -1057,6 +1077,20 @@ settings:
 	font-family: var(--font-monospace, monospace);
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
+}
+
+/* #82: the original text jumps to the comment in the note. */
+.annoteca-reviewer-addressed-original.is-jump-target {
+	cursor: pointer;
+}
+
+.annoteca-reviewer-addressed-original.is-jump-target:hover {
+	background-color: var(--background-modifier-hover);
+}
+
+.annoteca-reviewer-addressed-original.is-jump-target:focus-visible {
+	box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+	outline: none;
 }
 
 .annoteca-reviewer-thread {

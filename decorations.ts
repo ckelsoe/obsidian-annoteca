@@ -43,6 +43,8 @@ import { parseAll } from './parser';
 import { parseDocument } from './document';
 import {
 	planActiveCommentDecorations,
+	planFlashRange,
+	FLASH_COMMENT_CLASS,
 	resolveAnchorRangeInWindows,
 	ANCHOR_WINDOW,
 	shouldSubmitOnKeydown,
@@ -227,6 +229,40 @@ export function setActiveComment(
 	view.dispatch({ effects: setActiveCommentEffect.of(markerStart) });
 }
 
+// Arrival flash (#82). Carries the marker start of the comment a navigation
+// just landed on, or `null` once the flash has run its course. Separate from
+// the active-comment state above: that one stays for as long as the thread is
+// open, while this one is a short cue that says "it is here".
+export const setFlashCommentEffect = StateEffect.define<number | null>();
+
+// How long the flash stays painted. Long enough to catch the eye after the
+// scroll settles, short enough that it is gone before the reader starts
+// working on the text.
+const FLASH_DURATION_MS = 1500;
+
+// One pending clear per editor. A second jump inside the window replaces the
+// first, and without cancelling the first timer it would clear the second
+// flash early.
+const flashTimers = new WeakMap<EditorView, number>();
+
+// Briefly highlight the comment whose marker starts at `markerStart`. Nothing
+// paints if no marker starts there, which is the case when the note changed
+// between the index capture and the jump.
+export function flashComment(view: EditorView, markerStart: number): void {
+	const pending = flashTimers.get(view);
+	if (pending !== undefined) window.clearTimeout(pending);
+	view.dispatch({ effects: setFlashCommentEffect.of(markerStart) });
+	flashTimers.set(
+		view,
+		window.setTimeout(() => {
+			flashTimers.delete(view);
+			// The editor may have been closed inside the window.
+			if (!liveViews.has(view)) return;
+			view.dispatch({ effects: setFlashCommentEffect.of(null) });
+		}, FLASH_DURATION_MS),
+	);
+}
+
 // Every editor this extension is currently installed in. The workspace can only
 // enumerate markdown leaves, which misses embedded editors such as Canvas
 // cards, so asking Obsidian for the inventory always undercounts. Each view
@@ -342,6 +378,10 @@ class MarkerIconWidget extends WidgetType {
 		// it (pinning the tap popover) rather than only calling out to the
 		// plugin. toDOM receives the view, so it is available at bind time.
 		private readonly onClick: (marker: Comment, view: EditorView) => void,
+		// Set while this marker is flashing (#82) and the flash has nothing
+		// but the marker to cover. A new value per flash, so a repeat jump
+		// draws a fresh element and the animation restarts.
+		private readonly flashSeq: number | undefined = undefined,
 	) {
 		super();
 	}
@@ -367,7 +407,8 @@ class MarkerIconWidget extends WidgetType {
 			// This one IS load-bearing: turning the setting off changes what
 			// the widget draws while every marker range stays identical, so
 			// without it the badge survives its own setting.
-			other.showReplyCount === this.showReplyCount
+			other.showReplyCount === this.showReplyCount &&
+			other.flashSeq === this.flashSeq
 		);
 	}
 
@@ -389,6 +430,7 @@ class MarkerIconWidget extends WidgetType {
 		if (this.marker.addressed && !this.marker.resolution)
 			el.classList.add('annoteca-addressed');
 		if (this.hidden) el.classList.add('annoteca-resolved-hidden');
+		if (this.flashSeq !== undefined) el.classList.add(FLASH_COMMENT_CLASS);
 		const replies = this.marker.replies.length;
 		if (replies > 0) el.classList.add('annoteca-has-replies');
 		const countSuffix =
@@ -550,9 +592,11 @@ function resolveTier(
 function decorationsCompute(
 	ctx: DecorationContext,
 	field: StateField<Comment[]>,
+	flashField: StateField<FlashState | null>,
 ): Extension {
 	const deps = [
 		field,
+		flashField,
 		hideAllField,
 		showBodiesField,
 		settingsEpochField,
@@ -565,6 +609,7 @@ function decorationsCompute(
 		if (settings.indicatorStyle === 'none') return Decoration.none;
 
 		const showBodies = state.field(showBodiesField);
+		const flash = state.field(flashField);
 
 		const showIcon = stylesShowIcon(settings.indicatorStyle);
 		const showUnderline =
@@ -624,6 +669,7 @@ function decorationsCompute(
 						isHidden,
 						settings.markerReplyCount,
 						(marker, view) => activateMarker(ctx, view, marker),
+						iconFlashSeq(state, flash, m),
 					),
 					inclusive: false,
 				}).range(m.marker.start, m.marker.end),
@@ -2010,6 +2056,100 @@ function activeCommentDecorations(
 	);
 }
 
+// A running flash. `seq` is new on every flash, including a second jump to the
+// same comment: without it the field value would not change, nothing would
+// redraw, and the CSS animation would not start again.
+interface FlashState {
+	start: number;
+	seq: number;
+}
+
+let flashSeq = 0;
+
+// The flash follows its marker through edits for the same reason the active
+// highlight does, and drops when the marker is gone.
+function flashCommentField(
+	markersField: StateField<Comment[]>,
+): StateField<FlashState | null> {
+	return StateField.define<FlashState | null>({
+		create: () => null,
+		update(value, tr) {
+			for (const e of tr.effects) {
+				if (e.is(setFlashCommentEffect))
+					return e.value === null
+						? null
+						: { start: e.value, seq: ++flashSeq };
+			}
+			if (tr.docChanged && value !== null) {
+				const mapped = mapMarkerStart(tr, value.start);
+				const markers = tr.state.field(markersField);
+				if (!markers.some((m) => m.marker.start === mapped))
+					return null;
+				return { start: mapped, seq: value.seq };
+			}
+			return value;
+		},
+	});
+}
+
+// The flash range for the comment a flash names, or null. Shared by the mark
+// below and the marker icon, which has to paint the flash itself when the
+// range is the marker: the icon REPLACES the marker text, so a mark over the
+// same range never reaches the DOM.
+function flashRangeFor(
+	state: EditorState,
+	m: Comment,
+): { from: number; to: number } | null {
+	return planFlashRange(
+		m,
+		findAnchorRange(state.doc, m),
+		(pos) => state.doc.sliceString(pos, pos + 1),
+		(pos) => state.doc.lineAt(Math.min(pos, state.doc.length)).to,
+		state.field(hideAllField),
+	);
+}
+
+// The seq to hand the marker icon when the flash falls back to the marker
+// itself, or undefined when this marker is not the one flashing.
+function iconFlashSeq(
+	state: EditorState,
+	flash: FlashState | null,
+	m: Comment,
+): number | undefined {
+	if (flash === null || flash.start !== m.marker.start) return undefined;
+	const range = flashRangeFor(state, m);
+	return range?.from === m.marker.start && range.to === m.marker.end
+		? flash.seq
+		: undefined;
+}
+
+function flashCommentDecorations(
+	markersField: StateField<Comment[]>,
+	flashField: StateField<FlashState | null>,
+): Extension {
+	return EditorView.decorations.compute(
+		[markersField, flashField, hideAllField],
+		(state) => {
+			const flash = state.field(flashField);
+			if (flash === null) return Decoration.none;
+			const m = state
+				.field(markersField)
+				.find((c) => c.marker.start === flash.start);
+			if (!m) return Decoration.none;
+			const range = flashRangeFor(state, m);
+			if (!range) return Decoration.none;
+			// The seq attribute makes each flash a different decoration, so
+			// CodeMirror draws a fresh element and the animation restarts.
+			return Decoration.set([
+				Decoration.mark({
+					class: FLASH_COMMENT_CLASS,
+					attributes: { 'data-annoteca-flash': String(flash.seq) },
+				}).range(range.from, range.to),
+			]);
+		},
+	);
+}
+
 function clickHandlerExtension(
 	ctx: DecorationContext,
 	field: StateField<Comment[]>,
@@ -2119,6 +2259,7 @@ export function buildMarkerDecorations(ctx: DecorationContext): {
 } {
 	const field = markerStateField(ctx);
 	const activeField = activeCommentField(field);
+	const flashField = flashCommentField(field);
 	return {
 		extension: [
 			field,
@@ -2127,7 +2268,9 @@ export function buildMarkerDecorations(ctx: DecorationContext): {
 			settingsEpochField,
 			activeField,
 			activeCommentDecorations(field, activeField),
-			decorationsCompute(ctx, field),
+			flashField,
+			flashCommentDecorations(field, flashField),
+			decorationsCompute(ctx, field, flashField),
 		],
 		markerField: field,
 		activeField,

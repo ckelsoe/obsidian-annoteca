@@ -12,6 +12,7 @@ import {
 	buildMarkerDecorations,
 	findMarkersInDoc,
 	setActiveCommentEffect,
+	setFlashCommentEffect,
 	setHideAllCommentsEffect,
 	setHideAllCommentsEverywhere,
 	isHideAllComments,
@@ -623,6 +624,89 @@ describe('active-comment highlight', () => {
 			changes: { from: MARKER_START, to: DOC.indexOf('--> after.') + 3 },
 		}).state;
 		expect(activeStartOf(gone, built.activeField)).toBeNull();
+	});
+});
+
+describe('arrival flash (#82)', () => {
+	const FLASH = 'annoteca-flash-comment';
+
+	// Every flash mark in the state, as [from, to] pairs.
+	function flashRanges(state: EditorState): [number, number][] {
+		const out: [number, number][] = [];
+		for (const set of state.facet(EditorView.decorations)) {
+			if (typeof set === 'function') continue;
+			for (let cur = set.iter(); cur.value !== null; cur.next()) {
+				const spec = cur.value.spec as { class?: string };
+				if (spec.class === FLASH) out.push([cur.from, cur.to]);
+			}
+		}
+		return out;
+	}
+
+	const flashed = (doc: string, start: number): EditorState =>
+		makeState({}, doc).update({
+			effects: setFlashCommentEffect.of(start),
+		}).state;
+
+	it('paints nothing until a flash is dispatched', () => {
+		expect(flashRanges(makeState())).toEqual([]);
+	});
+
+	it('flashes the marker of a comment with no anchor', () => {
+		const m = findMarkersInDoc(DOC)[0];
+		if (!m) throw new Error('fixture has no marker');
+		expect(flashRanges(flashed(DOC, m.marker.start))).toEqual([
+			[m.marker.start, m.marker.end],
+		]);
+	});
+
+	it('flashes the new prose of an addressed comment, not the marker', () => {
+		const marker = [
+			'<!-- annoteca/clarify: tighten this',
+			'[id=addr0001]',
+			'[addressed claude 2026-06-20]: replaced the sentence',
+			'```annoteca-original',
+			'The old sentence.',
+			'```',
+			'-->',
+		].join('\n');
+		const doc = `${marker} The new sentence.\n\nMore prose.`;
+		const m = findMarkersInDoc(doc)[0];
+		if (!m) throw new Error('fixture has no marker');
+		const from = doc.indexOf('The new sentence.');
+		expect(flashRanges(flashed(doc, m.marker.start))).toEqual([
+			[from, from + 'The new sentence.'.length],
+		]);
+	});
+
+	it('paints nothing when no marker starts at the target', () => {
+		expect(flashRanges(flashed(DOC, 0))).toEqual([]);
+	});
+
+	it('clears on a null effect', () => {
+		const on = flashed(DOC, MARKER_START);
+		const off = on.update({
+			effects: setFlashCommentEffect.of(null),
+		}).state;
+		expect(flashRanges(off)).toEqual([]);
+	});
+
+	it('follows its marker through an edit above', () => {
+		const on = flashed(DOC, MARKER_START);
+		const edited = on.update({
+			changes: { from: 0, insert: 'XXXX' },
+		}).state;
+		const m = findMarkersInDoc(edited.doc.toString())[0];
+		if (!m) throw new Error('marker lost');
+		expect(flashRanges(edited)).toEqual([[m.marker.start, m.marker.end]]);
+	});
+
+	it('paints nothing while every comment is hidden', () => {
+		const on = flashed(DOC, MARKER_START);
+		const hidden = on.update({
+			effects: setHideAllCommentsEffect.of(true),
+		}).state;
+		expect(flashRanges(hidden)).toEqual([]);
 	});
 });
 

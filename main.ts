@@ -49,6 +49,7 @@ import {
 	inlineBodiesBlockedBy,
 	refreshDecorationsEverywhere,
 	setActiveComment,
+	flashComment,
 } from './decorations';
 import {
 	decideScrollAction,
@@ -1990,6 +1991,11 @@ export default class AnnotecaPlugin extends Plugin {
 		);
 		this.applyScrollAction(view, target, action);
 		this.app.workspace.setActiveLeaf(targetLeaf, { focus: true });
+		// #82: a brief highlight on arrival, so the reader can see where the
+		// jump landed. Paints nothing when no marker starts at the target,
+		// which covers a heading jump and a marker deleted since the capture.
+		const cm = view.editor.cm;
+		if (cm) flashComment(cm, target);
 	}
 
 	// Execute a resolved scroll action against the editor. "top" anchors the
@@ -2158,7 +2164,7 @@ export default class AnnotecaPlugin extends Plugin {
 	// F-276: paint the active-comment background in the editor showing `path`
 	// and clear it in every other markdown editor, so exactly one comment is
 	// highlighted at a time. `start` of null clears everywhere.
-	private highlightActiveComment(path: string, start: number | null): void {
+	highlightActiveComment(path: string, start: number | null): void {
 		for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
 			const v = leaf.view;
 			if (!(v instanceof MarkdownView)) continue;

@@ -260,6 +260,40 @@ export function planActiveCommentDecorations(
 	return specs;
 }
 
+export const FLASH_COMMENT_CLASS = 'annoteca-flash-comment';
+
+// Pure planner for the arrival flash (#82): the span that briefly lights up
+// after a navigation lands on a comment, so the reader can see where it is.
+//
+// An addressed comment flashes its NEW prose, because that is what the reader
+// came to look at and what Accept or Reject acts on. The span is the one
+// Reject restores, computed the same way: from the end of the marker, past
+// the single begin-placement space, to the end of that line. Any other
+// comment flashes its anchored passage when that resolves. Without either,
+// the marker itself flashes, so a jump always shows something.
+//
+// `lineEndAt` returns the end of the line holding an offset. It is passed in
+// so this stays free of CodeMirror and can be tested on plain strings.
+export function planFlashRange(
+	m: Comment,
+	anchorRange: { from: number; to: number } | null,
+	charAt: (pos: number) => string,
+	lineEndAt: (pos: number) => number,
+	hideAll: boolean,
+): { from: number; to: number } | null {
+	if (hideAll) return null;
+	if (m.addressed) {
+		const proseStart =
+			charAt(m.marker.end) === ' ' ? m.marker.end + 1 : m.marker.end;
+		const lineEnd = lineEndAt(proseStart);
+		if (lineEnd > proseStart) return { from: proseStart, to: lineEnd };
+	}
+	if (anchorRange && anchorRange.from < anchorRange.to) return anchorRange;
+	if (m.marker.start < m.marker.end)
+		return { from: m.marker.start, to: m.marker.end };
+	return null;
+}
+
 export function extractIndexTerm(body: string): string {
 	// The modal template emits `<term> > <subterm> — <body>` or `<term> — <body>`.
 	// Strip the post-em-dash body if present; return the term/subterm chain.

@@ -475,7 +475,7 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 		this.plugin.clearActiveCommentHighlight();
 		// Unload the last render's markdown lifetime. contentEl.empty() in
 		// super.onClose() removes the DOM but not the components attached to it.
-		this.threadRenderer.dispose();
+		this.threadRenderer.close();
 		this.unsubscribeFindings?.();
 		this.unsubscribeFindings = null;
 		await super.onClose();

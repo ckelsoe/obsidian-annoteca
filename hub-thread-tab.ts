@@ -91,6 +91,9 @@ export class ThreadTabRenderer {
 	// inside the debounce. See renderReplyInput for why those differ.
 	private readonly draftSaveTimers = new Map<string, Set<PendingDraftSave>>();
 
+	// Set by close(). See there.
+	private closed = false;
+
 	constructor(
 		private readonly plugin: AnnotecaPlugin,
 		private readonly app: App,
@@ -114,6 +117,15 @@ export class ThreadTabRenderer {
 		this.activeStart = start;
 		this.activeId = undefined;
 		this.activeTextKey = undefined;
+	}
+
+	// The hub view is closing for good, as opposed to dispose(), which also
+	// runs before every refresh. Work still in flight from a card click checks
+	// this, so it cannot paint an editor highlight after the panel that owned
+	// the selection is gone.
+	close(): void {
+		this.closed = true;
+		this.dispose();
 	}
 
 	// Unloads the current render's markdown lifetime. Called when the hub view
@@ -651,20 +663,50 @@ export class ThreadTabRenderer {
 		// scrolls. The chevron, sync, and star buttons stopPropagation so they do
 		// not also trigger this navigation.
 		compact.addEventListener('click', () => {
-			this.activePath = path;
-			this.activeStart = c.marker.start;
-			// Set together with the offset, never left to the refresh to
-			// learn: a stale id here would let the recovery in
-			// selectActiveComment pull the selection back to the PREVIOUS
-			// comment if this offset ever failed to resolve.
-			this.activeId = c.id;
 			// Ensure the file group is expanded so the newly-active card is visible.
 			this.collapsedFilePaths.delete(path);
-			this.refresh();
-			void this.plugin.navigateToOffset(path, c.marker.start);
+			this.selectAndReveal(path, c, false);
 		});
 
 		if (expanded) this.renderExpandedSection(card, c, path);
+	}
+
+	// Make `c` the selected card and move the document to its marker. Every
+	// way into the document from a card goes through here, so the editor's
+	// active highlight always names the same comment the panel does. Before
+	// this, a card click moved the cursor but left the highlight on whatever
+	// comment was selected last.
+	private selectAndReveal(path: string, c: Comment, force: boolean): void {
+		this.activePath = path;
+		this.activeStart = c.marker.start;
+		// Set together with the offset, never left to the refresh to
+		// learn: a stale id here would let the recovery in
+		// selectActiveComment pull the selection back to the PREVIOUS
+		// comment if this offset ever failed to resolve.
+		this.activeId = c.id;
+		this.refresh();
+		const start = c.marker.start;
+		void this.plugin.navigateToOffset(path, start, force).then(
+			() => {
+				// Re-checked after the await: the panel may have closed, which
+				// already cleared the highlight, or the user may have picked
+				// another card while this navigation was queued.
+				if (this.closed || !this.isSelected(path, c)) return;
+				this.plugin.highlightActiveComment(path, start);
+			},
+			// A failed navigation leaves nothing to highlight.
+			() => undefined,
+		);
+	}
+
+	// Whether `c` is still the selected comment. By id when it has one, since
+	// the refresh after a click can move activeStart to the same comment's new
+	// offset; by offset otherwise.
+	private isSelected(path: string, c: Comment): boolean {
+		if (this.activePath !== path) return false;
+		return c.id !== undefined
+			? this.activeId === c.id
+			: this.activeStart === c.marker.start;
 	}
 
 	private renderCompactRow(
@@ -735,15 +777,7 @@ export class ThreadTabRenderer {
 		setIcon(syncBtn, 'refresh-cw');
 		syncBtn.addEventListener('click', (e) => {
 			e.stopPropagation();
-			this.activePath = path;
-			this.activeStart = c.marker.start;
-			// Set together with the offset, never left to the refresh to
-			// learn: a stale id here would let the recovery in
-			// selectActiveComment pull the selection back to the PREVIOUS
-			// comment if this offset ever failed to resolve.
-			this.activeId = c.id;
-			this.refresh();
-			void this.plugin.navigateToOffset(path, c.marker.start, true);
+			this.selectAndReveal(path, c, true);
 		});
 
 		// Star toggle at the right of the compact row. The panel re-renders on the
@@ -832,10 +866,11 @@ export class ThreadTabRenderer {
 				// Plain text on purpose, matching the popover: this is the
 				// verbatim prose Reject would restore, so it must be shown as
 				// what would be written back, not as what it renders to.
-				addr.createDiv({
+				const original = addr.createDiv({
 					cls: 'annoteca-reviewer-addressed-original',
 					text: c.addressed.original,
 				});
+				this.makeJumpTarget(original, path, c);
 			}
 		}
 
@@ -1094,6 +1129,37 @@ export class ThreadTabRenderer {
 		});
 		this.createActionButton(actions, 'Open', 'external-link', () => {
 			void this.plugin.navigateToComment(path, c.marker.start, c);
+		});
+	}
+
+	// #82: the captured text jumps to the comment in the note. It lands on
+	// the marker, which is where the edited prose starts, and the arrival
+	// flash lights up that prose.
+	//
+	// A button role and keyboard activation, because a clickable div is
+	// otherwise invisible to a keyboard or a screen reader. A click that ends
+	// a drag-selection inside the text does NOT jump: people copy from this
+	// block, and moving the document out from under a selection would be
+	// hostile.
+	private makeJumpTarget(el: HTMLElement, path: string, c: Comment): void {
+		el.addClass('is-jump-target');
+		el.setAttribute('role', 'button');
+		el.setAttribute('tabindex', '0');
+		el.setAttribute('aria-label', 'Go to this comment in the note');
+		el.addEventListener('click', () => {
+			const selection = el.win.getSelection();
+			if (
+				selection &&
+				!selection.isCollapsed &&
+				el.contains(selection.anchorNode)
+			)
+				return;
+			this.selectAndReveal(path, c, true);
+		});
+		el.addEventListener('keydown', (e) => {
+			if (e.key !== 'Enter' && e.key !== ' ') return;
+			e.preventDefault();
+			this.selectAndReveal(path, c, true);
 		});
 	}
 
