@@ -908,7 +908,12 @@ export class ThreadTabRenderer {
 		// comment if this offset ever failed to resolve.
 		this.activeId = c.id;
 		this.refresh();
-		const start = c.marker.start;
+		// The card's offset is from the render that drew it, and the index can
+		// have moved on since (an autosave rebuilds it before the queued panel
+		// refresh runs). Read the comment's offset from the index as it is now,
+		// by id when that is unique, so the jump lands on the comment and not
+		// on where it used to be.
+		const start = this.currentStart(path, c);
 		void this.plugin.navigateToOffset(path, start, force).then(
 			() => {
 				// Re-checked after the await: the panel may have closed, which
@@ -920,6 +925,15 @@ export class ThreadTabRenderer {
 			// A failed navigation leaves nothing to highlight.
 			() => undefined,
 		);
+	}
+
+	private currentStart(path: string, c: Comment): number {
+		if (c.id === undefined) return c.marker.start;
+		const hits = (
+			this.plugin.commentIndex.get(path)?.comments ?? []
+		).filter((x) => x.id === c.id);
+		const only = hits.length === 1 ? hits[0] : undefined;
+		return only ? only.marker.start : c.marker.start;
 	}
 
 	// Whether `c` is still the selected comment. By id when it has one, since
@@ -1342,9 +1356,10 @@ export class ThreadTabRenderer {
 			);
 		}
 		// #83. A comment with an id can have a tab of its own. Not from inside
-		// that tab, and not for an id-less comment, which has nothing a saved
-		// tab could find it by after a restart.
-		if (!this.standalone && c.id !== undefined)
+		// that tab, not for an id-less comment, which has nothing a saved tab
+		// could find it by after a restart, and not for a copied one whose id
+		// is shared.
+		if (!this.standalone && this.hasUniqueId(path, c))
 			this.createActionButton(
 				actions,
 				'Open in tab',
@@ -1396,11 +1411,14 @@ export class ThreadTabRenderer {
 		el.setAttribute('tabindex', '0');
 		el.setAttribute('aria-label', 'Go to this comment in the note');
 		el.addEventListener('click', () => {
+			// Either end inside counts: a drag can start outside the block and
+			// end in it, which leaves only the focus end inside.
 			const selection = el.win.getSelection();
 			if (
 				selection &&
 				!selection.isCollapsed &&
-				el.contains(selection.anchorNode)
+				(el.contains(selection.anchorNode) ||
+					el.contains(selection.focusNode))
 			)
 				return;
 			this.selectAndReveal(path, c, true);
@@ -1410,6 +1428,15 @@ export class ThreadTabRenderer {
 			e.preventDefault();
 			this.selectAndReveal(path, c, true);
 		});
+	}
+
+	// A comment whose id no other comment in its note shares. A copied comment
+	// carries a copied id, and a tab saved by an ambiguous id would show both
+	// copies, so neither gets a tab until one is changed.
+	private hasUniqueId(path: string, c: Comment): boolean {
+		if (c.id === undefined) return false;
+		const comments = this.plugin.commentIndex.get(path)?.comments ?? [];
+		return comments.filter((x) => x.id === c.id).length === 1;
 	}
 
 	private createActionButton(

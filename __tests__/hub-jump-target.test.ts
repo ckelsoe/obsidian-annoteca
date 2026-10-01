@@ -80,6 +80,7 @@ function harness(navigate: () => Promise<void> = () => Promise.resolve()) {
 	return {
 		container,
 		renderer,
+		index,
 		start: comment.marker.start,
 		navigateToOffset,
 		highlightActiveComment,
@@ -138,6 +139,33 @@ describe('#82: the original text jumps to its comment', () => {
 		el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
 		el.dispatchEvent(new KeyboardEvent('keydown', { key: ' ' }));
 		expect(h.navigateToOffset).toHaveBeenCalledTimes(2);
+	});
+
+	it('a drag that starts outside and ends inside it does not jump', () => {
+		const h = harness();
+		const el = originalEl(h.container);
+		const text = el.firstChild;
+		const outside = h.container.querySelector(
+			'.annoteca-reviewer-excerpt',
+		)?.firstChild;
+		if (!text || !outside) throw new Error('missing text nodes');
+		const sel = window.getSelection();
+		sel?.setBaseAndExtent(outside, 0, text, 3);
+		expect(sel?.anchorNode).toBe(outside);
+		el.click();
+		expect(h.navigateToOffset).not.toHaveBeenCalled();
+	});
+
+	it('jumps to where the comment is NOW, not where the card drew it', async () => {
+		const h = harness();
+		// An autosave rebuilds the index before the panel's queued refresh,
+		// so the card still holds the old offset.
+		h.index.rebuild(A, `Typed above.\n${ADDRESSED_DOC}`);
+		originalEl(h.container).click();
+		await settle();
+		const moved = h.start + 'Typed above.\n'.length;
+		expect(h.navigateToOffset).toHaveBeenCalledWith(A, moved, true);
+		expect(h.highlightActiveComment).toHaveBeenCalledWith(A, moved);
 	});
 
 	it('a click that ends a text selection inside it does not jump', () => {

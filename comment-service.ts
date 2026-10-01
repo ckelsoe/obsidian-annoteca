@@ -95,6 +95,9 @@ export const VANISHED_MESSAGE =
 // lifecycle actions resolve their own file (they act on the note the popover
 // belongs to, not the focused one) and have to refuse in these words rather
 // than invent a second phrasing for the same situation.
+export const REJECT_BLOCKED_MESSAGE =
+	'Annoteca did not reject this edit: the text it would restore contains another comment, which the original text would overwrite. Move or delete that comment, then reject again.';
+
 export function fileGoneMessage(path: string): string {
 	return `Could not open ${path}. It may have been renamed or deleted.`;
 }
@@ -631,6 +634,15 @@ export class CommentService {
 		const lineEnd = current.closer
 			? current.closer.start
 			: this.endOfLine(content, proseStart);
+		// The span Reject overwrites must hold no other comment. Ranges may
+		// nest or overlap, so an addressed range can contain another comment's
+		// marker or closer, and restoring the original text over it would
+		// delete that comment, or strand half of it. Refused, and said why;
+		// the reader can move or resolve the inner comment, then reject.
+		if (this.spanHoldsOtherComment(content, proseStart, lineEnd)) {
+			new Notice(REJECT_BLOCKED_MESSAGE);
+			return;
+		}
 
 		const reopened: Comment = { ...full, addressed: undefined };
 
@@ -677,6 +689,19 @@ export class CommentService {
 
 	// `content` is editor text, where every line break is \n. The write maps the
 	// end back to the start of whatever break the file stores there.
+	// Whether any comment marker or closer overlaps [from, to). The rejected
+	// comment's own marker ends at or before `from` and its closer starts at
+	// `to`, so neither counts.
+	private spanHoldsOtherComment(
+		content: string,
+		from: number,
+		to: number,
+	): boolean {
+		const markers = parseAll(content).map((c) => c.marker);
+		const all = [...markers, ...scanClosers(content, markers)];
+		return all.some((r) => r.start < to && r.end > from);
+	}
+
 	private endOfLine(content: string, from: number): number {
 		const lf = content.indexOf('\n', from);
 		return lf === -1 ? content.length : lf;

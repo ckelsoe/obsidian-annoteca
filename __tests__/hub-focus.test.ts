@@ -331,6 +331,19 @@ describe('#83: Open in tab', () => {
 		expect(h.openedTabs).toEqual([`${A}:aaaaaaaa`]);
 	});
 
+	it('a copied comment does not, since its id is shared', () => {
+		const twin = serialize({
+			id: 'dupe0001',
+			category: 'clarify',
+			body: 'copy',
+		});
+		const h = harness(`${twin}\n\n${twin}`);
+		expect(
+			h.container.querySelector('.annoteca-reviewer-expanded'),
+		).not.toBeNull();
+		expect(h.container.querySelector('.annoteca-open-tab')).toBeNull();
+	});
+
 	it('an id-less comment does not, since a saved tab could not find it', () => {
 		const h = harness(
 			serialize({ category: 'clarify', body: 'no id here' }),

@@ -189,6 +189,12 @@ describe('planCloser', () => {
 		});
 	});
 
+	it('a fence line with text after it does not close the block', () => {
+		const doc = '```\ncode\n```js\nstill code\n```\nprose';
+		expect(plan(doc, 0, doc.indexOf('still') + 3).kind).toBe('refused');
+		expect(plan(doc, doc.indexOf('prose'), doc.length).kind).toBe('range');
+	});
+
 	it('allows a range that contains a whole code block', () => {
 		const doc = 'Intro.\n\n```js\nconst x = 1;\n```\n\nAfter.';
 		expect(plan(doc, 0, doc.length)).toEqual({

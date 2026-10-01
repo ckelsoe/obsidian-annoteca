@@ -130,11 +130,20 @@ function inFencedCode(content: string, pos: number): boolean {
 	for (let i = 0; i <= target; i++) {
 		const line = lines[i];
 		if (!line) break;
-		const fence = FENCE_LINE_RE.exec(line.body)?.[1];
+		const match = FENCE_LINE_RE.exec(line.body);
+		const fence = match?.[1];
+		// An opening fence may carry an info string (```js), but a closing one
+		// may carry nothing but whitespace, as CommonMark has it. Without that
+		// rule a ```js line inside an open block would close it, and the rest
+		// of the block would read as prose.
+		const closes =
+			match !== null && line.body.slice(match[0].length).trim() === '';
 		const isDelimiter =
 			fence !== undefined &&
 			(open === undefined ||
-				(fence.startsWith(open.char) && fence.length >= open.len));
+				(closes &&
+					fence.startsWith(open.char) &&
+					fence.length >= open.len));
 		if (i === target) return open !== undefined || isDelimiter;
 		if (fence !== undefined && isDelimiter)
 			open =

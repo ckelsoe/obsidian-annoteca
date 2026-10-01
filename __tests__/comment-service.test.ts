@@ -6,6 +6,7 @@ import type AnnotecaPlugin from '../main';
 import {
 	CommentService,
 	markerDamageMessage,
+	REJECT_BLOCKED_MESSAGE,
 	VANISHED_MESSAGE,
 } from '../comment-service';
 import { parseAll, serializeLeanMarker } from '../parser';
@@ -2759,6 +2760,26 @@ describe('range comments (closing marker)', () => {
 		expect(h.content).not.toContain('runs onto a second line');
 		// The range now covers the restored text.
 		expect(c.closer).toBeDefined();
+	});
+
+	it('reject refuses when the span holds another comment, and changes nothing', async () => {
+		const doc = [
+			'<!-- annoteca/tighten: wordy',
+			'[id=rng00005]',
+			'[addressed claude 2026-10-01]: rewrote',
+			'```annoteca-original',
+			'Old.',
+			'```',
+			'--> New text with <!-- annoteca/clarify: inner',
+			'[id=inr00001]',
+			'--> an inner comment.<!-- /annoteca rng00005 --> Tail.',
+		].join('\n');
+		const h = makeHarnessWith(doc);
+		const outer = parseAll(h.content).find((c) => c.id === 'rng00005');
+		if (!outer) throw new Error('no outer comment');
+		await h.service.rejectAddressed('note.md', outer);
+		expect(h.content).toBe(doc);
+		expect(noticeLog).toContain(REJECT_BLOCKED_MESSAGE);
 	});
 
 	it('eof mode: delete removes the lean marker, its store entry and its closer', async () => {
