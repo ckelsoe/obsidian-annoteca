@@ -1240,6 +1240,33 @@ settings:
 	border-bottom: 1px solid var(--background-modifier-border);
 }
 
+/* Focus mode (#83): takes the scope toolbar's place while the Thread tab shows
+ * one comment. Same rule and spacing, so the card below does not shift. */
+.annoteca-focus-bar {
+	display: flex;
+	gap: 6px;
+	align-items: center;
+	margin-bottom: 10px;
+	padding-bottom: 8px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.annoteca-focus-label {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--text-muted);
+}
+
+.annoteca-focus-exit {
+	display: inline-flex;
+	gap: 4px;
+	align-items: center;
+	flex-shrink: 0;
+}
+
 .annoteca-scope-select {
 	flex: 1;
 	min-width: 0;

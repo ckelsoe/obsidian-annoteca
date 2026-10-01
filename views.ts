@@ -417,6 +417,10 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 		this.registerEvent(
 			this.plugin.events.on('active-comment-changed', (payload) => {
 				const event = payload as { path: string; start: number };
+				this.threadRenderer.leaveFocusUnlessSelected(
+					event.path,
+					event.start,
+				);
 				this.threadRenderer.setActiveComment(event.path, event.start);
 				// Marker clicks force the Thread tab; the user's intent is to see
 				// the comment they clicked, not whatever tab was last viewed.
@@ -429,6 +433,14 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 		this.registerEvent(
 			this.plugin.events.on('index-changed', () =>
 				this.scheduleRefresh(),
+			),
+		);
+		// A focused comment (#83) is named by path. The plugin's own rename
+		// handler re-keys the index and fires index-changed, whose refresh is
+		// deferred to a microtask, so the focus is re-keyed before it renders.
+		this.registerEvent(
+			this.app.vault.on('rename', (file, oldPath) =>
+				this.threadRenderer.rekeyFocusOnRename(oldPath, file.path),
 			),
 		);
 		// The panel reads display settings (markdown rendering, among others)

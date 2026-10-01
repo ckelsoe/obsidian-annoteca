@@ -12,6 +12,7 @@ import type { Comment, ScopeState, StatusFilter } from './types';
 import { getCategoryOrFallback } from './categories';
 import { resolveSettingsCategories } from './settings';
 import { nowISO } from './parser';
+import { rekeyScopeAnchor } from './scope';
 import {
 	authorColorFor,
 	authorPickerOptions,
@@ -94,6 +95,32 @@ export class ThreadTabRenderer {
 	// Set by close(). See there.
 	private closed = false;
 
+	// Focus mode (#83): the Thread tab shows this one comment and nothing
+	// else, so a long conversation does not run into the others. Named by
+	// path plus the comment's identity (id, or category and body when it has
+	// none), which is what cardKey is built from, so it survives the edits and
+	// autosaves that move the comment's offset. The identity is kept apart
+	// from the path, not as a finished cardKey, because a rename changes the
+	// path and the key has to be rebuilt against the new one. Session-only;
+	// the panel opens on the full list again after a restart.
+	//
+	// `lastStart` is where the comment was on the last render. A comment with
+	// no id is identified by its text, so editing that text changes its
+	// identity; the offset is what lets the focus find it again.
+	private focus:
+		| {
+				path: string;
+				ident: Pick<Comment, 'id' | 'category' | 'body'>;
+				lastStart: number;
+		  }
+		| undefined;
+
+	// Where keyboard focus goes after the next render. Entering or leaving
+	// focus mode rebuilds the panel, which removes the button that was just
+	// pressed, and without this a keyboard user is dropped back to the top of
+	// the document.
+	private pendingKeyboardFocus: 'show-all' | 'focus-button' | undefined;
+
 	constructor(
 		private readonly plugin: AnnotecaPlugin,
 		private readonly app: App,
@@ -117,6 +144,32 @@ export class ThreadTabRenderer {
 		this.activeStart = start;
 		this.activeId = undefined;
 		this.activeTextKey = undefined;
+	}
+
+	// Whether focus mode is on. For the parent view and tests.
+	get isFocused(): boolean {
+		return this.focus !== undefined;
+	}
+
+	// Leave focus mode when something outside the panel selects a DIFFERENT
+	// comment, such as a click on another marker in the editor: the reader has
+	// moved on, and keeping the panel on the old comment would hide the one
+	// they just picked. Selecting the focused comment itself keeps the focus.
+	leaveFocusUnlessSelected(path: string, start: number): void {
+		const focus = this.focus;
+		if (!focus) return;
+		const still =
+			focus.path === path &&
+			(start === focus.lastStart ||
+				this.focusedComments().some((c) => c.marker.start === start));
+		if (!still) this.focus = undefined;
+	}
+
+	// A renamed note, or a renamed folder above it, takes the focus with it.
+	rekeyFocusOnRename(oldPath: string, newPath: string): void {
+		if (!this.focus) return;
+		const next = rekeyScopeAnchor(this.focus.path, oldPath, newPath);
+		if (next !== undefined) this.focus = { ...this.focus, path: next };
 	}
 
 	// The hub view is closing for good, as opposed to dispose(), which also
@@ -164,16 +217,25 @@ export class ThreadTabRenderer {
 
 	render(container: HTMLElement): void {
 		this.markdownLifetime = cycleLifetime(this.markdownLifetime);
+		if (this.focus) {
+			this.renderFocused(container, this.focus.path);
+			return;
+		}
 		this.renderScopeToolbar(container);
 
+		// Nothing below can take a pending keyboard focus except a rendered
+		// card, so an empty panel drops it rather than letting a later render
+		// grab focus out of nowhere.
 		const scopeFiles = this.plugin.computeScopeFiles();
 		if (scopeFiles.size === 0) {
+			this.pendingKeyboardFocus = undefined;
 			this.renderEmpty(container, 'No files in current scope.');
 			return;
 		}
 
 		const groups = this.buildScopedGroups(scopeFiles);
 		if (groups.length === 0) {
+			this.pendingKeyboardFocus = undefined;
 			this.renderEmpty(
 				container,
 				'No comments match this scope and filter.',
@@ -204,6 +266,17 @@ export class ThreadTabRenderer {
 		}
 
 		this.scrollActiveCardIntoView();
+		this.restoreKeyboardFocusToCard();
+	}
+
+	// Back from focus mode: put the keyboard on the Focus button of the
+	// comment that was focused, which is where the reader left off.
+	private restoreKeyboardFocusToCard(): void {
+		if (this.pendingKeyboardFocus !== 'focus-button') return;
+		this.pendingKeyboardFocus = undefined;
+		this.activeCardEl
+			?.querySelector<HTMLElement>('.annoteca-focus-enter')
+			?.focus();
 	}
 
 	// Reverse sync (F-292): when the selection changes (e.g. a marker clicked in
@@ -242,7 +315,10 @@ export class ThreadTabRenderer {
 	// draft is: its offset is not a name either. Two byte-identical id-less
 	// comments in one note share a key, which is the format's own irreducible
 	// ambiguity rather than something this can decide.
-	private cardKey(path: string, c: Comment): string {
+	private cardKey(
+		path: string,
+		c: Pick<Comment, 'id' | 'category' | 'body'>,
+	): string {
 		return c.id !== undefined
 			? `id:${path}\0${c.id}`
 			: `txt:${path}\0${c.category}\0${c.body}`;
@@ -462,6 +538,117 @@ export class ThreadTabRenderer {
 			}
 			this.refresh();
 		});
+	}
+
+	// Every comment in the focused note that matches the focus. Normally one.
+	// A comment copied within its note carries a copied id, so two markers can
+	// share the identity; both are shown rather than guessing between them.
+	//
+	// An id-less comment whose text changed matches nothing by identity. If an
+	// id-less comment still sits where the focused one last was, it is the
+	// same comment after an edit, and the focus adopts its new text. A comment
+	// with an id never needs this: editing does not change its id.
+	private focusedComments(): Comment[] {
+		const focus = this.focus;
+		if (!focus) return [];
+		const idx = this.plugin.commentIndex.get(focus.path);
+		if (!idx) return [];
+		const key = this.cardKey(focus.path, focus.ident);
+		const hits = idx.comments.filter(
+			(c) => this.cardKey(focus.path, c) === key,
+		);
+		if (hits.length === 0 && focus.ident.id === undefined) {
+			const moved = idx.comments.find(
+				(c) => c.id === undefined && c.marker.start === focus.lastStart,
+			);
+			if (moved) {
+				focus.ident = {
+					id: undefined,
+					category: moved.category,
+					body: moved.body,
+				};
+				return [moved];
+			}
+		}
+		const only = hits.length === 1 ? hits[0] : undefined;
+		if (only) focus.lastStart = only.marker.start;
+		return hits;
+	}
+
+	private enterFocus(path: string, c: Comment): void {
+		this.focus = {
+			path,
+			ident: { id: c.id, category: c.category, body: c.body },
+			lastStart: c.marker.start,
+		};
+		this.pendingKeyboardFocus = 'show-all';
+		this.activePath = path;
+		this.activeStart = c.marker.start;
+		this.activeId = c.id;
+		this.activeTextKey = this.cardKey(path, c);
+		this.refresh();
+	}
+
+	private leaveFocus(): void {
+		this.focus = undefined;
+		this.pendingKeyboardFocus = 'focus-button';
+		// Bring the list back with the focused comment still selected, and in
+		// view, rather than jumping to the top.
+		this.lastScrolledActiveKey = undefined;
+		this.refresh();
+	}
+
+	// Focus mode replaces the scope toolbar and the list. The scope and status
+	// filters do not apply: the point is this one comment, including after it
+	// is resolved, when the "Open" filter would otherwise drop it.
+	private renderFocused(container: HTMLElement, path: string): void {
+		const bar = container.createDiv({ cls: 'annoteca-focus-bar' });
+		const file = this.app.vault.getAbstractFileByPath(path);
+		bar.createSpan({
+			cls: 'annoteca-focus-label',
+			text: `One comment in ${file instanceof TFile ? file.basename : path}`,
+		});
+		const back = bar.createEl('button', {
+			cls: 'annoteca-focus-exit',
+			attr: { 'aria-label': 'Show all comments' },
+		});
+		setIcon(back, 'list');
+		back.createSpan({ text: 'Show all' });
+		back.addEventListener('click', () => this.leaveFocus());
+		if (this.pendingKeyboardFocus === 'show-all') {
+			this.pendingKeyboardFocus = undefined;
+			back.focus();
+		}
+
+		const comments = this.focusedComments();
+		if (comments.length === 0) {
+			this.renderEmpty(
+				container,
+				'This comment is no longer in the note. It may have been deleted, or resolved and removed.',
+			);
+			return;
+		}
+		// A single match IS the selection. Re-learned on every render because
+		// the offset moves with edits above it, and switching notes clears the
+		// selection while the focus stays put.
+		const only = comments.length === 1 ? comments[0] : undefined;
+		if (only) {
+			this.activePath = path;
+			this.activeStart = only.marker.start;
+			this.activeId = only.id;
+			this.activeTextKey = this.cardKey(path, only);
+		}
+		this.activeCardEl = undefined;
+		const list = container.createDiv({ cls: 'annoteca-reviewer-list' });
+		for (const c of comments) {
+			const isActive =
+				path === this.activePath && c.marker.start === this.activeStart;
+			const card = list.createDiv({
+				cls: `annoteca-reviewer-card${isActive ? ' is-active' : ''}`,
+			});
+			this.renderCommentCard(card, c, path, isActive);
+		}
+		this.scrollActiveCardIntoView();
 	}
 
 	private renderScopeToolbar(container: HTMLElement): void {
@@ -1118,6 +1305,18 @@ export class ThreadTabRenderer {
 				},
 			);
 		}
+		// #83. Hidden while focused, where the bar's "Show all" is the way out.
+		if (!this.focus)
+			this.createActionButton(
+				actions,
+				'Focus',
+				'focus',
+				() => this.enterFocus(path, c),
+				{
+					ariaLabel: 'Focus on this comment',
+					cls: 'annoteca-focus-enter',
+				},
+			);
 		this.createActionButton(actions, 'Edit', 'pencil', () => {
 			void this.plugin.editCommentFromReviewer(path, c);
 		});
@@ -1168,8 +1367,14 @@ export class ThreadTabRenderer {
 		label: string,
 		icon: string,
 		handler: () => void,
+		extra?: { ariaLabel: string; cls: string },
 	): void {
-		const btn = parent.createEl('button', { cls: 'annoteca-action-btn' });
+		const btn = parent.createEl('button', {
+			cls: extra
+				? `annoteca-action-btn ${extra.cls}`
+				: 'annoteca-action-btn',
+		});
+		if (extra) btn.setAttribute('aria-label', extra.ariaLabel);
 		setIcon(btn, icon);
 		btn.createSpan({ text: label });
 		btn.addEventListener('click', handler);
