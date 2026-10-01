@@ -44,6 +44,7 @@ import { parseDocument } from './document';
 import {
 	planActiveCommentDecorations,
 	planFlashRange,
+	rangeSpan,
 	FLASH_COMMENT_CLASS,
 	resolveAnchorRangeInWindows,
 	ANCHOR_WINDOW,
@@ -546,6 +547,8 @@ function findAnchorRange(
 	doc: import('@codemirror/state').Text,
 	m: Comment,
 ): { from: number; to: number } | null {
+	// A range comment (#84) states its own extent; nothing to match.
+	if (m.closer) return rangeSpan(m, (pos) => doc.sliceString(pos, pos + 1));
 	const a = m.anchor;
 	if (!a) return null;
 	const text = a.text;
@@ -674,6 +677,20 @@ function decorationsCompute(
 					inclusive: false,
 				}).range(m.marker.start, m.marker.end),
 			);
+
+			// A range comment's closer (#84) is hidden wherever its opener is
+			// drawn as an icon, so a commented passage reads as plain prose
+			// with an underline, not with raw HTML at its end. In "underline"
+			// style the opener's raw text is on screen too, and the closer
+			// stays visible with it.
+			if (m.closer) {
+				decorations.push(
+					Decoration.replace({ inclusive: false }).range(
+						m.closer.start,
+						m.closer.end,
+					),
+				);
+			}
 
 			// Inline body (#4), drawn immediately after the icon it belongs
 			// to. Reached only when the icon is drawn, which is why the

@@ -260,6 +260,21 @@ export function planActiveCommentDecorations(
 	return specs;
 }
 
+// The exact passage of a range comment (#84): from the end of its opening
+// marker, past the single space the composer writes after it, to the start of
+// its closer. Null for a comment with no closer, which callers then locate the
+// old way, by matching the anchor text next to the marker. Null too for an
+// empty range, since a zero-width span highlights nothing.
+export function rangeSpan(
+	m: Comment,
+	charAt: (pos: number) => string,
+): { from: number; to: number } | null {
+	if (!m.closer) return null;
+	const from = charAt(m.marker.end) === ' ' ? m.marker.end + 1 : m.marker.end;
+	const to = m.closer.start;
+	return to > from ? { from, to } : null;
+}
+
 export const FLASH_COMMENT_CLASS = 'annoteca-flash-comment';
 
 // Pure planner for the arrival flash (#82): the span that briefly lights up
@@ -270,7 +285,8 @@ export const FLASH_COMMENT_CLASS = 'annoteca-flash-comment';
 // Reject restores, computed the same way: from the end of the marker, past
 // the single begin-placement space, to the end of that line. Any other
 // comment flashes its anchored passage when that resolves. Without either,
-// the marker itself flashes, so a jump always shows something.
+// the marker itself flashes, so a jump always shows something. A range
+// comment's edited prose ends at its closer rather than at the line end.
 //
 // `lineEndAt` returns the end of the line holding an offset. It is passed in
 // so this stays free of CodeMirror and can be tested on plain strings.
@@ -285,7 +301,7 @@ export function planFlashRange(
 	if (m.addressed) {
 		const proseStart =
 			charAt(m.marker.end) === ' ' ? m.marker.end + 1 : m.marker.end;
-		const lineEnd = lineEndAt(proseStart);
+		const lineEnd = m.closer ? m.closer.start : lineEndAt(proseStart);
 		if (lineEnd > proseStart) return { from: proseStart, to: lineEnd };
 	}
 	if (anchorRange && anchorRange.from < anchorRange.to) return anchorRange;

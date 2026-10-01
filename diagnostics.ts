@@ -2,7 +2,12 @@
 // (F-233), and format validation (F-235). All pure over file content.
 
 import type { Comment } from './types';
-import { parseAll, findMalformedMarkers, type MalformedMarker } from './parser';
+import {
+	parseAll,
+	findMalformedMarkers,
+	scanClosers,
+	type MalformedMarker,
+} from './parser';
 import { isLeanMarker, parseDocument } from './document';
 import { parseStore } from './store';
 
@@ -174,6 +179,58 @@ export function detectStoreOrphans(
 		});
 	}
 
+	return out;
+}
+
+// Range closers (#84) that pair with nothing. A closer is only attached when
+// the pairing is certain (see pairClosers in parser.ts), so each of these is a
+// comment that has quietly fallen back to marking only its start:
+//   - orphaned-closer: no comment in the note carries this id. Its comment was
+//     deleted by hand, or the closer was pasted into another note.
+//   - closer-before-opener: the closer sits above its comment's marker, so it
+//     cannot end the passage the marker starts. One of the two was moved.
+//   - duplicate-closer: more than one closer carries this id, so which one ends
+//     the passage cannot be told.
+//   - duplicate-opener: more than one marker carries this id (a copied comment),
+//     so which one the closer belongs to cannot be told.
+// The fix is a hand edit, and the report says which id to look for.
+export interface RangeFinding {
+	path: string;
+	kind:
+		| 'orphaned-closer'
+		| 'closer-before-opener'
+		| 'duplicate-closer'
+		| 'duplicate-opener';
+	id: string;
+	// Where the closer is, in editor offsets, so it can be found in the note.
+	offset: number;
+}
+
+export function detectRangeIssues(
+	content: string,
+	path: string,
+): RangeFinding[] {
+	const comments = parseAll(content);
+	const closers = scanClosers(
+		content,
+		comments.map((c) => c.marker),
+	);
+	const out: RangeFinding[] = [];
+	for (const k of closers) {
+		const openers = comments.filter((c) => c.id === k.id);
+		const siblings = closers.filter((o) => o.id === k.id);
+		const kind: RangeFinding['kind'] | undefined =
+			openers.length === 0
+				? 'orphaned-closer'
+				: openers.length > 1
+					? 'duplicate-opener'
+					: siblings.length > 1
+						? 'duplicate-closer'
+						: openers.some((o) => o.marker.end <= k.start)
+							? undefined
+							: 'closer-before-opener';
+		if (kind) out.push({ path, kind, id: k.id, offset: k.start });
+	}
 	return out;
 }
 

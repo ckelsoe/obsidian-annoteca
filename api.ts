@@ -3,7 +3,11 @@ import type { EventRef } from 'obsidian';
 import type AnnotecaPlugin from './main';
 import type { Comment, CreatedComment, PromoteRequest } from './types';
 import { parseDocument } from './document';
-import { ANCHOR_WINDOW, resolveAnchorRangeInWindows } from './view-utils';
+import {
+	ANCHOR_WINDOW,
+	rangeSpan,
+	resolveAnchorRangeInWindows,
+} from './view-utils';
 import { resolveSettingsCategories } from './settings';
 
 // The read-only API other plugins call (F-284, interop-contract section 7).
@@ -231,6 +235,28 @@ export function createApi(plugin: AnnotecaPlugin): AnnotecaApi {
 			// marker moves every offset after it.
 			const out: AnchorRange[] = [];
 			for (const c of parseDocument(content).comments) {
+				// A range comment (#84) carries its exact extent in the file,
+				// so it is reported from that rather than from anchor matching,
+				// which loses a passage longer than the anchor window or one
+				// that crosses a line break.
+				// Gated on the closer, not on the span: a range whose text was
+				// deleted has no span, and falling through to anchor matching
+				// would then report whatever matching text precedes the marker,
+				// which is not the comment's passage. The editor draws nothing
+				// there, and this agrees with it.
+				if (c.closer) {
+					const span = rangeSpan(c, (pos) => content.charAt(pos));
+					if (!span) continue;
+					out.push({
+						start: span.from,
+						end: span.to,
+						category: c.category,
+						resolved: c.resolution !== undefined,
+						addressed: c.addressed !== undefined,
+						commentId: c.id,
+					});
+					continue;
+				}
 				const anchor = c.anchor;
 				if (!anchor || anchor.text.length === 0) {
 					continue;

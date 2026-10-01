@@ -29,6 +29,7 @@ import type {
 	Reply,
 } from './types';
 import { ConfirmPromotionModal } from './confirm-modal';
+import { frontmatterEnd } from './range-placement';
 import {
 	findRemovalBlocker,
 	parseAll,
@@ -40,6 +41,7 @@ import {
 	isAuthorToken,
 	isCommentSource,
 	isSerializableCategory,
+	scanClosers,
 	type MalformedMarker,
 } from './parser';
 import {
@@ -145,10 +147,15 @@ function forbiddenRanges(content: string): { start: number; end: number }[] {
 	for (const e of scanStoreEntries(content)) {
 		out.push({ start: e.start, end: e.end });
 	}
+	// Range closers (#84), for the same reason as markers: a marker spliced
+	// into the middle of one breaks it, and its comment silently loses its end.
+	for (const k of scanClosers(content)) {
+		out.push({ start: k.start, end: k.end });
+	}
 	// Frontmatter, only when the document opens with it. A `---` fence anywhere
 	// else is a horizontal rule and is ordinary prose.
-	const fm = /^---\n[\s\S]*?\n---[ \t]*(\n|$)/.exec(content);
-	if (fm) out.push({ start: 0, end: fm[0].length });
+	const fm = frontmatterEnd(content);
+	if (fm > 0) out.push({ start: 0, end: fm });
 	return out;
 }
 
@@ -203,6 +210,14 @@ function isValidPromoteRequest(
 		!forbidden.some((f) => start > f.start && start < f.end) &&
 		!forbidden.some((f) => end > f.start && start < f.end)
 	);
+}
+
+// Removes a range comment's closer (#84). Exactly the closer, nothing around it:
+// the composer writes it straight after the passage's last character, so there
+// is no padding to take with it, and taking a line break could collide with the
+// store region's splice when the closer is the last thing before it.
+function closerSplice(closer: MarkerRange): SpliceRange {
+	return { from: closer.start, to: closer.end, insert: '' };
 }
 
 export class CommentService {
@@ -609,7 +624,13 @@ export class CommentService {
 		// prose, if present.
 		const proseStart =
 			content.charAt(markerEnd) === ' ' ? markerEnd + 1 : markerEnd;
-		const lineEnd = this.endOfLine(content, proseStart);
+		// A range comment (#84) says exactly where the edited prose ends, so
+		// Reject restores that span and nothing else, across as many lines as
+		// it covers. Without a closer it is the old rule: to the end of the
+		// line, which cannot see an edit that ran onto the next line.
+		const lineEnd = current.closer
+			? current.closer.start
+			: this.endOfLine(content, proseStart);
 
 		const reopened: Comment = { ...full, addressed: undefined };
 
@@ -942,6 +963,7 @@ export class CommentService {
 				start -= 1;
 			}
 			splices.push({ from: start, to: end, insert: '' });
+			if (c.closer) splices.push(closerSplice(c.closer));
 		}
 
 		// Drop the store entries of every eof-stored resolved comment in one region
@@ -1384,7 +1406,12 @@ export class CommentService {
 			current.marker.start,
 			current.marker.end,
 		);
-		if (!eof) return [markerSplice];
+		// A range comment (#84) loses its closer with it. Left behind, the
+		// closer would be a stray that the orphan check reports forever.
+		const prose = current.closer
+			? [markerSplice, closerSplice(current.closer)]
+			: [markerSplice];
+		if (!eof) return prose;
 		const remaining = eof.allEntries
 			.filter((e) => e !== eof.entry)
 			.map((e) => e.comment);
@@ -1392,7 +1419,7 @@ export class CommentService {
 			content,
 			writeStoreRegion(content, remaining),
 		);
-		return storeSplice ? [markerSplice, storeSplice] : [markerSplice];
+		return storeSplice ? [...prose, storeSplice] : prose;
 	}
 
 	private buildDeleteSplice(

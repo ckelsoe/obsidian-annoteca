@@ -19,8 +19,11 @@ import {
 	parseAt,
 	serialize,
 	serializeLeanMarker,
+	serializeCloser,
+	scanClosers,
 	nowISO,
 } from './parser';
+import { planCloser, type CloserPlan } from './range-placement';
 import {
 	coerceStorageMode,
 	resolveEofTarget,
@@ -346,6 +349,21 @@ export class ComposerForm {
 		if (this.request.editing) return undefined;
 		return this.plugin.settings.categories.find((c) => c.id === category)
 			?.defaultBody;
+	}
+
+	// Where the new comment's closer goes, judged against the note as it is
+	// before the marker is inserted. Every existing marker and closer is
+	// passed so the closer cannot land inside one.
+	private closerPlan(editor: Editor, fromOffset: number): CloserPlan {
+		const content = editor.getValue();
+		const markers = parseAll(content).map((c) => c.marker);
+		const occupied = [...markers, ...scanClosers(content, markers)];
+		return planCloser(
+			content,
+			fromOffset,
+			editor.posToOffset(editor.getCursor('to')),
+			occupied,
+		);
 	}
 
 	private buildCommentForCreate(
@@ -711,7 +729,28 @@ export class ComposerForm {
 			// (end-placed) side.
 			const from = editor.getCursor('from');
 			const fromOffset = editor.posToOffset(from);
-			editor.replaceRange(`${text} `, from);
+			// #84: and a closer at the END, so the comment covers exactly the
+			// selection. Both go in ONE transaction, so a single undo removes
+			// the comment whole rather than leaving half of it. The changes are
+			// in the document's coordinates before either lands.
+			const plan =
+				id === undefined
+					? ({ kind: 'none' } as const)
+					: this.closerPlan(editor, fromOffset);
+			if (plan.kind === 'range' && id !== undefined) {
+				editor.transaction({
+					changes: [
+						{ from, text: `${text} ` },
+						{
+							from: editor.offsetToPos(plan.at),
+							text: serializeCloser(id),
+						},
+					],
+				});
+			} else {
+				if (plan.kind === 'refused') new Notice(plan.reason);
+				editor.replaceRange(`${text} `, from);
+			}
 			markerStart = fromOffset;
 		} else {
 			const cursor = editor.getCursor();
