@@ -116,6 +116,13 @@ import {
 	type FrontmatterSummaryOptions,
 } from './frontmatter-summary';
 
+// The element a note-side action came from, for finding its leaf: a command
+// or menu gets the note's view, which in a pop-out window is how the comment
+// opens there.
+function originOf(view: MarkdownFileInfo): HTMLElement | undefined {
+	return view instanceof MarkdownView ? view.containerEl : undefined;
+}
+
 // A comment's own tab, the only way to show its thread beside a note in a
 // pop-out window, finds the comment by id.
 const POPOUT_NO_ID_MESSAGE =
@@ -165,8 +172,12 @@ export default class AnnotecaPlugin extends Plugin {
 				getSourcePath: () =>
 					this.app.workspace.getActiveFile()?.path ?? '',
 				getSettings: () => this.settings,
-				onMarkerClick: (m, from) =>
-					this.openReviewerOnComment(m, undefined, from),
+				onMarkerClick: (m, sourcePath, from) =>
+					this.openReviewerOnComment(
+						m,
+						sourcePath || undefined,
+						from,
+					),
 				openInReviewer: (m, sourcePath, from) =>
 					this.openReviewerOnComment(
 						m,
@@ -609,7 +620,11 @@ export default class AnnotecaPlugin extends Plugin {
 							.setTitle('Annoteca: reply to comment')
 							.setIcon('reply')
 							.onClick(() =>
-								this.openReviewerOnComment(inside, file.path),
+								this.openReviewerOnComment(
+									inside,
+									file.path,
+									originOf(view),
+								),
 							),
 					);
 					menu.addItem((item) =>
@@ -770,7 +785,7 @@ export default class AnnotecaPlugin extends Plugin {
 			name: 'Reply to comment here',
 			editorCallback: (editor: Editor, view: MarkdownFileInfo) => {
 				this.withCommentAtCursor(editor, view, (path, c) =>
-					this.openReviewerOnComment(c, path),
+					this.openReviewerOnComment(c, path, originOf(view)),
 				);
 			},
 		});
@@ -2216,7 +2231,18 @@ export default class AnnotecaPlugin extends Plugin {
 
 		if (!target) return;
 		await this.navigateToOffset(target.path, target.comment.marker.start);
-		this.openReviewerOnComment(target.comment, target.path);
+		// The comment opens where the jump landed. Crossing into another
+		// note moves to that note's leaf, which navigation has just made the
+		// active one; the command's own view still shows the note it left.
+		const landed = this.app.workspace.getMostRecentLeaf();
+		const origin =
+			target.path === currentPath
+				? originOf(view)
+				: landed?.view instanceof MarkdownView &&
+					  landed.view.file?.path === target.path
+					? landed.view.containerEl
+					: undefined;
+		this.openReviewerOnComment(target.comment, target.path, origin);
 	}
 
 	// #83: open one comment in a main-area tab of its own, or bring forward
@@ -2236,23 +2262,38 @@ export default class AnnotecaPlugin extends Plugin {
 		const id = comment.id;
 		if (id === undefined) return;
 		const container = beside?.getContainer();
+		const tabs = this.app.workspace.getLeavesOfType(
+			ANNOTECA_COMMENT_VIEW_TYPE,
+		);
 		// Matched on the saved view STATE, not on the view object. A tab
 		// restored in the background holds a DeferredView until it is first
 		// shown, so an instanceof check misses it and stacks a duplicate tab,
 		// the same failure findMarkdownLeafForPath works around for notes.
-		const existing = this.app.workspace
-			.getLeavesOfType(ANNOTECA_COMMENT_VIEW_TYPE)
-			.find((leaf) => {
-				const shown = commentTabState(leaf.getViewState().state);
-				return (
-					shown?.path === path &&
-					shown.id === id &&
-					(container === undefined ||
-						leaf.getContainer() === container)
-				);
-			});
+		const existing = tabs.find((leaf) => {
+			const shown = commentTabState(leaf.getViewState().state);
+			return (
+				shown?.path === path &&
+				shown.id === id &&
+				(container === undefined || leaf.getContainer() === container)
+			);
+		});
 		if (existing) {
 			void this.app.workspace.revealLeaf(existing);
+			return;
+		}
+		// In a pop-out the tab stands in for the side panel, so one tab
+		// follows the reader from comment to comment rather than a new one
+		// opening for each.
+		const reuse =
+			container && tabs.find((leaf) => leaf.getContainer() === container);
+		if (reuse) {
+			void reuse
+				.setViewState({
+					type: ANNOTECA_COMMENT_VIEW_TYPE,
+					state: { path, id },
+					active: true,
+				})
+				.then(() => this.app.workspace.revealLeaf(reuse));
 			return;
 		}
 		const leaf = beside
@@ -2265,21 +2306,21 @@ export default class AnnotecaPlugin extends Plugin {
 		});
 	}
 
-	// The note leaf the reader is working in, when it is in a pop-out window
-	// and shows `path`; undefined for the main window. `from` is the element
-	// the action came from, when the caller knows it: a hover popover never
-	// activates its note's leaf, so the most recent leaf can be another copy
-	// of the note, in another window. Commands and menus act on the active
-	// leaf, so without `from` the most recent leaf is the reader's.
+	// The note leaf an action came from, when it is in a pop-out window and
+	// shows `path`; undefined otherwise. Found from `from`, the element the
+	// action came from, and only from it. A hover popover never activates its
+	// note's leaf, so the most recent leaf can be another copy of the note in
+	// another window; and a click in the hub moves focus to the note, so a
+	// recency guess would turn every hub click on a pop-out note into a tab
+	// in the pop-out instead of a selection in the hub the reader clicked.
 	private popoutLeafFor(
 		path: string,
 		from?: HTMLElement,
 	): MarkdownView | undefined {
-		const leaf = from
-			? this.app.workspace
-					.getLeavesOfType('markdown')
-					.find((l) => l.view.containerEl.contains(from))
-			: this.app.workspace.getMostRecentLeaf();
+		if (!from) return undefined;
+		const leaf = this.app.workspace
+			.getLeavesOfType('markdown')
+			.find((l) => l.view.containerEl.contains(from));
 		if (!leaf || !(leaf.view instanceof MarkdownView)) return undefined;
 		if (leaf.view.file?.path !== path) return undefined;
 		return leaf.getContainer() === this.app.workspace.rootSplit

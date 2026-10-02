@@ -139,8 +139,11 @@ describe('openReviewerOnComment from a pop-out note', () => {
 			inPopout: true,
 			ids: ['aaaaaaaa'],
 		});
-		plugin.openReviewerOnComment(c, PATH);
-		expect(calls.tab).toEqual([[PATH, c, note.leaf]]);
+		plugin.openReviewerOnComment(c, PATH, note.editorEl);
+		expect(calls.tab).toHaveLength(1);
+		expect(calls.tab[0]?.[0]).toBe(PATH);
+		expect(calls.tab[0]?.[1]).toBe(c);
+		expect(calls.tab[0]?.[2]).toBe(note.leaf);
 		expect(calls.highlight).toEqual([[PATH, 5]]);
 		// Indexed from the editor before the tab opened, and announced.
 		expect(calls.indexedAtOpen).toEqual([['aaaaaaaa']]);
@@ -150,8 +153,8 @@ describe('openReviewerOnComment from a pop-out note', () => {
 	});
 
 	it('shows a notice, not the main window hub, for a comment with no id', () => {
-		const { plugin, calls } = setup({ inPopout: true, ids: [] });
-		plugin.openReviewerOnComment(comment(undefined), PATH);
+		const { plugin, note, calls } = setup({ inPopout: true, ids: [] });
+		plugin.openReviewerOnComment(comment(undefined), PATH, note.editorEl);
 		expect(calls.tab).toEqual([]);
 		expect(calls.hub).toBe(0);
 		expect(noticeLog).toHaveLength(1);
@@ -159,11 +162,11 @@ describe('openReviewerOnComment from a pop-out note', () => {
 	});
 
 	it('treats a duplicated id like no id', () => {
-		const { plugin, calls } = setup({
+		const { plugin, note, calls } = setup({
 			inPopout: true,
 			ids: ['aaaaaaaa', 'aaaaaaaa'],
 		});
-		plugin.openReviewerOnComment(comment('aaaaaaaa'), PATH);
+		plugin.openReviewerOnComment(comment('aaaaaaaa'), PATH, note.editorEl);
 		expect(calls.tab).toEqual([]);
 		expect(calls.hub).toBe(0);
 		expect(noticeLog).toHaveLength(1);
@@ -180,7 +183,10 @@ describe('openReviewerOnComment from a pop-out note', () => {
 			recentInMain: true,
 		});
 		plugin.openReviewerOnComment(c, PATH, note.editorEl);
-		expect(calls.tab).toEqual([[PATH, c, note.leaf]]);
+		expect(calls.tab).toHaveLength(1);
+		expect(calls.tab[0]?.[0]).toBe(PATH);
+		expect(calls.tab[0]?.[1]).toBe(c);
+		expect(calls.tab[0]?.[2]).toBe(note.leaf);
 		expect(calls.hub).toBe(0);
 	});
 
@@ -192,6 +198,21 @@ describe('openReviewerOnComment from a pop-out note', () => {
 		plugin.openReviewerOnComment(comment('aaaaaaaa'), PATH, main.editorEl);
 		expect(calls.tab).toEqual([]);
 		expect(calls.hub).toBe(1);
+	});
+
+	// A click in the hub moves focus to the note, so the pop-out note is the
+	// most recent leaf by the time the hub asks. Without an origin the hub
+	// keeps the click: a tab in the pop-out would take it away from the panel
+	// the reader clicked in.
+	it('keeps a hub click in the hub when the note is in a pop-out', () => {
+		const { plugin, calls } = setup({
+			inPopout: true,
+			ids: ['aaaaaaaa'],
+		});
+		plugin.openReviewerOnComment(comment('aaaaaaaa'), PATH);
+		expect(calls.tab).toEqual([]);
+		expect(calls.hub).toBe(1);
+		expect(noticeLog).toEqual([]);
 	});
 
 	it('opens the hub as before for a note in the main window', () => {
@@ -235,5 +256,132 @@ describe('scanVaultIfNeeded', () => {
 		expect(commentIndex.get(PATH)?.comments.map((c) => c.id)).toEqual([
 			'bbbbbbbb',
 		]);
+	});
+});
+
+// In a pop-out the comment tab stands in for the side panel, so stepping from
+// comment to comment (next and previous, or clicking marker after marker)
+// moves one tab rather than opening a tab per comment.
+describe('openCommentInTab beside a pop-out note', () => {
+	function tabsSetup() {
+		const popout = {};
+		const elsewhere = {};
+		const made: { state: unknown }[] = [];
+		const tabLeaf = (container: object, id: string) => {
+			const leaf = {
+				state: { path: PATH, id } as unknown,
+				getContainer: () => container,
+				getViewState: () => ({ state: leaf.state }),
+				setViewState: (vs: { state: unknown }) => {
+					leaf.state = vs.state;
+					return Promise.resolve();
+				},
+			};
+			return leaf;
+		};
+		const tabs: ReturnType<typeof tabLeaf>[] = [];
+		const plugin = Object.create(AnnotecaPlugin.prototype) as unknown as {
+			openCommentInTab(path: string, c: Comment, beside?: unknown): void;
+		};
+		Object.assign(plugin, {
+			app: {
+				workspace: {
+					getLeavesOfType: () => tabs,
+					revealLeaf: () => Promise.resolve(),
+					createLeafBySplit: () => {
+						const leaf = tabLeaf(popout, '');
+						made.push(leaf);
+						tabs.push(leaf);
+						return leaf;
+					},
+					getLeaf: () => {
+						throw new Error(
+							'a pop-out tab must not open in the main area',
+						);
+					},
+				},
+			},
+		});
+		const beside = { getContainer: () => popout };
+		return { plugin, tabs, made, beside, tabLeaf, popout, elsewhere };
+	}
+
+	it('points the pop-out comment tab at the next comment', () => {
+		const t = tabsSetup();
+		t.tabs.push(t.tabLeaf(t.popout, 'aaaaaaaa'));
+		t.plugin.openCommentInTab(PATH, comment('bbbbbbbb'), t.beside);
+		expect(t.made).toEqual([]);
+		expect(t.tabs.map((l) => l.state)).toEqual([
+			{ path: PATH, id: 'bbbbbbbb' },
+		]);
+	});
+
+	it('leaves a comment tab in another window alone and opens one here', () => {
+		const t = tabsSetup();
+		t.tabs.push(t.tabLeaf(t.elsewhere, 'aaaaaaaa'));
+		t.plugin.openCommentInTab(PATH, comment('bbbbbbbb'), t.beside);
+		expect(t.made).toHaveLength(1);
+		expect(t.tabs.map((l) => l.state)).toEqual([
+			{ path: PATH, id: 'aaaaaaaa' },
+			{ path: PATH, id: 'bbbbbbbb' },
+		]);
+	});
+});
+
+// Next and previous comment can cross into another note. The comment then
+// opens where the jump landed, not where the command was run.
+describe('jumpToAdjacentComment across notes', () => {
+	function jumpSetup() {
+		const OTHER = 'notes/b.md';
+		const viewFor = (path: string) => {
+			const containerEl = document.body.createDiv();
+			return Object.assign(Object.create(MarkdownView.prototype), {
+				file: { path },
+				containerEl,
+			}) as MarkdownView;
+		};
+		const here = viewFor(PATH);
+		const there = viewFor(OTHER);
+		let recent: { view: MarkdownView } = { view: here };
+		const opened: { path?: string; from?: HTMLElement }[] = [];
+		const index = new CommentIndex();
+		index.rebuild(PATH, textWith(['aaaaaaaa']));
+		index.rebuild(OTHER, textWith(['bbbbbbbb']));
+		const plugin = Object.create(AnnotecaPlugin.prototype) as unknown as {
+			jumpToAdjacentComment(
+				editor: unknown,
+				view: unknown,
+				direction: 'next' | 'previous',
+				unresolvedOnly: boolean,
+			): Promise<void>;
+		};
+		Object.assign(plugin, {
+			commentIndex: index,
+			computeScopeFiles: () => [PATH, OTHER],
+			navigateToOffset: (path: string) => {
+				recent = { view: path === OTHER ? there : here };
+				return Promise.resolve();
+			},
+			openReviewerOnComment: (
+				_c: Comment,
+				path?: string,
+				from?: HTMLElement,
+			) => opened.push({ path, from }),
+			app: { workspace: { getMostRecentLeaf: () => recent } },
+		});
+		// The cursor sits past the note's only comment, so "next" crosses.
+		const editor = {
+			getCursor: () => ({ line: 0, ch: 0 }),
+			posToOffset: () => 10_000,
+		};
+		return { plugin, here, there, opened, editor, OTHER };
+	}
+
+	it('opens a comment in another note from the view it landed in', async () => {
+		const t = jumpSetup();
+		await t.plugin.jumpToAdjacentComment(t.editor, t.here, 'next', false);
+		expect(t.opened.map((o) => o.path)).toEqual([t.OTHER]);
+		// Identity, not equality: two empty containers are deep-equal.
+		expect(t.opened[0]?.from).toBe(t.there.containerEl);
 	});
 });
