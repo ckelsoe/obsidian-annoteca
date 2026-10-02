@@ -275,6 +275,17 @@ export function rangeSpan(
 	return to > from ? { from, to } : null;
 }
 
+// Whether `c` has an id that no other comment in its note shares. A copied
+// comment carries a copied id, and anything saved by an ambiguous id (a
+// comment's own tab) would find both copies, so only a unique id qualifies.
+export function hasUniqueId(
+	comments: readonly Comment[],
+	c: Pick<Comment, 'id'>,
+): boolean {
+	if (c.id === undefined) return false;
+	return comments.filter((x) => x.id === c.id).length === 1;
+}
+
 export const FLASH_COMMENT_CLASS = 'annoteca-flash-comment';
 
 // Pure planner for the arrival flash (#82): the span that briefly lights up

@@ -436,6 +436,19 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 				this.scheduleRefresh(),
 			),
 		);
+		// The Outline tree reads Obsidian's cached headings and list items,
+		// which Obsidian updates a moment AFTER the save that rebuilt the
+		// comment index. Without this the tree drew the previous version of
+		// the note (or "No headings" for a new one) until something else
+		// refreshed it.
+		this.registerEvent(
+			this.app.metadataCache.on('changed', (file) => {
+				if (this.activeTab !== 'outline') return;
+				if (this.app.workspace.getActiveFile()?.path !== file.path)
+					return;
+				this.scheduleRefresh();
+			}),
+		);
 		// A focused comment (#83) is named by path. The plugin's own rename
 		// handler re-keys the index and fires index-changed, whose refresh is
 		// deferred to a microtask, so the focus is re-keyed before it renders.

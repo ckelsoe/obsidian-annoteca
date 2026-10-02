@@ -21,9 +21,20 @@ beforeAll(() => {
 	installObsidianDomHelpers();
 });
 
+// The note the headings come from. The tree reads positions as line numbers
+// against this text, so the cursor at offset 100 sits under "Details".
+const TEXT = `# Intro\n${'x'.repeat(80)}\n## Details\n${'y'.repeat(40)}`;
 const HEADINGS = [
-	{ heading: 'Intro', level: 1, position: { start: { offset: 0 } } },
-	{ heading: 'Details', level: 2, position: { start: { offset: 100 } } },
+	{
+		heading: 'Intro',
+		level: 1,
+		position: { start: { offset: 0, line: 0, col: 0 } },
+	},
+	{
+		heading: 'Details',
+		level: 2,
+		position: { start: { offset: 89, line: 2, col: 0 } },
+	},
 ];
 
 // A markdown leaf whose view starts deferred (a plain object, not a
@@ -32,6 +43,7 @@ function makeDeferredLeaf(cursorOffset: number) {
 	const editor = {
 		getCursor: () => ({ line: 0, ch: cursorOffset }),
 		posToOffset: (p: { ch: number }) => p.ch,
+		getValue: () => TEXT,
 	};
 	const leaf: { view: unknown; load: () => void } = {
 		view: {},
@@ -61,6 +73,10 @@ function makePlugin(
 		},
 		navigateToComment: () => Promise.resolve(),
 		navigateToOffset: () => Promise.resolve(),
+		// No editor holds the note while the leaf is deferred, so the tree
+		// reads the file. Never resolving keeps that read out of these tests,
+		// which are about the leaf load.
+		comments: { currentNoteText: () => new Promise(() => undefined) },
 	} as unknown as AnnotecaPlugin;
 	const app = {
 		workspace: { getActiveFile: () => file },
@@ -133,6 +149,7 @@ describe('Outline tab: cursor heading for a deferred leaf (M12a)', () => {
 			},
 			navigateToComment: () => Promise.resolve(),
 			navigateToOffset: () => Promise.resolve(),
+			comments: { currentNoteText: () => new Promise(() => undefined) },
 		} as unknown as AnnotecaPlugin;
 		const app = {
 			workspace: {

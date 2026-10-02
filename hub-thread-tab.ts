@@ -17,6 +17,7 @@ import {
 	authorColorFor,
 	authorPickerOptions,
 	formatStamp,
+	hasUniqueId,
 	truncate,
 	replyCountLabel,
 } from './view-utils';
@@ -1359,7 +1360,10 @@ export class ThreadTabRenderer {
 		// that tab, not for an id-less comment, which has nothing a saved tab
 		// could find it by after a restart, and not for a copied one whose id
 		// is shared.
-		if (!this.standalone && this.hasUniqueId(path, c))
+		if (
+			!this.standalone &&
+			hasUniqueId(this.plugin.commentIndex.get(path)?.comments ?? [], c)
+		)
 			this.createActionButton(
 				actions,
 				'Open in tab',
@@ -1428,15 +1432,6 @@ export class ThreadTabRenderer {
 			e.preventDefault();
 			this.selectAndReveal(path, c, true);
 		});
-	}
-
-	// A comment whose id no other comment in its note shares. A copied comment
-	// carries a copied id, and a tab saved by an ambiguous id would show both
-	// copies, so neither gets a tab until one is changed.
-	private hasUniqueId(path: string, c: Comment): boolean {
-		if (c.id === undefined) return false;
-		const comments = this.plugin.commentIndex.get(path)?.comments ?? [];
-		return comments.filter((x) => x.id === c.id).length === 1;
 	}
 
 	private createActionButton(

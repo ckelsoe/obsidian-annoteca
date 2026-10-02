@@ -246,6 +246,11 @@ export function installObsidianDomHelpers(): void {
 		// exercised path is `createEl('option', { value })`, and an option's
 		// value attribute is what its value property reads.
 		if (o.value !== undefined) el.setAttribute('value', o.value);
+		// Obsidian's `attr`: each entry set as an attribute; null removes it.
+		for (const [k, v] of Object.entries(o.attr ?? {})) {
+			if (v === null) el.removeAttribute(k);
+			else el.setAttribute(k, String(v));
+		}
 	}
 
 	// One shared builder behind createEl / createDiv / createSpan, so the
