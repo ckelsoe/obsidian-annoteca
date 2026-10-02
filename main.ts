@@ -165,9 +165,14 @@ export default class AnnotecaPlugin extends Plugin {
 				getSourcePath: () =>
 					this.app.workspace.getActiveFile()?.path ?? '',
 				getSettings: () => this.settings,
-				onMarkerClick: (m) => this.openReviewerOnComment(m),
-				openInReviewer: (m, sourcePath) =>
-					this.openReviewerOnComment(m, sourcePath || undefined),
+				onMarkerClick: (m, from) =>
+					this.openReviewerOnComment(m, undefined, from),
+				openInReviewer: (m, sourcePath, from) =>
+					this.openReviewerOnComment(
+						m,
+						sourcePath || undefined,
+						from,
+					),
 				addCommentForSelection: () => {
 					const view =
 						this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -2257,16 +2262,25 @@ export default class AnnotecaPlugin extends Plugin {
 	}
 
 	// The note leaf the reader is working in, when it is in a pop-out window
-	// and shows `path`. The most recent leaf, because a marker click or a
-	// popover button in a pop-out leaves that note's leaf as the last active
-	// one; a leaf in the main window answers undefined.
-	private popoutLeafFor(path: string): WorkspaceLeaf | undefined {
-		const leaf = this.app.workspace.getMostRecentLeaf();
+	// and shows `path`; undefined for the main window. `from` is the element
+	// the action came from, when the caller knows it: a hover popover never
+	// activates its note's leaf, so the most recent leaf can be another copy
+	// of the note, in another window. Commands and menus act on the active
+	// leaf, so without `from` the most recent leaf is the reader's.
+	private popoutLeafFor(
+		path: string,
+		from?: HTMLElement,
+	): MarkdownView | undefined {
+		const leaf = from
+			? this.app.workspace
+					.getLeavesOfType('markdown')
+					.find((l) => l.view.containerEl.contains(from))
+			: this.app.workspace.getMostRecentLeaf();
 		if (!leaf || !(leaf.view instanceof MarkdownView)) return undefined;
 		if (leaf.view.file?.path !== path) return undefined;
 		return leaf.getContainer() === this.app.workspace.rootSplit
 			? undefined
-			: leaf;
+			: leaf.view;
 	}
 
 	// A renamed note, or a folder above it, takes its comment tabs (#83) with
@@ -2287,7 +2301,11 @@ export default class AnnotecaPlugin extends Plugin {
 
 	// Reviewer pane wiring ----------------------------------------------
 
-	openReviewerOnComment(comment: Comment, path?: string): void {
+	openReviewerOnComment(
+		comment: Comment,
+		path?: string,
+		from?: HTMLElement,
+	): void {
 		const filePath = path ?? this.app.workspace.getActiveFile()?.path;
 		if (!filePath) return;
 		const start = comment.marker.start;
@@ -2296,15 +2314,12 @@ export default class AnnotecaPlugin extends Plugin {
 		// Open the comment's own tab beside the note in the pop-out instead.
 		// That tab finds its comment by id; without a unique one, say so
 		// rather than show the main window's panel on the wrong note.
-		const popout = this.popoutLeafFor(filePath);
+		const popout = this.popoutLeafFor(filePath, from);
 		if (popout) {
-			if (
-				hasUniqueId(
-					this.commentIndex.get(filePath)?.comments ?? [],
-					comment,
-				)
-			) {
-				this.openCommentInTab(filePath, comment, popout);
+			// Ids from the editor's text, not the index: a comment saved a
+			// moment ago may not be indexed yet, and would read as id-less.
+			if (hasUniqueId(parseAll(popout.editor.getValue()), comment)) {
+				this.openCommentInTab(filePath, comment, popout.leaf);
 				this.highlightActiveComment(filePath, start);
 			} else {
 				new Notice(POPOUT_NO_ID_MESSAGE);

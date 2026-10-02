@@ -66,7 +66,9 @@ export interface DecorationContext {
 	// which asks the view first.
 	getSourcePath(): string;
 	getSettings(): AnnotecaSettings;
-	onMarkerClick(marker: Comment): void;
+	// `from` is the editor the click happened in, so a note in a pop-out
+	// window opens its comment there rather than in the main window.
+	onMarkerClick(marker: Comment, from: HTMLElement): void;
 	addCommentForSelection(): void;
 	categoryFor(id: string): CategoryDefinition;
 	// Everything below that takes a `sourcePath` acts on a specific note, and
@@ -75,7 +77,11 @@ export interface DecorationContext {
 	// does not either, so asking the workspace for the active file ran every
 	// one of these against whichever note happened to be focused. `view` is in
 	// scope wherever the popover is built, so each is `sourcePathFor(ctx, view)`.
-	openInReviewer(marker: Comment, sourcePath: string): void;
+	openInReviewer(
+		marker: Comment,
+		sourcePath: string,
+		from: HTMLElement,
+	): void;
 	toggleResolution(marker: Comment, sourcePath: string): void;
 	resolveAndRemove(marker: Comment, sourcePath: string): void;
 	acceptAddressed(marker: Comment, sourcePath: string): void;
@@ -1078,7 +1084,7 @@ function buildCommentPopover(
 				e.preventDefault();
 				e.stopPropagation();
 				closeTapPopover(view);
-				ctx.openInReviewer(ref.current, sourcePath);
+				ctx.openInReviewer(ref.current, sourcePath, view.dom);
 			});
 		}
 		for (const r of shown) renderReplyRow(r, repliesBlock, ctx, host);
@@ -1198,7 +1204,7 @@ function buildCommentPopover(
 		e.preventDefault();
 		e.stopPropagation();
 		closeTapPopover(view);
-		ctx.openInReviewer(ref.current, sourcePath);
+		ctx.openInReviewer(ref.current, sourcePath, view.dom);
 	});
 
 	const replyBtn = actions.createEl('button', {
@@ -1877,7 +1883,7 @@ function activateMarker(
 		});
 		return;
 	}
-	ctx.onMarkerClick(m);
+	ctx.onMarkerClick(m, view.dom);
 }
 
 function tapPopoverField(

@@ -86,7 +86,7 @@ export function registerReadingViewIndicator(plugin: AnnotecaPlugin): void {
 		);
 
 		const open = (comment: Comment) => {
-			plugin.openReviewerOnComment(comment, ctx.sourcePath);
+			plugin.openReviewerOnComment(comment, ctx.sourcePath, el);
 		};
 
 		// The banner attaches to whichever section hosts the file's first
