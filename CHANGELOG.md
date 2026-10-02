@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.20.0-beta.3] - 2026-10-02
+
 ### Added
 - **Add comment for current sentence**, in the command palette and the right-click menu. Click inside a sentence and run it: Annoteca selects that sentence and opens the comment form, and the comment covers exactly the sentence. A sentence ends at `.`, `!`, `?` or `…` followed by a space, keeps its closing quotes, and never runs past its paragraph. Each list item, heading and quote is its own block, and their markup stays outside the sentence. Common abbreviations, initials and decimals do not end a sentence. A table row is not a sentence, since a comment marker inside a row would break the table; select the text yourself there. (#84)
 
