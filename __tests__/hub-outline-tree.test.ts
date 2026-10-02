@@ -24,14 +24,16 @@ const TEXT = [
 ].join('\n');
 const pos = (line: number, col = 0) => ({ line, col, offset: 0 });
 
-function harness() {
+function harness(opts: { headings?: boolean; live?: boolean } = {}) {
 	const index = new CommentIndex();
 	index.rebuild('a.md', TEXT);
-	const file = Object.assign(new TFile(), {
+	let file = Object.assign(new TFile(), {
 		path: 'a.md',
 		basename: 'a',
 		stat: { mtime: 1 },
 	});
+	let reads = 0;
+	let readMtime = 1;
 	const editor = {
 		getCursor: () => ({ line: 0, ch: 0 }),
 		posToOffset: () => TEXT.indexOf('## Notes') + 3,
@@ -44,7 +46,16 @@ function harness() {
 	const plugin = {
 		settings: { ...DEFAULT_SETTINGS },
 		commentIndex: index,
-		findMarkdownLeafForPath: () => ({ view }),
+		findMarkdownLeafForPath: () =>
+			opts.live === false ? undefined : { view },
+		comments: {
+			currentNoteText: () => {
+				reads += 1;
+				// The file can change while the read is in flight.
+				file.stat.mtime = readMtime;
+				return Promise.resolve({ text: TEXT, raw: TEXT });
+			},
+		},
 		ensureLeafLoadedForPath: () => Promise.resolve(true),
 		navigateToOffset: (_p: string, o: number) => {
 			calls.push(`nav ${o}`);
@@ -62,11 +73,26 @@ function harness() {
 		workspace: { getActiveFile: () => file },
 		metadataCache: {
 			getFileCache: () => ({
-				headings: [
-					{ heading: 'Title', level: 1, position: { start: pos(0) } },
-					{ heading: 'To-do', level: 2, position: { start: pos(1) } },
-					{ heading: 'Notes', level: 2, position: { start: pos(4) } },
-				],
+				headings:
+					opts.headings === false
+						? []
+						: [
+								{
+									heading: 'Title',
+									level: 1,
+									position: { start: pos(0) },
+								},
+								{
+									heading: 'To-do',
+									level: 2,
+									position: { start: pos(1) },
+								},
+								{
+									heading: 'Notes',
+									level: 2,
+									position: { start: pos(4) },
+								},
+							],
 				listItems: [
 					{
 						position: {
@@ -94,7 +120,23 @@ function harness() {
 		draw,
 	);
 	draw();
-	return { container, calls, draw };
+	return {
+		container,
+		calls,
+		draw,
+		switchTo: (path: string) => {
+			file = Object.assign(new TFile(), {
+				path,
+				basename: path,
+				stat: { mtime: 1 },
+			});
+		},
+		reads: () => reads,
+		setReadMtime: (m: number) => {
+			readMtime = m;
+		},
+		file: () => file,
+	};
 }
 
 const labels = (c: HTMLElement) =>
@@ -211,5 +253,58 @@ describe('Outline tree', () => {
 			new KeyboardEvent('keydown', { key: 'Enter' }),
 		);
 		expect(calls).toContain(`nav ${TEXT.indexOf('## Notes')}`);
+	});
+
+	it('row state does not follow the reader into another note', () => {
+		const h = harness();
+		row(h.container, 'Title')
+			.querySelector<HTMLElement>('.annoteca-outline-chevron')
+			?.click();
+		expect(labels(h.container)).toEqual(['Title']);
+		h.switchTo('b.md');
+		h.draw();
+		expect(labels(h.container)).toEqual(['Title', 'To-do', 'Notes']);
+	});
+
+	it('a note with lists and no headings can still turn list items on', () => {
+		const h = harness({ headings: false });
+		expect(toggle(h.container, 'List items')).not.toBeNull();
+		toggle(h.container, 'List items')?.click();
+		expect(labels(h.container)).toContain('review steps');
+	});
+
+	it('one tab stop, and ArrowDown moves between rows', () => {
+		const h = harness();
+		const stops = h.container.querySelectorAll(
+			'[role="treeitem"][tabindex="0"]',
+		);
+		expect(stops).toHaveLength(1);
+		const first = row(h.container, 'Title');
+		first.focus();
+		first.dispatchEvent(
+			new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
+		);
+		expect(document.activeElement).toBe(row(h.container, 'To-do'));
+		expect(row(h.container, 'To-do').getAttribute('tabindex')).toBe('0');
+		expect(first.getAttribute('tabindex')).toBe('-1');
+	});
+
+	it('without an editor, waits for a read of the current version', async () => {
+		const h = harness({ live: false });
+		expect(h.container.textContent).toContain('Loading the outline');
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(labels(h.container)).toEqual(['Title', 'To-do', 'Notes']);
+		// The file changes: the old text is not drawn against the new version.
+		h.file().stat.mtime = 2;
+		h.setReadMtime(3);
+		h.draw();
+		expect(h.container.textContent).toContain('Loading the outline');
+		for (let i = 0; i < 6; i++) await Promise.resolve();
+		// That read finished after yet another change, so it was thrown away
+		// and a fresh read made; only the read that matches the current
+		// version is drawn.
+		expect(h.reads()).toBe(3);
+		expect(labels(h.container)).toEqual(['Title', 'To-do', 'Notes']);
 	});
 });

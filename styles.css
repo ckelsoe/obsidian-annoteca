@@ -1192,9 +1192,18 @@ settings:
 
 /* The Outline tree indents by depth in the tree, set per row as a variable,
  * so a list item sits under its heading however deep the heading is. */
-.annoteca-outline-tree .annoteca-density-row {
-	padding-left: calc(4px + var(--annoteca-outline-depth, 0) * 16px);
-}
+/* The Outline tree indents by depth in the tree, so a list item sits under its
+ * heading however deep the heading is. One rule per step, capped at 8, because
+ * an inline style per row is not allowed here. */
+.annoteca-outline-tree .annoteca-density-row[data-depth="0"] { padding-left: 4px; }
+.annoteca-outline-tree .annoteca-density-row[data-depth="1"] { padding-left: 20px; }
+.annoteca-outline-tree .annoteca-density-row[data-depth="2"] { padding-left: 36px; }
+.annoteca-outline-tree .annoteca-density-row[data-depth="3"] { padding-left: 52px; }
+.annoteca-outline-tree .annoteca-density-row[data-depth="4"] { padding-left: 68px; }
+.annoteca-outline-tree .annoteca-density-row[data-depth="5"] { padding-left: 84px; }
+.annoteca-outline-tree .annoteca-density-row[data-depth="6"] { padding-left: 100px; }
+.annoteca-outline-tree .annoteca-density-row[data-depth="7"] { padding-left: 116px; }
+.annoteca-outline-tree .annoteca-density-row[data-depth="8"] { padding-left: 132px; }
 
 .annoteca-density-row.is-selected {
 	background-color: var(--background-modifier-active-hover);
@@ -1309,8 +1318,17 @@ settings:
 	flex-direction: column;
 	gap: 6px;
 	margin: 2px 0 8px;
-	padding-left: calc(26px + var(--annoteca-outline-depth, 0) * 16px);
 }
+
+.annoteca-outline-preview[data-depth="0"] { padding-left: 26px; }
+.annoteca-outline-preview[data-depth="1"] { padding-left: 42px; }
+.annoteca-outline-preview[data-depth="2"] { padding-left: 58px; }
+.annoteca-outline-preview[data-depth="3"] { padding-left: 74px; }
+.annoteca-outline-preview[data-depth="4"] { padding-left: 90px; }
+.annoteca-outline-preview[data-depth="5"] { padding-left: 106px; }
+.annoteca-outline-preview[data-depth="6"] { padding-left: 122px; }
+.annoteca-outline-preview[data-depth="7"] { padding-left: 138px; }
+.annoteca-outline-preview[data-depth="8"] { padding-left: 154px; }
 
 .annoteca-outline-card {
 	display: flex;

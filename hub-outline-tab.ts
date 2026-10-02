@@ -37,8 +37,16 @@ export class OutlineTabRenderer {
 	// as it always has until the reader asks for more.
 	private showItems = false;
 	private onlyCommented = false;
+	// Row state is keyed by line position, which only means something inside
+	// one note, so it is dropped whenever a different note is drawn. Kept
+	// across notes, a collapsed heading at offset 0 in one note collapsed the
+	// heading at offset 0 in the next.
 	private readonly collapsed = new Set<string>();
 	private selectedKey: string | undefined;
+	// The row that holds keyboard focus. The tree has one tab stop (roving
+	// focus), and a rebuild puts focus back on this row.
+	private focusKey: string | undefined;
+	private statePath: string | undefined;
 
 	constructor(
 		private readonly plugin: AnnotecaPlugin,
@@ -53,6 +61,12 @@ export class OutlineTabRenderer {
 			return;
 		}
 		container.createEl('h4', { text: file.basename });
+		if (this.statePath !== file.path) {
+			this.statePath = file.path;
+			this.collapsed.clear();
+			this.selectedKey = undefined;
+			this.focusKey = undefined;
+		}
 
 		const cache = this.app.metadataCache.getFileCache(file);
 		const headings = cache?.headings ?? [];
@@ -91,8 +105,12 @@ export class OutlineTabRenderer {
 			this.renderEmpty(container, 'Loading the outline…');
 			return;
 		}
-		const listItems = this.showItems ? (cache?.listItems ?? []) : [];
-		if (headings.length === 0 && listItems.length === 0) {
+		const allItems = cache?.listItems ?? [];
+		const listItems = this.showItems ? allItems : [];
+		// Checked against the note's list items whether or not they are shown:
+		// a note with lists and no headings needs the toolbar, or the toggle
+		// that would show its lists can never be reached.
+		if (headings.length === 0 && allItems.length === 0) {
 			this.renderEmpty(
 				container,
 				`No headings. ${comments.length} comment(s) total.`,
@@ -133,23 +151,84 @@ export class OutlineTabRenderer {
 			return;
 		}
 		for (const n of roots) this.renderNode(tree, n, file, current, 0);
+		this.wireKeyboard(tree);
 	}
 
+	// One tab stop for the whole tree, ArrowUp/ArrowDown between visible rows,
+	// Home/End to the ends, and focus put back on the same row after the tree
+	// is rebuilt. Each row's own keys (Enter, left/right) are wired in
+	// renderNode.
+	private wireKeyboard(tree: HTMLElement): void {
+		const rows = Array.from(
+			tree.querySelectorAll<HTMLElement>('.annoteca-density-row'),
+		);
+		const keyOf = (el: HTMLElement): string => el.dataset.key ?? '';
+		const stop =
+			rows.find((r) => keyOf(r) === this.focusKey) ??
+			rows.find((r) => keyOf(r) === this.selectedKey) ??
+			rows[0];
+		for (const r of rows)
+			r.setAttribute('tabindex', r === stop ? '0' : '-1');
+		const move = (to: HTMLElement | undefined): void => {
+			if (!to) return;
+			for (const r of rows) r.setAttribute('tabindex', '-1');
+			to.setAttribute('tabindex', '0');
+			this.focusKey = keyOf(to);
+			to.focus();
+		};
+		tree.addEventListener('keydown', (e) => {
+			const at = rows.findIndex((r) => r === e.target);
+			if (at === -1) return;
+			const next =
+				e.key === 'ArrowDown'
+					? rows[at + 1]
+					: e.key === 'ArrowUp'
+						? rows[at - 1]
+						: e.key === 'Home'
+							? rows[0]
+							: e.key === 'End'
+								? rows[rows.length - 1]
+								: undefined;
+			if (!next) return;
+			e.preventDefault();
+			move(next);
+		});
+		tree.addEventListener('focusin', (e) => {
+			const row = rows.find((r) => r === e.target);
+			if (row) this.focusKey = keyOf(row);
+		});
+		const restore = rows.find((r) => keyOf(r) === this.focusKey);
+		if (
+			restore &&
+			tree.ownerDocument.activeElement === tree.ownerDocument.body
+		)
+			restore.focus();
+	}
+
+	// The note's text for the version Obsidian's cache describes, or
+	// undefined while it loads. Only a text read for the file's CURRENT mtime
+	// is used: drawing new line positions over old text put rows, jumps and
+	// "comment on this line" on the wrong words. A read that finishes after
+	// the file changed again is thrown away, and the next render reads anew.
 	private cachedText(file: TFile): string | undefined {
 		const hit = this.texts.get(file.path);
 		const mtime = file.stat?.mtime ?? 0;
-		if (hit?.mtime !== mtime && !this.loadingTexts.has(file.path)) {
+		if (hit?.mtime === mtime) return hit.text;
+		if (!this.loadingTexts.has(file.path)) {
 			this.loadingTexts.add(file.path);
-			void this.plugin.comments
-				.currentNoteText(file.path, file)
-				.then((note) => {
-					this.texts.set(file.path, { mtime, text: note.text });
+			void this.plugin.comments.currentNoteText(file.path, file).then(
+				(note) => {
+					this.loadingTexts.delete(file.path);
+					if ((file.stat?.mtime ?? 0) === mtime)
+						this.texts.set(file.path, { mtime, text: note.text });
 					this.requestRerender();
-				})
-				.catch(() => undefined)
-				.finally(() => this.loadingTexts.delete(file.path));
+				},
+				() => {
+					this.loadingTexts.delete(file.path);
+				},
+			);
 		}
-		return hit?.text;
+		return undefined;
 	}
 
 	private renderToolbar(container: HTMLElement): void {
@@ -203,7 +282,9 @@ export class OutlineTabRenderer {
 				.join(' '),
 			attr: {
 				role: 'treeitem',
-				tabindex: '0',
+				tabindex: '-1',
+				'data-key': n.key,
+				'data-depth': String(Math.min(depth, MAX_DEPTH)),
 				'aria-level': String(depth + 1),
 				'aria-selected': String(selected),
 				...(hasChildren
@@ -214,7 +295,6 @@ export class OutlineTabRenderer {
 					: {}),
 			},
 		});
-		row.style.setProperty('--annoteca-outline-depth', String(depth));
 
 		const chevron = row.createSpan({ cls: 'annoteca-outline-chevron' });
 		if (hasChildren) {
@@ -334,8 +414,10 @@ export class OutlineTabRenderer {
 		file: TFile,
 		depth: number,
 	): void {
-		const wrap = parent.createDiv({ cls: 'annoteca-outline-preview' });
-		wrap.style.setProperty('--annoteca-outline-depth', String(depth));
+		const wrap = parent.createDiv({
+			cls: 'annoteca-outline-preview',
+			attr: { 'data-depth': String(Math.min(depth, MAX_DEPTH)) },
+		});
 		const enabled = resolveSettingsCategories(this.plugin.settings);
 		const ordered = [...n.own].sort(
 			(a, b) => Number(!!a.resolution) - Number(!!b.resolution),
@@ -420,6 +502,9 @@ export class OutlineTabRenderer {
 		container.createEl('p', { text: message, cls: 'annoteca-empty' });
 	}
 }
+
+// Indentation steps styles.css has rules for. Deeper rows share the last step.
+const MAX_DEPTH = 8;
 
 // The innermost heading that starts at or before the cursor.
 function currentHeading(

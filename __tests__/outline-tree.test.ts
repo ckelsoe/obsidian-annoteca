@@ -209,4 +209,30 @@ describe('buildOutlineTree', () => {
 			'    Stable URL (2/0)',
 		]);
 	});
+
+	it('a list that starts on line 0 keeps its top-level items as siblings', () => {
+		// Obsidian gives a top-level item of such a list parent -0, which is
+		// >= 0 and names line 0. Indentation tells it apart from a real child.
+		const text = '- one\n- two\n  - child';
+		const items: ListItemInput[] = [
+			{ startLine: 0, startCol: 0, endLine: 0, endCol: 5, parent: -0 },
+			{ startLine: 1, startCol: 0, endLine: 1, endCol: 5, parent: -0 },
+			{ startLine: 2, startCol: 2, endLine: 2, endCol: 9, parent: 1 },
+		];
+		const roots = buildOutlineTree(text, [], items, [], [], true);
+		const top = roots[0];
+		expect(top?.kind).toBe('preamble');
+		expect(top?.children.map((n) => n.label)).toEqual(['one', 'two']);
+		expect(top?.children[1]?.children.map((n) => n.label)).toEqual([
+			'child',
+		]);
+	});
+
+	it('a comment inside a line limits the selectable span to before it', () => {
+		const text = `- before ${c('', 'x')} after`;
+		const node = tree(text)[0]?.children[0];
+		if (!node) throw new Error('no node');
+		expect(node.label).toBe('before after');
+		expect(text.slice(node.textFrom, node.textTo)).toBe('before');
+	});
 });

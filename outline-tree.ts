@@ -83,6 +83,7 @@ export function buildOutlineTree(
 		spanFrom: number;
 		spanTo: number;
 		line: number;
+		col: number;
 		parentLine?: number;
 	}
 	const drafts: Draft[] = [];
@@ -94,6 +95,7 @@ export function buildOutlineTree(
 			spanFrom: from,
 			spanTo: to,
 			line: h.line,
+			col: 0,
 		});
 	}
 	if (includeItems) {
@@ -107,6 +109,7 @@ export function buildOutlineTree(
 				spanFrom: lineStart(li.startLine),
 				spanTo: to,
 				line: li.startLine,
+				col: li.startCol,
 				...(li.parent >= 0 ? { parentLine: li.parent } : {}),
 			});
 		}
@@ -164,7 +167,11 @@ export function buildOutlineTree(
 			if (!m) break;
 			textFrom = m.end;
 		}
-		let textTo = to;
+		// A comment already sitting inside the line splits it. The selectable
+		// span stops before it, so a comment made from the row never wraps
+		// another comment's marker text into its own range and anchor.
+		const inner = cuts.find((r) => r.start > textFrom && r.start < to);
+		let textTo = inner ? inner.start : to;
 		for (;;) {
 			while (textTo > textFrom && /\s/.test(text.charAt(textTo - 1)))
 				textTo -= 1;
@@ -185,7 +192,7 @@ export function buildOutlineTree(
 	const roots: OutlineNode[] = [];
 	let preamble: OutlineNode | undefined;
 	const headingStack: OutlineNode[] = [];
-	const itemByLine = new Map<number, OutlineNode>();
+	const itemByLine = new Map<number, { node: OutlineNode; col: number }>();
 	const preambleNode = (): OutlineNode => {
 		if (!preamble) {
 			preamble = {
@@ -220,14 +227,21 @@ export function buildOutlineTree(
 			continue;
 		}
 		const section = headingStack[headingStack.length - 1];
-		const parentItem =
+		// A parent must also be indented less than its child. Obsidian marks a
+		// top-level item with the NEGATED line of its list's first item, and a
+		// list that starts on line 0 gives -0, which reads as a real parent on
+		// line 0: without this, the second top-level item nested under the
+		// first.
+		const candidate =
 			d.parentLine === undefined
 				? undefined
 				: itemByLine.get(d.parentLine);
+		const parentItem =
+			candidate && candidate.col < d.col ? candidate.node : undefined;
 		const parent = parentItem ?? section ?? preambleNode();
 		n.level = parent.level + 1;
 		parent.children.push(n);
-		itemByLine.set(d.line, n);
+		itemByLine.set(d.line, { node: n, col: d.col });
 	}
 
 	// Attach each comment to the line its marker starts on: the innermost
