@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.20.0-beta.5] - 2026-10-02
+
 ### Added
 - API (version 5): `compose(path, range)` lets another plugin ask you to comment on exact text in a note. Annoteca opens the note, selects that text and opens its own comment form, so the comment is yours, with a closing marker. Nothing is written until you save. It is the hook a companion view, such as a mind map, needs for a "comment on this" action.
 
