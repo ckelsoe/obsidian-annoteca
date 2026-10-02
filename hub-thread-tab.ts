@@ -1449,9 +1449,12 @@ export class ThreadTabRenderer {
 		el.addClass('is-jump-target');
 		el.setAttribute('title', 'Click to go to this comment in the note');
 		el.addEventListener('click', (e) => {
-			const target = e.target;
+			// instanceOf, not instanceof: in a pop-out window the target
+			// belongs to that window's realm, where the main window's Element
+			// does not match, and a link click would also jump.
+			const target = e.target as Node | null;
 			if (
-				target instanceof Element &&
+				target?.instanceOf(Element) &&
 				target.closest('a, button, input, textarea, select, label')
 			)
 				return;

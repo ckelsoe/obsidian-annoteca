@@ -467,10 +467,11 @@ describe('annoteca-api.d.ts: the published surface matches the runtime', () => {
 // compose(): a companion asks the USER to comment on a range, through
 // Annoteca's own form. These pin what it refuses before anything opens.
 describe('AnnotecaApi.compose', () => {
-	const NOTE = `---\ntitle: x\n---\nPlain prose here. <!-- annoteca/clarify: hi\n[id=aaaa1111]\n--> more.`;
+	const NOTE = `---\ntitle: x\n---\nPlain prose here. <!-- annoteca/clarify: hi\n[id=aaaa1111]\n--> more.\n\nUse \`npm run build\` now.`;
 
 	function composeHarness(opens = true) {
 		const opened: [string, number, number][] = [];
+		const expected: (string | undefined)[] = [];
 		const file = Object.assign(new TFile(), {
 			path: 'a.md',
 			extension: 'md',
@@ -491,12 +492,18 @@ describe('AnnotecaApi.compose', () => {
 				currentNoteText: () =>
 					Promise.resolve({ text: NOTE, raw: NOTE }),
 			},
-			commentOnRange: (path: string, from: number, to: number) => {
+			commentOnRange: (
+				path: string,
+				from: number,
+				to: number,
+				text?: string,
+			) => {
 				opened.push([path, from, to]);
+				expected.push(text);
 				return Promise.resolve(opens);
 			},
 		} as unknown as AnnotecaPlugin);
-		return { api, opened };
+		return { api, opened, expected };
 	}
 
 	const plain = NOTE.indexOf('Plain');
@@ -506,6 +513,12 @@ describe('AnnotecaApi.compose', () => {
 		const range = { start: plain, end: plain + 'Plain prose'.length };
 		await expect(api.compose('a.md', range)).resolves.toBe(true);
 		expect(opened).toEqual([['a.md', range.start, range.end]]);
+	});
+
+	it('hands over the text it checked, so a change in between is refused', async () => {
+		const { api, expected } = composeHarness();
+		await api.compose('a.md', { start: plain, end: plain + 5 });
+		expect(expected).toEqual([NOTE]);
 	});
 
 	it('passes on a refusal from the editor', async () => {
@@ -526,6 +539,21 @@ describe('AnnotecaApi.compose', () => {
 			'inside a comment marker',
 			'a.md',
 			{ start: NOTE.indexOf('annoteca/'), end: NOTE.length },
+		],
+		[
+			'the whole properties block',
+			'a.md',
+			{ start: 0, end: NOTE.indexOf('Plain') },
+		],
+		[
+			'a range enclosing a whole marker',
+			'a.md',
+			{ start: plain, end: NOTE.indexOf(' more') },
+		],
+		[
+			'an end inside inline code, where no closer can go',
+			'a.md',
+			{ start: NOTE.indexOf('Use'), end: NOTE.indexOf('run') },
 		],
 	])('refuses %s and opens nothing', async (_label, path, range) => {
 		const { api, opened } = composeHarness();

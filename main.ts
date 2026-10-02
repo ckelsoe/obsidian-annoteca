@@ -1178,7 +1178,7 @@ export default class AnnotecaPlugin extends Plugin {
 	private openModalAtCursor(editor: Editor, view: MarkdownFileInfo): void {
 		const path = view.file?.path;
 		if (!path) return;
-		this.openComposer({ editor, view, filePath: path });
+		void this.openComposer({ editor, view, filePath: path });
 	}
 
 	private openModalForSelection(
@@ -1220,27 +1220,40 @@ export default class AnnotecaPlugin extends Plugin {
 	// the note may not be the active leaf or even open yet.
 	// Resolves to whether the composer opened, which the API's compose()
 	// reports to its caller.
+	//
+	// `expected` is the note text the caller validated the range against.
+	// Navigation awaits, and an edit landing in between (an autosave, another
+	// writer) shifts the text under the offsets; refusing then is the only
+	// way not to open the form on the wrong words.
 	async commentOnRange(
 		path: string,
 		from: number,
 		to: number,
+		expected?: string,
 	): Promise<boolean> {
 		await this.navigateToOffset(path, from);
 		const leaf = this.findMarkdownLeafForPath(path);
 		const view = leaf?.view;
 		if (!(view instanceof MarkdownView) || to <= from) return false;
 		const editor = view.editor;
-		const length = editor.getValue().length;
-		if (to > length) return false;
+		const text = editor.getValue();
+		if (to > text.length) return false;
+		if (expected !== undefined && text !== expected) return false;
+		const file = view.file;
+		if (!file) return false;
 		editor.setSelection(editor.offsetToPos(from), editor.offsetToPos(to));
-		this.openModalForSelection(editor, view);
-		return true;
+		return this.openComposer({ editor, view, filePath: file.path });
 	}
 
 	private openScratchpadModal(editor: Editor, view: MarkdownFileInfo): void {
 		const path = view.file?.path;
 		if (!path) return;
-		this.openComposer({ editor, view, filePath: path, scratchpad: true });
+		void this.openComposer({
+			editor,
+			view,
+			filePath: path,
+			scratchpad: true,
+		});
 	}
 
 	// The path comes from the VIEW, like every other composer opener. It used
@@ -1257,7 +1270,7 @@ export default class AnnotecaPlugin extends Plugin {
 		if (!path) return;
 		const from = editor.offsetToPos(comment.marker.start);
 		const to = editor.offsetToPos(comment.marker.end);
-		this.openComposer({
+		void this.openComposer({
 			editor,
 			view,
 			filePath: path,
@@ -1265,21 +1278,27 @@ export default class AnnotecaPlugin extends Plugin {
 		});
 	}
 
-	private openComposer(request: ComposerRequest): void {
-		if (this.settings.composerLocation === 'panel') {
-			void this.openComposerPanel(request);
-		} else {
-			new AddCommentModal(this.app, this, request).open();
-		}
+	// Resolves to whether the composer actually opened. The panel path can
+	// fail quietly (no right leaf to put it in), and API compose() reports
+	// this result to its caller, so it is awaited rather than assumed.
+	private openComposer(request: ComposerRequest): Promise<boolean> {
+		if (this.settings.composerLocation === 'panel')
+			return this.openComposerPanel(request);
+		new AddCommentModal(this.app, this, request).open();
+		return Promise.resolve(true);
 	}
 
-	private async openComposerPanel(request: ComposerRequest): Promise<void> {
+	private async openComposerPanel(
+		request: ComposerRequest,
+	): Promise<boolean> {
 		await this.activateView(COMPOSER_PANEL_VIEW_TYPE, 'right');
 		const leaves = this.app.workspace.getLeavesOfType(
 			COMPOSER_PANEL_VIEW_TYPE,
 		);
 		const view = leaves[0]?.view;
-		if (view instanceof ComposerPanelView) view.setRequest(request);
+		if (!(view instanceof ComposerPanelView)) return false;
+		view.setRequest(request);
+		return true;
 	}
 
 	async notifyComposerSubmitted(

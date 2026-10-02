@@ -10,6 +10,8 @@ import {
 } from './view-utils';
 import { resolveSettingsCategories } from './settings';
 import { forbiddenRanges } from './comment-service';
+import { parseAll, scanClosers } from './parser';
+import { planCloser } from './range-placement';
 
 // The read-only API other plugins call (F-284, interop-contract section 7).
 //
@@ -350,16 +352,28 @@ export function createApi(plugin: AnnotecaPlugin): AnnotecaApi {
 			if (!(file instanceof TFile) || file.extension !== 'md')
 				return false;
 			const note = await plugin.comments.currentNoteText(path, file);
-			if (end > note.text.length) return false;
-			// The same zones promote() refuses: a selection that starts or ends
-			// inside a marker, closer, store block or the properties would put
-			// the new marker or closer inside existing syntax.
-			const inside = (pos: number): boolean =>
-				forbiddenRanges(note.text).some(
-					(f) => pos > f.start && pos < f.end,
-				);
-			if (inside(start) || inside(end)) return false;
-			return plugin.commentOnRange(path, start, end);
+			const text = note.text;
+			if (end > text.length) return false;
+			// No overlap at all with existing comment syntax, a store block or
+			// the properties. Checking only the two ends let a range that
+			// ENCLOSES one through, and the new comment then covered marker
+			// or YAML text. Touching a boundary is fine.
+			if (
+				forbiddenRanges(text).some(
+					(f) => f.start < end && f.end > start,
+				)
+			)
+				return false;
+			// The composer writes a closer only where it can place one exactly
+			// (not in code, not in properties). If it would not, the comment
+			// would quietly cover less than asked, so refuse up front.
+			const markers = parseAll(text).map((c) => c.marker);
+			const plan = planCloser(text, start, end, [
+				...markers,
+				...scanClosers(text, markers),
+			]);
+			if (plan.kind !== 'range') return false;
+			return plugin.commentOnRange(path, start, end, text);
 		},
 
 		async reveal(commentId: string): Promise<boolean> {
