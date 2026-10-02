@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.20.0-beta.2] - 2026-10-02
+
 ### Added
 - Click the "Original text" of an addressed comment in the Thread tab to jump to that comment in the note. It also works from the keyboard (Tab to it, then Enter or Space). Selecting text in the block to copy it does not jump. (#82)
 - Focus mode in the Thread tab. Press **Focus** on an expanded comment and the tab shows only that comment, with its full conversation, reply box and actions, so a long thread does not run into the others. **Show all** brings the list back with the comment still selected. The focus stays put while you switch notes, follows the note through a rename, and keeps showing the comment after you resolve it. Clicking a different comment's marker in the editor leaves focus. (#83)
