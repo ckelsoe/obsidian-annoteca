@@ -56,6 +56,7 @@ import {
 	authorColorFor,
 	authorPickerOptions,
 	resolveMarkerClickAction,
+	hasUniqueId,
 	type ScrollAction,
 } from './view-utils';
 import { isMobile } from './platform';
@@ -114,6 +115,11 @@ import {
 	applyFrontmatterSummary,
 	type FrontmatterSummaryOptions,
 } from './frontmatter-summary';
+
+// A comment's own tab, the only way to show its thread beside a note in a
+// pop-out window, finds the comment by id.
+const POPOUT_NO_ID_MESSAGE =
+	"This comment has no unique ID, so its thread can't open in this window. Open the note in the main window to see it.";
 
 export default class AnnotecaPlugin extends Plugin {
 	settings!: AnnotecaSettings;
@@ -2207,9 +2213,20 @@ export default class AnnotecaPlugin extends Plugin {
 	// #83: open one comment in a main-area tab of its own, or bring forward
 	// the tab already showing it. An id-less comment cannot have one: the tab
 	// is restored from saved state, and only an id finds the comment again.
-	openCommentInTab(path: string, comment: Comment): void {
+	//
+	// `beside`, when given, is a note leaf to open the tab next to, split to
+	// its right in the same window, and only a tab in that same window counts
+	// as already open. That is how a comment opens from a pop-out window,
+	// which has no sidebar for the hub: in a split beside the note, like a
+	// side panel, rather than in the main window behind it.
+	openCommentInTab(
+		path: string,
+		comment: Comment,
+		beside?: WorkspaceLeaf,
+	): void {
 		const id = comment.id;
 		if (id === undefined) return;
+		const container = beside?.getContainer();
 		// Matched on the saved view STATE, not on the view object. A tab
 		// restored in the background holds a DeferredView until it is first
 		// shown, so an instanceof check misses it and stacks a duplicate tab,
@@ -2218,17 +2235,38 @@ export default class AnnotecaPlugin extends Plugin {
 			.getLeavesOfType(ANNOTECA_COMMENT_VIEW_TYPE)
 			.find((leaf) => {
 				const shown = commentTabState(leaf.getViewState().state);
-				return shown?.path === path && shown.id === id;
+				return (
+					shown?.path === path &&
+					shown.id === id &&
+					(container === undefined ||
+						leaf.getContainer() === container)
+				);
 			});
 		if (existing) {
 			void this.app.workspace.revealLeaf(existing);
 			return;
 		}
-		void this.app.workspace.getLeaf('tab').setViewState({
+		const leaf = beside
+			? this.app.workspace.createLeafBySplit(beside, 'vertical')
+			: this.app.workspace.getLeaf('tab');
+		void leaf.setViewState({
 			type: ANNOTECA_COMMENT_VIEW_TYPE,
 			state: { path, id },
 			active: true,
 		});
+	}
+
+	// The note leaf the reader is working in, when it is in a pop-out window
+	// and shows `path`. The most recent leaf, because a marker click or a
+	// popover button in a pop-out leaves that note's leaf as the last active
+	// one; a leaf in the main window answers undefined.
+	private popoutLeafFor(path: string): WorkspaceLeaf | undefined {
+		const leaf = this.app.workspace.getMostRecentLeaf();
+		if (!leaf || !(leaf.view instanceof MarkdownView)) return undefined;
+		if (leaf.view.file?.path !== path) return undefined;
+		return leaf.getContainer() === this.app.workspace.rootSplit
+			? undefined
+			: leaf;
 	}
 
 	// A renamed note, or a folder above it, takes its comment tabs (#83) with
@@ -2253,6 +2291,33 @@ export default class AnnotecaPlugin extends Plugin {
 		const filePath = path ?? this.app.workspace.getActiveFile()?.path;
 		if (!filePath) return;
 		const start = comment.marker.start;
+		// A pop-out window has no sidebar, so the hub would open in the main
+		// window, behind the note, showing whatever the main window has open.
+		// Open the comment's own tab beside the note in the pop-out instead.
+		// That tab finds its comment by id; without a unique one, say so
+		// rather than show the main window's panel on the wrong note.
+		const popout = this.popoutLeafFor(filePath);
+		if (popout) {
+			if (
+				hasUniqueId(
+					this.commentIndex.get(filePath)?.comments ?? [],
+					comment,
+				)
+			) {
+				this.openCommentInTab(filePath, comment, popout);
+				this.highlightActiveComment(filePath, start);
+			} else {
+				new Notice(POPOUT_NO_ID_MESSAGE);
+			}
+			return;
+		}
+		// The hub's single-file scope follows the active file, and the note
+		// this comment is in is not always it (a pop-out note, a link opened
+		// in the background). Point the scope at the comment's note first, or
+		// the panel opens on another note's comments and cannot select this
+		// one. A pinned scope stays where the reader pinned it.
+		const target = this.app.vault.getAbstractFileByPath(filePath);
+		if (target instanceof TFile) this.onActiveFileChangedForScope(target);
 		// F-276: revealLeaf below uncollapses the right sidebar, which narrows
 		// and reflows the document editor and would otherwise shift the reading
 		// position. Capture the editor's scroll before the reveal and restore it

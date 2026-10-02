@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Clicking a comment's text in an open card in the Thread tab now jumps to the comment in the note, the same as the original text of an addressed comment. Clicking a link in the text still follows the link, and selecting text to copy it does not jump. (#82)
+- Clicking a comment in a note open in a pop-out window opened the comment panel in the main window, on whatever note the main window had open, so it often showed the wrong comment. A pop-out window has no side panel, so the comment now opens in its own tab beside the note in the pop-out. A comment without a unique ID cannot have a tab, so a notice says to open the note in the main window instead.
 
 ## [1.20.0-beta.4] - 2026-10-02
 
