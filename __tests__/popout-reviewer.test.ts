@@ -257,6 +257,42 @@ describe('scanVaultIfNeeded', () => {
 			'bbbbbbbb',
 		]);
 	});
+
+	function scanSetup(read: () => Promise<{ text: string }>) {
+		const commentIndex = new CommentIndex();
+		const plugin = Object.create(AnnotecaPlugin.prototype) as unknown as {
+			scanVaultIfNeeded(): Promise<void>;
+		};
+		Object.assign(plugin, {
+			commentIndex,
+			vaultScanned: false,
+			events: { trigger: () => undefined },
+			app: { vault: { getMarkdownFiles: () => [{ path: PATH }] } },
+			comments: { currentNoteText: read },
+		});
+		return { plugin, commentIndex };
+	}
+	const ids = (index: CommentIndex) =>
+		index.get(PATH)?.comments.map((c) => c.id);
+
+	it('keeps an entry already indexed', async () => {
+		const t = scanSetup(() =>
+			Promise.resolve({ text: textWith(['bbbbbbbb']) }),
+		);
+		t.commentIndex.rebuild(PATH, textWith(['aaaaaaaa']));
+		await t.plugin.scanVaultIfNeeded();
+		expect(ids(t.commentIndex)).toEqual(['aaaaaaaa']);
+	});
+
+	it('keeps an entry indexed while the scan was reading', async () => {
+		const t = scanSetup(() => {
+			// The pop-out route indexes the editor while the read is pending.
+			t.commentIndex.rebuild(PATH, textWith(['aaaaaaaa']));
+			return Promise.resolve({ text: textWith(['bbbbbbbb']) });
+		});
+		await t.plugin.scanVaultIfNeeded();
+		expect(ids(t.commentIndex)).toEqual(['aaaaaaaa']);
+	});
 });
 
 // In a pop-out the comment tab stands in for the side panel, so stepping from

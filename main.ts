@@ -1145,11 +1145,15 @@ export default class AnnotecaPlugin extends Plugin {
 		if (this.vaultScanned) return;
 		const files = this.app.vault.getMarkdownFiles();
 		for (const f of files) {
-			// What a write would see: the open editor's buffer, else the
-			// vault. The saved bytes of an open note can be older than an
-			// entry already indexed from its editor, and the first scan
-			// would put the older comments back.
+			// A note already indexed keeps its entry, as in indexUnseenFiles:
+			// keeping it current is the file-event handlers' job, and an entry
+			// indexed from the editor (a pop-out comment opening in its tab)
+			// is newer than anything the scan reads. Checked again after the
+			// read, which awaits.
+			if (this.commentIndex.get(f.path)) continue;
+			// What a write would see: the open editor's buffer, else the vault.
 			const { text } = await this.comments.currentNoteText(f.path, f);
+			if (this.commentIndex.get(f.path)) continue;
 			this.commentIndex.rebuild(f.path, text);
 		}
 		this.vaultScanned = true;
