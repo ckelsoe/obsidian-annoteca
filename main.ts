@@ -1130,8 +1130,12 @@ export default class AnnotecaPlugin extends Plugin {
 		if (this.vaultScanned) return;
 		const files = this.app.vault.getMarkdownFiles();
 		for (const f of files) {
-			const content = await this.app.vault.cachedRead(f);
-			this.commentIndex.rebuild(f.path, content);
+			// What a write would see: the open editor's buffer, else the
+			// vault. The saved bytes of an open note can be older than an
+			// entry already indexed from its editor, and the first scan
+			// would put the older comments back.
+			const { text } = await this.comments.currentNoteText(f.path, f);
+			this.commentIndex.rebuild(f.path, text);
 		}
 		this.vaultScanned = true;
 		this.events.trigger('index-changed');
@@ -2316,9 +2320,14 @@ export default class AnnotecaPlugin extends Plugin {
 		// rather than show the main window's panel on the wrong note.
 		const popout = this.popoutLeafFor(filePath, from);
 		if (popout) {
-			// Ids from the editor's text, not the index: a comment saved a
+			// Ids from the editor's text, not the index: a comment typed a
 			// moment ago may not be indexed yet, and would read as id-less.
-			if (hasUniqueId(parseAll(popout.editor.getValue()), comment)) {
+			// The tab looks its comment up in the index, so index that same
+			// text first, or the tab would report the comment missing.
+			const text = popout.editor.getValue();
+			if (hasUniqueId(parseAll(text), comment)) {
+				this.commentIndex.rebuild(filePath, text);
+				this.events.trigger('index-changed', { path: filePath });
 				this.openCommentInTab(filePath, comment, popout.leaf);
 				this.highlightActiveComment(filePath, start);
 			} else {

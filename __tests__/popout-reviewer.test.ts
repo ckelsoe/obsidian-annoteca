@@ -12,6 +12,7 @@
 import { MarkdownView } from 'obsidian';
 import { installObsidianDomHelpers, noticeLog } from '../__mocks__/obsidian';
 import AnnotecaPlugin from '../main';
+import { CommentIndex } from '../index';
 import { serializeLeanMarker } from '../parser';
 import type { Comment } from '../types';
 
@@ -74,16 +75,27 @@ function setup(opts: {
 	const text = textWith(opts.ids);
 	const note = noteLeaf(opts.inPopout, splits, text);
 	const main = noteLeaf(false, splits, text);
+	// Empty, as when the comment was typed after the note was last indexed.
+	const commentIndex = new CommentIndex();
 	const calls = {
 		tab: [] as unknown[][],
+		// The ids the index held for the note when the tab opened: the tab
+		// looks its comment up there.
+		indexedAtOpen: [] as (string | undefined)[][],
 		hub: 0,
 		highlight: [] as unknown[][],
+		changed: [] as unknown[],
 	};
 	const plugin = Object.create(
 		AnnotecaPlugin.prototype,
 	) as unknown as PluginUnderTest;
 	Object.assign(plugin, {
-		events: { trigger: () => undefined },
+		commentIndex,
+		events: {
+			trigger: (name: string, payload: unknown) => {
+				if (name === 'index-changed') calls.changed.push(payload);
+			},
+		},
 		app: {
 			vault: { getAbstractFileByPath: () => null },
 			workspace: {
@@ -95,7 +107,12 @@ function setup(opts: {
 				getActiveFile: () => null,
 			},
 		},
-		openCommentInTab: (...args: unknown[]) => calls.tab.push(args),
+		openCommentInTab: (...args: unknown[]) => {
+			calls.tab.push(args);
+			calls.indexedAtOpen.push(
+				(commentIndex.get(PATH)?.comments ?? []).map((c) => c.id),
+			);
+		},
 		activateView: () => {
 			calls.hub += 1;
 			return Promise.resolve();
@@ -125,6 +142,9 @@ describe('openReviewerOnComment from a pop-out note', () => {
 		plugin.openReviewerOnComment(c, PATH);
 		expect(calls.tab).toEqual([[PATH, c, note.leaf]]);
 		expect(calls.highlight).toEqual([[PATH, 5]]);
+		// Indexed from the editor before the tab opened, and announced.
+		expect(calls.indexedAtOpen).toEqual([['aaaaaaaa']]);
+		expect(calls.changed).toEqual([{ path: PATH }]);
 		expect(calls.hub).toBe(0);
 		expect(noticeLog).toEqual([]);
 	});
@@ -183,5 +203,37 @@ describe('openReviewerOnComment from a pop-out note', () => {
 		expect(calls.tab).toEqual([]);
 		expect(calls.hub).toBe(1);
 		expect(noticeLog).toEqual([]);
+	});
+});
+
+// The comment tab starts the one-time vault scan when it opens. Reading saved
+// bytes there would replace an entry just indexed from the editor with older
+// text, and the tab would lose the comment it was opened on.
+describe('scanVaultIfNeeded', () => {
+	it('indexes an open note from its editor, not its saved bytes', async () => {
+		const commentIndex = new CommentIndex();
+		const plugin = Object.create(AnnotecaPlugin.prototype) as unknown as {
+			scanVaultIfNeeded(): Promise<void>;
+		};
+		Object.assign(plugin, {
+			commentIndex,
+			vaultScanned: false,
+			events: { trigger: () => undefined },
+			app: {
+				vault: {
+					getMarkdownFiles: () => [{ path: PATH }],
+					cachedRead: () =>
+						Promise.resolve('Saved before the comment.'),
+				},
+			},
+			comments: {
+				currentNoteText: () =>
+					Promise.resolve({ text: textWith(['bbbbbbbb']) }),
+			},
+		});
+		await plugin.scanVaultIfNeeded();
+		expect(commentIndex.get(PATH)?.comments.map((c) => c.id)).toEqual([
+			'bbbbbbbb',
+		]);
 	});
 });
