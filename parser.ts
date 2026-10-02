@@ -124,6 +124,12 @@ export function isAuthorToken(tag: string): boolean {
 // structured line the walk consumes without inventing an anchor, instead of an
 // unknown line.
 const ANCHOR_LINE_RE = /^\s*\[anchor=([^\]\r\n]*)\]\s*$/;
+// A comment created with a closer (#84) says so, so a closer that goes missing
+// later is reportable instead of reading as a start-only comment. One value
+// only: any other `[range=...]` is an unknown line, kept verbatim like every
+// line this version cannot name.
+export const RANGE_CLOSED_LINE = '[range=closed]';
+const RANGE_LINE_RE = /^\s*\[range=closed\]\s*$/;
 const REPLY_LINE_RE = new RegExp(
 	`^\\s*\\[reply\\s+(${AUTHOR_SRC})\\s+(${STAMP_SRC})\\]:\\s?([\\s\\S]*)$`,
 );
@@ -492,6 +498,7 @@ const KNOWN_LINE_RES = [
 	DATE_LINE_RE,
 	AUTHOR_LINE_RE,
 	ANCHOR_LINE_RE,
+	RANGE_LINE_RE,
 	SOURCE_LINE_RE,
 	REPLY_LINE_RE,
 	ADDRESSED_LINE_RE,
@@ -684,6 +691,7 @@ interface ParsedTail {
 	resolution: Resolution | undefined;
 	unknownLines: string[];
 	source: CommentSource | undefined;
+	range: 'closed' | undefined;
 }
 
 interface FenceBlock {
@@ -892,6 +900,7 @@ function walkTrailingLines(
 	let author: string | undefined;
 	let source: CommentSource | undefined;
 	let anchor: AnchorText | undefined;
+	let range: 'closed' | undefined;
 	const replies: Reply[] = [];
 	let addressed: Addressed | undefined;
 	let resolution: Resolution | undefined;
@@ -905,6 +914,7 @@ function walkTrailingLines(
 	let seenAuthor = false;
 	let seenSource = false;
 	let seenAnchor = false;
+	let seenRange = false;
 	let seenAddressed = false;
 	let seenResolution = false;
 
@@ -959,6 +969,14 @@ function walkTrailingLines(
 			if (seenSource) break;
 			seenSource = true;
 			source = { tag: sourceMatch[1], key: sourceMatch[2] };
+			bodyEndExclusive = i;
+			continue;
+		}
+
+		if (RANGE_LINE_RE.test(line)) {
+			if (seenRange) break;
+			seenRange = true;
+			range = 'closed';
 			bodyEndExclusive = i;
 			continue;
 		}
@@ -1080,6 +1098,7 @@ function walkTrailingLines(
 		resolution,
 		unknownLines,
 		source,
+		range,
 	};
 }
 
@@ -1171,6 +1190,7 @@ export function parseAll(content: string): Comment[] {
 			unknownLines: tail.unknownLines,
 			source: tail.source,
 			marker: { start: raw.start, end: raw.end },
+			...(tail.range ? { range: tail.range } : {}),
 		});
 	}
 	pairClosers(
@@ -1218,6 +1238,7 @@ export function parseAt(content: string, start: number): Comment | undefined {
 		source: tail.source,
 		marker: { start: match.index, end: match.index + match[0].length },
 		...(closer ? { closer } : {}),
+		...(tail.range ? { range: tail.range } : {}),
 	};
 }
 
@@ -1229,6 +1250,7 @@ export interface SerializeInput {
 	author?: string;
 	source?: CommentSource;
 	anchor?: AnchorText;
+	range?: 'closed';
 	replies?: readonly Reply[];
 	addressed?: Addressed;
 	resolution?: Resolution;
@@ -1277,7 +1299,8 @@ export function serialize(c: SerializeInput): string {
 		c.date !== undefined ||
 		c.author !== undefined ||
 		c.source !== undefined ||
-		c.anchor !== undefined;
+		c.anchor !== undefined ||
+		c.range !== undefined;
 	const hasReplies = (c.replies?.length ?? 0) > 0;
 	const hasAddressed = c.addressed !== undefined;
 	const hasResolution = c.resolution !== undefined;
@@ -1331,6 +1354,7 @@ export function serialize(c: SerializeInput): string {
 			);
 		if (text.trim() !== '') lines.push(`[anchor=${text}]`);
 	}
+	if (c.range === 'closed') lines.push(RANGE_CLOSED_LINE);
 	for (const r of c.replies ?? []) {
 		lines.push(
 			`[reply ${sanitizeAuthorToken(r.author)} ${r.date}]: ${escapeInline(r.body)}`,

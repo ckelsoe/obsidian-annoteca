@@ -91,11 +91,22 @@ export interface PromoteRequest {
 	// Your plugin's own identity for the finding. Creation is idempotent on it:
 	// promoting the same finding twice is a no-op, not a second marker.
 	sourceKey: string;
+	// apiVersion >= 4. Also write a closing marker after the last non-whitespace
+	// character before anchor.end, so the comment covers exactly that text instead
+	// of marking only where it starts. Optional and off by default; an older
+	// Annoteca ignores it and writes a start-only comment, which `closed` on the
+	// result reports. Skipped where HTML would show (code) or when the range is
+	// only whitespace. An anchor touching the note properties is invalid and
+	// fails the whole call, as it always did.
+	readonly closeRange?: boolean;
 }
 
 export interface CreatedComment {
 	id: string;
 	sourceKey: string;
+	// apiVersion >= 4: whether a closing marker was written. Absent from an older
+	// Annoteca, which never writes one.
+	closed?: boolean;
 }
 
 export interface AnnotecaApi {

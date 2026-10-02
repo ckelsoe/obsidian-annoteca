@@ -52,7 +52,12 @@ export type SkillExportTarget = 'claude' | 'agent' | 'both';
 // to drop the closer with the old text or leave it stranded mid-sentence, and
 // the comment silently loses its range; on a Reject the wrong span would then be
 // restored. Same reason as every bump above.
-export const SKILL_SCHEMA_VERSION = 9;
+// 10 = the `[range=closed]` line that goes with a closer. A comment made with a
+// closer now says so in its own marker, so a closer an edit later drops is
+// reported instead of the comment quietly becoming start-only. An assistant on
+// a v9 skill creates ranges without the line, and strips it as an unknown field
+// when it rewrites the marker, so the report never fires for its comments.
+export const SKILL_SCHEMA_VERSION = 10;
 
 const SKILL_VERSION_RE = /^annoteca-skill-version:\s*(\d+)\s*$/m;
 
@@ -172,7 +177,7 @@ The Q3 forecast assumes a hiring freeze through December.
 -->
 \`\`\`
 
-Structured lines sit at the END of the comment, after all body text, one per line, in this order: \`[id=]\`, \`[date=]\`, \`[author=]\`, \`[source=]\`, \`[anchor=]\`, then \`[reply ...]\` lines oldest first, then at most one \`[addressed ...]\` line (with its optional \`annoteca-original\` fence), then at most one \`[resolved ...]\` line.
+Structured lines sit at the END of the comment, after all body text, one per line, in this order: \`[id=]\`, \`[date=]\`, \`[author=]\`, \`[source=]\`, \`[anchor=]\`, \`[range=closed]\`, then \`[reply ...]\` lines oldest first, then at most one \`[addressed ...]\` line (with its optional \`annoteca-original\` fence), then at most one \`[resolved ...]\` line.
 
 ### Range comments: the closing marker
 
@@ -182,17 +187,21 @@ A comment can say exactly where its passage ends. The opening marker sits at the
 <!-- annoteca/tighten: wordy
 [id=k7q2m9p4]
 [anchor=The Q3 forecast assumes a hiring freeze through December.]
+[range=closed]
 --> The Q3 forecast assumes a hiring freeze through December.<!-- /annoteca k7q2m9p4 --> The rest of the paragraph.
 \`\`\`
 
 The commented text is everything between the opening marker's \`-->\` (plus the one space after it) and the closing marker's \`<!--\`. It can span several sentences or paragraphs. Pairing is by id, so ranges may overlap or nest.
+
+The \`[range=closed]\` line says the comment was made with a closer. It goes after \`[anchor=]\` and before any \`[reply ...]\` line. With it, a closer that goes missing is reported to the reviewer; without it, the comment simply marks where its passage starts.
 
 Rules for closers:
 
 - **Keep the closer at the end of the passage when you rewrite it.** Replace the text between the two markers and leave both markers in place, so the closer still sits straight after the last character of your new text. Never drop it along with the old text, and never leave it stranded inside the new text.
 - **When you address a range comment by replacement**, the \`annoteca-original\` fence holds exactly the old text that was between the two markers, nothing more. Reject restores that text between them.
 - **Never add a closer to an existing comment that has none**, and never move one. A comment without a closer marks only where its passage starts, and that is a valid comment. Closers are written when a comment is created.
-- **Storage mode does not matter**: a lean marker (see "End-of-file storage" below) takes the same closer, straight after its passage, and the closer never goes in the store.
+- **Write \`[range=closed]\` with every closer you create, and never remove it.** It is how a lost closer gets noticed.
+- **Storage mode does not matter**: a lean marker (see "End-of-file storage" below) takes the same closer, straight after its passage, and the closer never goes in the store. The flag does go in the store, as \`"range": "closed"\`.
 - **A closer goes only where HTML is invisible**: never inside a code block, inline code, or the note's frontmatter properties.
 - **Deleting a comment deletes its closer too**, and only when the user explicitly asks to delete that comment. Exactly one closer per id; a second one makes the range ambiguous and the plugin ignores both.
 
@@ -230,7 +239,7 @@ Field rules (match these exactly; the plugin's parser enforces them):
 - **Reply to a comment**: append a \`[reply <you> <now>]: ...\` line as the last line before \`-->\` (after existing replies, before any \`[addressed ...]\` or \`[resolved ...]\` line), where \`<now>\` is the current \`YYYY-MM-DDTHH:MM:SS\` timestamp. Never rewrite the original body or others' replies.
 - **Address a comment with a small in-place tweak**: edit the passage the comment points at (use the \`[anchor=]\` quote to locate it), then reply in the thread saying what you changed and why. Leave the rest of the document byte-for-byte untouched.
 - **Address a comment by replacing the passage**: this is the lossless flow. (1) Replace the anchored passage with your new text. (2) Leave the marker at the **head** of the new text (markers lead the text they concern). (3) Inside the marker, add an \`[addressed <you> <now>]: <what you changed and why>\` line (\`<now>\` = the current timestamp); on the line directly after it open a fenced block tagged \`annoteca-original\`, put the verbatim text you replaced on its own line(s), then close the fence. Keep the original \`[anchor=]\` line as-is; it is the historical record of what was commented on. Do not mark the comment resolved; the reviewer decides accept / revise / reject. See the worked example below.
-- **Create a comment**: insert a marker at the **start** of the passage it concerns (the prose it is about follows the marker), with your category choice, an id, the current \`YYYY-MM-DDTHH:MM:SS\` timestamp, and your author tag. When the comment is about a specific phrase, sentence or set of sentences, also add a closing marker \`<!-- /annoteca <id> -->\` straight after its last character, so the reader can see exactly what it covers.
+- **Create a comment**: insert a marker at the **start** of the passage it concerns (the prose it is about follows the marker), with your category choice, an id, the current \`YYYY-MM-DDTHH:MM:SS\` timestamp, and your author tag. When the comment is about a specific phrase, sentence or set of sentences, also add a closing marker \`<!-- /annoteca <id> -->\` straight after its last character and a \`[range=closed]\` line in the marker, so the reader can see exactly what it covers.
 - **Resolve a comment**: ONLY when the user explicitly asks. Append one \`[resolved <you> <now>]: <note>\` line (\`<now>\` = the current timestamp). **Never resolve a comment unprompted** (rationale: resolution is the reviewer's decision; resolving feedback the reviewer has not signed off on destroys the review loop this format exists to protect).
 - **Never delete a marker, and never delete a closing marker.** Do not remove a marker to "clean up", and never resolve by rewriting the file so the markers disappear (rationale: the markers are the audit trail; deleting them silently discards the conversation and the reviewer's pending decisions). Removal happens only when the user explicitly asks to delete a specific comment.
 
@@ -278,7 +287,7 @@ That is a **lean marker**: category and id only, no body or thread. Its real con
 
 Find every store entry with this regex: \`<!--\\s*annoteca:store\\b[\\s\\S]*?-->\`. A comment is in this mode when its marker body is empty AND its id matches a store entry. A marker that still carries an inline body is NOT in this mode: leave it in the bracket format above.
 
-The JSON mirrors the comment model: \`v\` (schema version, currently 1), \`id\` (required, the join key), \`category\`, \`body\`, and the optional \`date\`, \`author\`, \`anchor\` (\`{ "text": "...", "truncated": false }\`), \`replies\` (array of \`{ "author", "date", "body" }\`), \`addressed\` (\`{ "author", "date", "note", "original"? }\`) and \`resolution\` (\`{ "author", "date", "note" }\`). Absent fields are omitted.
+The JSON mirrors the comment model: \`v\` (schema version, currently 1), \`id\` (required, the join key), \`category\`, \`body\`, and the optional \`date\`, \`author\`, \`anchor\` (\`{ "text": "...", "truncated": false }\`), \`range\` (\`"closed"\` for a comment made with a closer), \`replies\` (array of \`{ "author", "date", "body" }\`), \`addressed\` (\`{ "author", "date", "note", "original"? }\`) and \`resolution\` (\`{ "author", "date", "note" }\`). Absent fields are omitted.
 
 **Edit both sites, and put each change in the right one.** To reply to, address, resolve or edit the body of an eof comment, change its **store entry's JSON**, never the lean marker: append to the \`replies\` array, add an \`addressed\` or \`resolution\` object, or edit \`body\`. Leave the marker lean. Category is the one field the marker owns, so changing it rewrites the marker (\`<!-- annoteca/<new-category>: [id=<id>] -->\`) and the entry's \`category\` together. To create a comment in this mode, insert a lean marker at the start of the passage and add a matching store entry at the end of the file.
 

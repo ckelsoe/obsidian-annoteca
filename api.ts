@@ -35,7 +35,12 @@ import { resolveSettingsCategories } from './settings';
 // 3 = adds reveal(). Bumped for the same reason: a consumer checking `apiVersion`
 //     before it wires a "jump to this comment" action must be able to tell a build
 //     that has reveal() from one that does not.
-export const API_VERSION = 3;
+// 4 = promote() takes `closeRange` and reports `closed` (#84). Nothing existing
+//     changed shape: the request field is optional and the result field is new,
+//     and an older build ignores the request field. Bumped anyway because a
+//     consumer deciding whether to ask for ranges should not have to promote a
+//     comment to find out it cannot get one.
+export const API_VERSION = 4;
 
 // The shape a consumer sees. Deliberately NOT the internal `Comment`: that
 // carries the marker grammar, `unknownLines`, reply and addressed structures

@@ -51,10 +51,11 @@ A comment on a selection also marks where the selection ends, with a closing mar
 ```markdown
 <!-- annoteca/tighten: wordy
 [id=a3b9c2x7]
+[range=closed]
 --> The Q3 forecast assumes a hiring freeze through December.<!-- /annoteca a3b9c2x7 -->
 ```
 
-The underline and highlight cover exactly that passage, and Reject restores exactly that passage. A comment made at the cursor, and every comment from an earlier version, marks only where its passage starts, and works as it always has. A selection that starts or ends inside a code block, inline code, or the note properties gets no closing marker, since HTML would show there.
+The underline and highlight cover exactly that passage, and Reject restores exactly that passage. The `[range=closed]` line records that the comment was made with a closing marker, so if an edit later drops the closing marker, the orphan check reports it. A comment made at the cursor, and every comment from an earlier version, marks only where its passage starts, and works as it always has. A selection that starts or ends inside a code block, inline code, or the note properties gets no closing marker, since HTML would show there.
 
 When an assistant addresses a comment by rewriting the passage, it records the change on an `[addressed ...]` line and keeps the original text verbatim in a fenced block inside the marker, so a Reject can restore it:
 

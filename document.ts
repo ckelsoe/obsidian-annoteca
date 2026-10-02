@@ -61,6 +61,9 @@ export function isLeanMarker(c: Comment): boolean {
 		// id, overwrite its provenance on merge, and convertFileToEof would skip
 		// it entirely.
 		c.source === undefined &&
+		// The range flag (#84) too, for the same reason: it is inline content,
+		// and a lean classification would let a store entry's merge drop it.
+		c.range === undefined &&
 		c.unknownLines.length === 0
 	);
 }
@@ -81,6 +84,7 @@ function merge(marker: Comment, stored: StoredComment): Comment {
 		source: stored.source,
 		author: stored.author,
 		anchor: stored.anchor,
+		...(stored.range ? { range: stored.range } : {}),
 		replies: stored.replies.slice(),
 		addressed: stored.addressed,
 		resolution: stored.resolution,

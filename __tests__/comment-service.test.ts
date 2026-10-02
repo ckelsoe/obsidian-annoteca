@@ -2820,3 +2820,117 @@ describe('range comments (closing marker)', () => {
 		expect(h.content).toBe(RANGE);
 	});
 });
+
+// #84 follow-up: promote() writes a closer only when asked, and says so.
+describe('promote with closeRange', () => {
+	const PLAIN = 'The rough draft carries on here and then some more prose.\n';
+	const req = (over: Partial<PromoteRequest> = {}): PromoteRequest => ({
+		category: 'prose-check',
+		body: 'Flagged register.',
+		anchor: { start: 4, end: 15 },
+		author: 'plumbline',
+		sourceKey: 'k1',
+		...over,
+	});
+
+	it('without the option: start-only, exactly as before, reported closed: false', async () => {
+		const h = makeHarnessWith(PLAIN);
+		const made = await h.service.promote('note.md', [req()], h.content);
+		expect(made).toEqual([
+			{ id: made[0]?.id, sourceKey: 'k1', closed: false },
+		]);
+		expect(h.content).not.toContain('/annoteca');
+		expect(firstComment(h.content).range).toBeUndefined();
+	});
+
+	it('with it: a closer after the range, the flag, and closed: true', async () => {
+		const h = makeHarnessWith(PLAIN);
+		const made = await h.service.promote(
+			'note.md',
+			[req({ closeRange: true })],
+			h.content,
+		);
+		const c = firstComment(h.content);
+		expect(made[0]?.closed).toBe(true);
+		expect(c.range).toBe('closed');
+		expect(c.closer).toBeDefined();
+		if (!c.closer) return;
+		expect(h.content.slice(c.marker.end + 1, c.closer.start)).toBe(
+			'rough draft',
+		);
+	});
+
+	it('no closer where it would show: closed: false, comment still made', async () => {
+		const doc = 'Run `npm run build` now.\n';
+		const h = makeHarnessWith(doc);
+		const made = await h.service.promote(
+			'note.md',
+			[req({ anchor: { start: 0, end: 10 }, closeRange: true })],
+			h.content,
+		);
+		expect(made).toHaveLength(1);
+		expect(made[0]?.closed).toBe(false);
+		expect(h.content).not.toContain('/annoteca');
+		expect(firstComment(h.content).range).toBeUndefined();
+	});
+
+	it("back-to-back ranges: the first one's closer comes before the second marker", async () => {
+		// "rough" ends at 9 and " draft" starts at 9, so the first closer and
+		// the second marker are inserted at the same offset. Listed second,
+		// so request order cannot be what puts them right.
+		const h = makeHarnessWith(PLAIN);
+		const made = await h.service.promote(
+			'note.md',
+			[
+				req({
+					anchor: { start: 9, end: 15 },
+					sourceKey: 'b',
+					closeRange: true,
+				}),
+				req({
+					anchor: { start: 4, end: 9 },
+					sourceKey: 'a',
+					closeRange: true,
+				}),
+			],
+			h.content,
+		);
+		expect(made.every((m) => m.closed)).toBe(true);
+		const byKey = new Map(
+			parseAll(h.content).map((c) => [c.source?.key, c] as const),
+		);
+		const a = byKey.get('a');
+		const b = byKey.get('b');
+		if (!a?.closer || !b?.closer) throw new Error('both ranges expected');
+		expect(a.closer.end).toBeLessThanOrEqual(b.marker.start);
+		expect(h.content.slice(a.marker.end + 1, a.closer.start)).toBe('rough');
+		expect(h.content.slice(b.marker.end, b.closer.start).trim()).toBe(
+			'draft',
+		);
+	});
+
+	it('refuses the whole batch when closeRange is not a boolean', async () => {
+		const h = makeHarnessWith(PLAIN);
+		const bad = {
+			...req(),
+			closeRange: 'yes',
+		} as unknown as PromoteRequest;
+		expect(await h.service.promote('note.md', [bad], h.content)).toEqual(
+			[],
+		);
+		expect(h.content).toBe(PLAIN);
+	});
+
+	it('under end-of-file storage, the flag goes in the store', async () => {
+		const h = makeHarnessWith(PLAIN);
+		h.setFrontmatter({ annoteca_storage: 'eof' });
+		await h.service.promote(
+			'note.md',
+			[req({ closeRange: true })],
+			h.content,
+		);
+		const c = parseDocument(h.content).comments[0];
+		expect(c?.range).toBe('closed');
+		expect(c?.closer).toBeDefined();
+	});
+});

@@ -60,6 +60,11 @@ export interface Comment {
 	// before ranges existed and every comment made at the cursor. Set only
 	// when the pairing is unambiguous; see pairClosers in parser.ts.
 	closer?: MarkerRange;
+	// Set when the comment was created with a closer (#84), so a closer that
+	// later goes missing can be told apart from a comment that never had one.
+	// Written as the `[range=closed]` trailing line (or `"range": "closed"` in
+	// the end-of-file store). Absent on every start-only comment.
+	range?: 'closed';
 	// Where a machine-created comment came from (F-282), absent for one a person
 	// wrote. `tag` is the creating plugin's id and `key` is that plugin's own
 	// identity for the finding, so it can tell whether it already promoted this
@@ -81,11 +86,22 @@ export interface PromoteRequest {
 	// The creating plugin's own identity for the finding. Promotion is idempotent
 	// on it: promoting the same finding twice is a no-op, not a second marker.
 	sourceKey: string;
+	// Opt in to a range comment (#84): also write a closer after the last
+	// non-whitespace character before anchor.end. Absent or false keeps the
+	// original start-only behaviour. Skipped where a closer would show (code)
+	// or the range is only whitespace, and `closed` on the result says which
+	// happened. An anchor touching the properties block is invalid before this
+	// is considered, and fails the whole batch as it always did.
+	closeRange?: boolean;
 }
 
 export interface CreatedComment {
 	id: string;
 	sourceKey: string;
+	// Whether a closer was written, so the comment covers exactly its range.
+	// Always set by this build; optional because a consumer reading the result
+	// of an older build (apiVersion < 4) does not get it.
+	closed?: boolean;
 }
 
 // Provenance for a comment created through the API rather than by a person.

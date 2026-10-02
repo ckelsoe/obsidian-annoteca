@@ -47,7 +47,7 @@ import type {
 	Reply,
 	Resolution,
 } from './types';
-import { isCommentSource } from './parser';
+import { isCommentSource, RANGE_CLOSED_LINE } from './parser';
 
 // Schema version stamped into every entry. The marker format deliberately has NO
 // version sentinel (see parser.ts's escapeTerminator note: adding one there is a
@@ -93,6 +93,9 @@ export interface StoredComment {
 	// lean marker holds category and id only, so under eof storage this is the
 	// ONLY place a promoted comment's source survives.
 	source?: CommentSource;
+	// Set when the comment was created with a closer (#84). Carried for the same
+	// reason as source: a fold between storage modes must not drop it.
+	range?: 'closed';
 }
 
 export interface RawStoreEntry {
@@ -173,9 +176,12 @@ function buildPayload(c: StoredComment): Record<string, unknown> {
 			note: c.resolution.note,
 		};
 	}
+	// The range flag (#84) travels the same way and for the same reason: as its
+	// marker line, which an older build carries verbatim.
 	const carried = [
 		...(c.unknownLines ?? []),
 		...(sourceLine !== undefined ? [sourceLine] : []),
+		...(c.range === 'closed' ? [RANGE_CLOSED_LINE] : []),
 	];
 	if (carried.length > 0) {
 		out.unknownLines = carried;
@@ -392,7 +398,15 @@ export function decodeStoreEntry(json: string): StoredComment | undefined {
 	// conversion time instead of deliberately here.
 	const lifted = liftLegacySource(priorLines);
 	const source = explicitSource ?? lifted.source;
-	const carried = lifted.rest;
+	// The range flag comes back out of the carried lines it was written into.
+	// An explicit `"range": "closed"` is accepted too, since an assistant
+	// writing the store by hand is taught the field, not the line; any other
+	// value fails the entry like every other field of the wrong shape.
+	if (obj.range !== undefined && obj.range !== 'closed') return undefined;
+	const rangeLine = lifted.rest.some((l) => l.trim() === RANGE_CLOSED_LINE);
+	const range: 'closed' | undefined =
+		obj.range === 'closed' || rangeLine ? 'closed' : undefined;
+	const carried = lifted.rest.filter((l) => l.trim() !== RANGE_CLOSED_LINE);
 
 	const out: StoredComment = { id, category, body, replies };
 	const date = optString(obj.date);
@@ -401,6 +415,7 @@ export function decodeStoreEntry(json: string): StoredComment | undefined {
 	if (author !== undefined) out.author = author;
 	if (source !== undefined) out.source = source;
 	if (anchor !== undefined) out.anchor = anchor;
+	if (range !== undefined) out.range = range;
 	if (addressed !== null) out.addressed = addressed;
 	if (resolution !== null) out.resolution = resolution;
 	if (carried.length > 0) {
@@ -526,6 +541,7 @@ export function toStored(id: string, c: Comment): StoredComment {
 		// would otherwise drop its provenance, and the lean marker left behind
 		// has nowhere to put it, so the loss is permanent and silent.
 		source: c.source,
+		...(c.range ? { range: c.range } : {}),
 	};
 }
 
