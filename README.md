@@ -77,7 +77,7 @@ Why HTML comments?
 
 ## The review workflow
 
-1. Select a passage and run **Add comment for selection** (or **Add comment here** at a bare cursor) from the command palette or the right-click menu.
+1. Select a passage and run **Add comment for selection** (or **Add comment here** at a bare cursor) from the command palette or the right-click menu. To comment on one sentence, click inside it and run **Add comment for current sentence**: Annoteca selects the sentence for you.
 2. Pick a category, write the feedback. The composer opens as a modal or as a side panel, your choice.
 3. Reply from the hover popup, the hub's Thread tab, or by typing a `[reply ...]` line directly in the file.
 4. When an assistant has addressed a comment, the hover popup offers **Accept**, **Revise**, or **Reject** (reject restores the original text). Otherwise resolve when done and reopen if it comes back, or use "Resolve and remove" to drop the marker instead of keeping it as history.
