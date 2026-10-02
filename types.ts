@@ -86,11 +86,12 @@ export interface PromoteRequest {
 	// The creating plugin's own identity for the finding. Promotion is idempotent
 	// on it: promoting the same finding twice is a no-op, not a second marker.
 	sourceKey: string;
-	// Opt in to a range comment (#84): also write a closer at anchor.end, so
-	// the comment covers exactly start..end. Absent or false keeps the original
-	// start-only behaviour. Ignored where a closer would show (code, the
-	// properties block) or the range is empty; `closed` on the result says
-	// which happened.
+	// Opt in to a range comment (#84): also write a closer after the last
+	// non-whitespace character before anchor.end. Absent or false keeps the
+	// original start-only behaviour. Skipped where a closer would show (code)
+	// or the range is only whitespace, and `closed` on the result says which
+	// happened. An anchor touching the properties block is invalid before this
+	// is considered, and fails the whole batch as it always did.
 	closeRange?: boolean;
 }
 

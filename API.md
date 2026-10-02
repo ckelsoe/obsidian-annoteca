@@ -133,8 +133,9 @@ Return and argument shapes, so you can build against this page alone:
   captured anchor text next to the marker. If you detect markers yourself, skip closers
   too: they are separate HTML comments, and they do not match the opener pattern below.
 - `PromoteRequest` (into `promote`): `category`, `body`, `anchor` as `{start, end}`,
-  `author`, `sourceKey`. Shown in Creating below.
-- `CreatedComment` (from `promote`): `id`, `sourceKey`.
+  `author`, `sourceKey`, and optional `closeRange` (`apiVersion >= 4`). Shown in Creating
+  below.
+- `CreatedComment` (from `promote`): `id`, `sourceKey`, and `closed?` (`apiVersion >= 4`).
 
 The exact declarations, with `readonly` and optionality, are in `annoteca-api.d.ts`.
 
@@ -225,11 +226,13 @@ Notes on `promote`:
   call returns an empty array rather than placing a marker in the wrong prose. Re-read
   and call again. A returned `CreatedComment` is the only proof a comment was written.
 - Range comments (`apiVersion >= 4`). Set `closeRange: true` on a request and Annoteca
-  also writes a closing marker, `<!-- /annoteca <id> -->`, at `anchor.end`, so the
-  comment covers exactly `start..end` instead of marking only where it starts. It is off
-  by default, and an older build ignores it. No closer is written where HTML would show
-  (a code block, inline code, the note properties) or when the range is only whitespace;
-  `closed` on the returned `CreatedComment` says whether one was.
+  also writes a closing marker, `<!-- /annoteca <id> -->`, after the last non-whitespace
+  character before `anchor.end`, so trailing spaces and line breaks in your range stay
+  outside it. It is off by default, and an older build ignores it. No closer is written
+  where HTML would show (a code block, inline code) or when the range is only whitespace;
+  that request still creates a start-only comment, and `closed` on the returned
+  `CreatedComment` says which happened. An anchor that touches the note properties is a
+  different case: it is invalid, and the whole call returns an empty array, as before.
 
 Reveal, to jump to a comment from your own indicator:
 
