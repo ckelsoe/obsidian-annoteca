@@ -164,26 +164,45 @@ function blockAround(
 		const l = lines[i];
 		return l ? content.slice(l.start, l.end) : '';
 	};
-	const blank = (i: number): boolean => !covered(i) && text(i).trim() === '';
+	// Blank once any quote markers are gone: a lone `>` separates two quoted
+	// paragraphs the way an empty line separates two plain ones.
+	const blank = (i: number): boolean =>
+		!covered(i) && stripQuotes(text(i)).trim() === '';
 	const solo = (i: number): boolean =>
 		!covered(i) && SOLO_LINE_RE.test(text(i));
 	const item = (i: number): boolean =>
 		!covered(i) && ITEM_LINE_RE.test(text(i));
-	const quoted = (i: number): boolean =>
-		!covered(i) && QUOTE_LINE_RE.test(text(i));
-	// Two neighbouring lines belong to one block.
+	const depth = (i: number): number =>
+		covered(i) ? -1 : quoteDepth(text(i));
+	// A table, with or without outer pipes: a line holding a `|` in a run of
+	// lines that includes a delimiter row (`---|---`, `| :-- | --: |`).
+	const delimiter = (i: number): boolean =>
+		!covered(i) && isDelimiterRow(text(i));
+	const inTable = (i: number): boolean => {
+		if (covered(i) || !text(i).includes('|')) return false;
+		// A row that opens with a pipe is treated as a table even without a
+		// delimiter row nearby: refusing costs only the shortcut.
+		if (text(i).trimStart().startsWith('|')) return true;
+		for (let j = i; j >= 0 && !blank(j); j--) if (delimiter(j)) return true;
+		for (let j = i + 1; j < lines.length && !blank(j); j++)
+			if (delimiter(j)) return true;
+		return false;
+	};
+	// Two neighbouring lines belong to one block. A line inside a comment
+	// carries no quote depth of its own, so it never splits on depth.
 	const joins = (upper: number, lower: number): boolean =>
 		!blank(upper) &&
 		!blank(lower) &&
 		!solo(upper) &&
 		!solo(lower) &&
 		!item(lower) &&
-		(covered(lower) || quoted(upper) === quoted(lower));
+		!inTable(upper) &&
+		!inTable(lower) &&
+		(covered(lower) || covered(upper) || depth(upper) === depth(lower));
 
 	// A table row is not a sentence. A new comment's marker spans several lines,
 	// and one inserted into a row would end the table there.
-	if (blank(here) || (!covered(here) && TABLE_ROW_RE.test(text(here))))
-		return undefined;
+	if (blank(here) || inTable(here)) return undefined;
 	let first = here;
 	if (!solo(here)) while (first > 0 && joins(first - 1, first)) first -= 1;
 	let last = here;
@@ -195,14 +214,44 @@ function blockAround(
 	return { start: top.start, end: bottom.end };
 }
 
-// A heading or a table row: a block on its own.
+// A heading or a leading-pipe table row: a block on its own.
 const SOLO_LINE_RE = /^[ \t]*(?:#{1,6}[ \t]|\|)/;
-// A table row.
-const TABLE_ROW_RE = /^[ \t]*\|/;
 // A list item, which starts a new block.
 const ITEM_LINE_RE = /^[ \t]*(?:>[ \t]?)*(?:[-*+]|\d+[.)])[ \t]/;
-// A quoted line.
-const QUOTE_LINE_RE = /^[ \t]*>/;
+// How many `>` quote markers open the line: 0 for plain prose, 2 for `>> `.
+function quoteDepth(line: string): number {
+	let depth = 0;
+	let i = 0;
+	for (;;) {
+		while (line.charAt(i) === ' ' || line.charAt(i) === '\t') i += 1;
+		if (line.charAt(i) !== '>') return depth;
+		depth += 1;
+		i += 1;
+	}
+}
+
+// The line with its leading quote markers removed.
+function stripQuotes(line: string): string {
+	let i = 0;
+	for (;;) {
+		while (line.charAt(i) === ' ' || line.charAt(i) === '\t') i += 1;
+		if (line.charAt(i) !== '>') return line.slice(i);
+		i += 1;
+	}
+}
+
+// A table's delimiter row: only pipes, colons, dashes and spaces, with at
+// least one pipe and one dash. A plain `---` rule has no pipe.
+function isDelimiterRow(line: string): boolean {
+	const t = line.trim();
+	return (
+		t.includes('|') &&
+		t.includes('-') &&
+		[...t].every(
+			(ch) => ch === '|' || ch === ':' || ch === '-' || ch === ' ',
+		)
+	);
+}
 
 // Whitespace, the line's markdown prefix, and existing markers, repeatedly,
 // so the sentence starts at its first word.

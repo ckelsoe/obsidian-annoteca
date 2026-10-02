@@ -118,4 +118,24 @@ describe('sentenceAt', () => {
 	it('nothing on a single blank line between paragraphs', () => {
 		expect(pick('One.\n|\nTwo.')).toBeUndefined();
 	});
+
+	it('a table without outer pipes is still a table', () => {
+		const doc = 'a | b\n--- | ---\nc^ell | d';
+		expect(pick(doc, '^')).toBeUndefined();
+		expect(pick('Prose with a | pipe in i^t.', '^')).toBe(
+			'Prose with a | pipe in it.',
+		);
+	});
+
+	it('a lone > separates two quoted paragraphs', () => {
+		expect(pick('> First has no stop\n>\n> Second para^graph.', '^')).toBe(
+			'Second paragraph.',
+		);
+	});
+
+	it('a change of quote depth is a block boundary', () => {
+		expect(pick('> outer has no stop\n>> inner sen^tence.', '^')).toBe(
+			'inner sentence.',
+		);
+	});
 });
