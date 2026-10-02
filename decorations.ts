@@ -66,7 +66,11 @@ export interface DecorationContext {
 	// which asks the view first.
 	getSourcePath(): string;
 	getSettings(): AnnotecaSettings;
-	onMarkerClick(marker: Comment): void;
+	// `sourcePath` is the note the click is in: the inline icon handles its
+	// own click, which need not make that note the active file. `from` is the
+	// editor the click happened in, so a note in a pop-out window opens its
+	// comment there rather than in the main window.
+	onMarkerClick(marker: Comment, sourcePath: string, from: HTMLElement): void;
 	addCommentForSelection(): void;
 	categoryFor(id: string): CategoryDefinition;
 	// Everything below that takes a `sourcePath` acts on a specific note, and
@@ -75,7 +79,11 @@ export interface DecorationContext {
 	// does not either, so asking the workspace for the active file ran every
 	// one of these against whichever note happened to be focused. `view` is in
 	// scope wherever the popover is built, so each is `sourcePathFor(ctx, view)`.
-	openInReviewer(marker: Comment, sourcePath: string): void;
+	openInReviewer(
+		marker: Comment,
+		sourcePath: string,
+		from: HTMLElement,
+	): void;
 	toggleResolution(marker: Comment, sourcePath: string): void;
 	resolveAndRemove(marker: Comment, sourcePath: string): void;
 	acceptAddressed(marker: Comment, sourcePath: string): void;
@@ -786,6 +794,12 @@ const HOVER_DELAY_MS: Record<AnnotecaSettings['hoverDelay'], number> = {
 // The editor itself knows, via the state field Obsidian installs on every
 // markdown editor. `false` makes the lookup optional, for a state built without
 // it (the unit tests build bare CodeMirror states).
+// What the popover's open action does, by window: a pop-out window has no
+// side panel, so there the comment opens in a tab beside the note.
+function openLabel(view: EditorView): string {
+	return view.dom.win === window ? 'Open in side panel' : 'Open beside note';
+}
+
 function sourcePathFor(ctx: DecorationContext, view: EditorView): string {
 	const info = view.state.field(editorInfoField, false);
 	return info?.file?.path ?? ctx.getSourcePath();
@@ -1072,13 +1086,13 @@ function buildCommentPopover(
 		if (earlier > 0) {
 			const more = repliesBlock.createEl('button', {
 				cls: 'annoteca-hover-more-link',
-				text: `+${earlier} earlier ${earlier === 1 ? 'reply' : 'replies'} — open in side panel`,
+				text: `+${earlier} earlier ${earlier === 1 ? 'reply' : 'replies'} — ${openLabel(view).toLowerCase()}`,
 			});
 			more.addEventListener('click', (e) => {
 				e.preventDefault();
 				e.stopPropagation();
 				closeTapPopover(view);
-				ctx.openInReviewer(ref.current, sourcePath);
+				ctx.openInReviewer(ref.current, sourcePath, view.dom);
 			});
 		}
 		for (const r of shown) renderReplyRow(r, repliesBlock, ctx, host);
@@ -1192,13 +1206,13 @@ function buildCommentPopover(
 
 	const openBtn = actions.createEl('button', {
 		cls: 'annoteca-hover-action',
-		text: 'Open in side panel',
+		text: openLabel(view),
 	});
 	openBtn.addEventListener('click', (e) => {
 		e.preventDefault();
 		e.stopPropagation();
 		closeTapPopover(view);
-		ctx.openInReviewer(ref.current, sourcePath);
+		ctx.openInReviewer(ref.current, sourcePath, view.dom);
 	});
 
 	const replyBtn = actions.createEl('button', {
@@ -1877,7 +1891,7 @@ function activateMarker(
 		});
 		return;
 	}
-	ctx.onMarkerClick(m);
+	ctx.onMarkerClick(m, sourcePathFor(ctx, view), view.dom);
 }
 
 function tapPopoverField(

@@ -56,6 +56,7 @@ import {
 	authorColorFor,
 	authorPickerOptions,
 	resolveMarkerClickAction,
+	hasUniqueId,
 	type ScrollAction,
 } from './view-utils';
 import { isMobile } from './platform';
@@ -115,6 +116,18 @@ import {
 	type FrontmatterSummaryOptions,
 } from './frontmatter-summary';
 
+// The element a note-side action came from, for finding its leaf: a command
+// or menu gets the note's view, which in a pop-out window is how the comment
+// opens there.
+function originOf(view: MarkdownFileInfo): HTMLElement | undefined {
+	return view instanceof MarkdownView ? view.containerEl : undefined;
+}
+
+// A comment's own tab, the only way to show its thread beside a note in a
+// pop-out window, finds the comment by id.
+const POPOUT_NO_ID_MESSAGE =
+	"This comment has no unique ID, so its thread can't open in this window. Open the note in the main window to see it.";
+
 export default class AnnotecaPlugin extends Plugin {
 	settings!: AnnotecaSettings;
 	commentIndex = new CommentIndex();
@@ -159,9 +172,18 @@ export default class AnnotecaPlugin extends Plugin {
 				getSourcePath: () =>
 					this.app.workspace.getActiveFile()?.path ?? '',
 				getSettings: () => this.settings,
-				onMarkerClick: (m) => this.openReviewerOnComment(m),
-				openInReviewer: (m, sourcePath) =>
-					this.openReviewerOnComment(m, sourcePath || undefined),
+				onMarkerClick: (m, sourcePath, from) =>
+					this.openReviewerOnComment(
+						m,
+						sourcePath || undefined,
+						from,
+					),
+				openInReviewer: (m, sourcePath, from) =>
+					this.openReviewerOnComment(
+						m,
+						sourcePath || undefined,
+						from,
+					),
 				addCommentForSelection: () => {
 					const view =
 						this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -598,7 +620,11 @@ export default class AnnotecaPlugin extends Plugin {
 							.setTitle('Annoteca: reply to comment')
 							.setIcon('reply')
 							.onClick(() =>
-								this.openReviewerOnComment(inside, file.path),
+								this.openReviewerOnComment(
+									inside,
+									file.path,
+									originOf(view),
+								),
 							),
 					);
 					menu.addItem((item) =>
@@ -759,7 +785,7 @@ export default class AnnotecaPlugin extends Plugin {
 			name: 'Reply to comment here',
 			editorCallback: (editor: Editor, view: MarkdownFileInfo) => {
 				this.withCommentAtCursor(editor, view, (path, c) =>
-					this.openReviewerOnComment(c, path),
+					this.openReviewerOnComment(c, path, originOf(view)),
 				);
 			},
 		});
@@ -1119,8 +1145,16 @@ export default class AnnotecaPlugin extends Plugin {
 		if (this.vaultScanned) return;
 		const files = this.app.vault.getMarkdownFiles();
 		for (const f of files) {
-			const content = await this.app.vault.cachedRead(f);
-			this.commentIndex.rebuild(f.path, content);
+			// A note already indexed keeps its entry, as in indexUnseenFiles:
+			// keeping it current is the file-event handlers' job, and an entry
+			// indexed from the editor (a pop-out comment opening in its tab)
+			// is newer than anything the scan reads. Checked again after the
+			// read, which awaits.
+			if (this.commentIndex.get(f.path)) continue;
+			// What a write would see: the open editor's buffer, else the vault.
+			const { text } = await this.comments.currentNoteText(f.path, f);
+			if (this.commentIndex.get(f.path)) continue;
+			this.commentIndex.rebuild(f.path, text);
 		}
 		this.vaultScanned = true;
 		this.events.trigger('index-changed');
@@ -2201,34 +2235,101 @@ export default class AnnotecaPlugin extends Plugin {
 
 		if (!target) return;
 		await this.navigateToOffset(target.path, target.comment.marker.start);
-		this.openReviewerOnComment(target.comment, target.path);
+		// The comment opens where the jump landed. Crossing into another
+		// note moves to that note's leaf, which navigation has just made the
+		// active one; the command's own view still shows the note it left.
+		const landed = this.app.workspace.getMostRecentLeaf();
+		const origin =
+			target.path === currentPath
+				? originOf(view)
+				: landed?.view instanceof MarkdownView &&
+					  landed.view.file?.path === target.path
+					? landed.view.containerEl
+					: undefined;
+		this.openReviewerOnComment(target.comment, target.path, origin);
 	}
 
 	// #83: open one comment in a main-area tab of its own, or bring forward
 	// the tab already showing it. An id-less comment cannot have one: the tab
 	// is restored from saved state, and only an id finds the comment again.
-	openCommentInTab(path: string, comment: Comment): void {
+	//
+	// `beside`, when given, is a note leaf to open the tab next to, split to
+	// its right in the same window, and only a tab in that same window counts
+	// as already open. That is how a comment opens from a pop-out window,
+	// which has no sidebar for the hub: in a split beside the note, like a
+	// side panel, rather than in the main window behind it.
+	openCommentInTab(
+		path: string,
+		comment: Comment,
+		beside?: WorkspaceLeaf,
+	): void {
 		const id = comment.id;
 		if (id === undefined) return;
+		const container = beside?.getContainer();
+		const tabs = this.app.workspace.getLeavesOfType(
+			ANNOTECA_COMMENT_VIEW_TYPE,
+		);
 		// Matched on the saved view STATE, not on the view object. A tab
 		// restored in the background holds a DeferredView until it is first
 		// shown, so an instanceof check misses it and stacks a duplicate tab,
 		// the same failure findMarkdownLeafForPath works around for notes.
-		const existing = this.app.workspace
-			.getLeavesOfType(ANNOTECA_COMMENT_VIEW_TYPE)
-			.find((leaf) => {
-				const shown = commentTabState(leaf.getViewState().state);
-				return shown?.path === path && shown.id === id;
-			});
+		const existing = tabs.find((leaf) => {
+			const shown = commentTabState(leaf.getViewState().state);
+			return (
+				shown?.path === path &&
+				shown.id === id &&
+				(container === undefined || leaf.getContainer() === container)
+			);
+		});
 		if (existing) {
 			void this.app.workspace.revealLeaf(existing);
 			return;
 		}
-		void this.app.workspace.getLeaf('tab').setViewState({
+		// In a pop-out the tab stands in for the side panel, so one tab
+		// follows the reader from comment to comment rather than a new one
+		// opening for each.
+		const reuse =
+			container && tabs.find((leaf) => leaf.getContainer() === container);
+		if (reuse) {
+			void reuse
+				.setViewState({
+					type: ANNOTECA_COMMENT_VIEW_TYPE,
+					state: { path, id },
+					active: true,
+				})
+				.then(() => this.app.workspace.revealLeaf(reuse));
+			return;
+		}
+		const leaf = beside
+			? this.app.workspace.createLeafBySplit(beside, 'vertical')
+			: this.app.workspace.getLeaf('tab');
+		void leaf.setViewState({
 			type: ANNOTECA_COMMENT_VIEW_TYPE,
 			state: { path, id },
 			active: true,
 		});
+	}
+
+	// The note leaf an action came from, when it is in a pop-out window and
+	// shows `path`; undefined otherwise. Found from `from`, the element the
+	// action came from, and only from it. A hover popover never activates its
+	// note's leaf, so the most recent leaf can be another copy of the note in
+	// another window; and a click in the hub moves focus to the note, so a
+	// recency guess would turn every hub click on a pop-out note into a tab
+	// in the pop-out instead of a selection in the hub the reader clicked.
+	private popoutLeafFor(
+		path: string,
+		from?: HTMLElement,
+	): MarkdownView | undefined {
+		if (!from) return undefined;
+		const leaf = this.app.workspace
+			.getLeavesOfType('markdown')
+			.find((l) => l.view.containerEl.contains(from));
+		if (!leaf || !(leaf.view instanceof MarkdownView)) return undefined;
+		if (leaf.view.file?.path !== path) return undefined;
+		return leaf.getContainer() === this.app.workspace.rootSplit
+			? undefined
+			: leaf.view;
 	}
 
 	// A renamed note, or a folder above it, takes its comment tabs (#83) with
@@ -2249,10 +2350,43 @@ export default class AnnotecaPlugin extends Plugin {
 
 	// Reviewer pane wiring ----------------------------------------------
 
-	openReviewerOnComment(comment: Comment, path?: string): void {
+	openReviewerOnComment(
+		comment: Comment,
+		path?: string,
+		from?: HTMLElement,
+	): void {
 		const filePath = path ?? this.app.workspace.getActiveFile()?.path;
 		if (!filePath) return;
 		const start = comment.marker.start;
+		// A pop-out window has no sidebar, so the hub would open in the main
+		// window, behind the note, showing whatever the main window has open.
+		// Open the comment's own tab beside the note in the pop-out instead.
+		// That tab finds its comment by id; without a unique one, say so
+		// rather than show the main window's panel on the wrong note.
+		const popout = this.popoutLeafFor(filePath, from);
+		if (popout) {
+			// Ids from the editor's text, not the index: a comment typed a
+			// moment ago may not be indexed yet, and would read as id-less.
+			// The tab looks its comment up in the index, so index that same
+			// text first, or the tab would report the comment missing.
+			const text = popout.editor.getValue();
+			if (hasUniqueId(parseAll(text), comment)) {
+				this.commentIndex.rebuild(filePath, text);
+				this.events.trigger('index-changed', { path: filePath });
+				this.openCommentInTab(filePath, comment, popout.leaf);
+				this.highlightActiveComment(filePath, start);
+			} else {
+				new Notice(POPOUT_NO_ID_MESSAGE);
+			}
+			return;
+		}
+		// The hub's single-file scope follows the active file, and the note
+		// this comment is in is not always it (a pop-out note, a link opened
+		// in the background). Point the scope at the comment's note first, or
+		// the panel opens on another note's comments and cannot select this
+		// one. A pinned scope stays where the reader pinned it.
+		const target = this.app.vault.getAbstractFileByPath(filePath);
+		if (target instanceof TFile) this.onActiveFileChangedForScope(target);
 		// F-276: revealLeaf below uncollapses the right sidebar, which narrows
 		// and reflows the document editor and would otherwise shift the reading
 		// position. Capture the editor's scroll before the reveal and restore it
