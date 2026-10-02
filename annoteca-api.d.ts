@@ -8,7 +8,8 @@
 // Resolve the API at CALL time, never in your onload. `app.plugins` is an Obsidian
 // internal the official types do not declare, so reach it through a minimal local
 // shape; API.md has a lookup that compiles against the stock types plus this file
-// alone. Gate on `apiVersion >= 3` and degrade below it.
+// alone. Gate on the apiVersion the method you call needs (see API.md) and degrade
+// below it.
 //
 // Caching it is the only thing that makes plugin load order matter, and
 // `isEnabled('annoteca')` is not an availability test (it reports saved config, so
@@ -44,6 +45,12 @@ export interface ApiComment {
 	// line break is one character, even in a file saved with Windows (CRLF)
 	// line endings.
 	readonly marker: { readonly start: number; readonly end: number };
+}
+
+// The text a compose() call asks the user to comment on, as editor offsets.
+export interface ComposeRange {
+	readonly start: number;
+	readonly end: number;
 }
 
 // Where a comment's prose sits in the current text, resolved from content the
@@ -144,6 +151,15 @@ export interface AnnotecaApi {
 	// consumer that draws its own indicator and wants a click to land the reader
 	// on the comment. Resolves `false` when no comment carries that id.
 	reveal(commentId: string): Promise<boolean>;
+
+	// apiVersion >= 5. Ask the user to comment on exactly [start, end) of a note:
+	// opens the note, selects that text and opens Annoteca's own comment form, so
+	// the comment is the user's, with a closing marker covering exactly that
+	// text. Nothing is written until the user saves. Offsets are into the note's
+	// editor text. Resolves false, opening nothing, for a path that is not a
+	// markdown note, or a range that is empty, out of bounds, or starts or ends
+	// inside existing comment syntax or the note properties.
+	compose(path: string, range: ComposeRange): Promise<boolean>;
 
 	// Fires when the comment index changes. Returns its own unsubscribe; call it
 	// on unload or the callback outlives your plugin.

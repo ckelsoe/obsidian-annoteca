@@ -1,4 +1,4 @@
-import type { EventRef } from 'obsidian';
+import { TFile, type EventRef } from 'obsidian';
 
 import type AnnotecaPlugin from './main';
 import type { Comment, CreatedComment, PromoteRequest } from './types';
@@ -9,6 +9,7 @@ import {
 	resolveAnchorRangeInWindows,
 } from './view-utils';
 import { resolveSettingsCategories } from './settings';
+import { forbiddenRanges } from './comment-service';
 
 // The read-only API other plugins call (F-284, interop-contract section 7).
 //
@@ -35,12 +36,15 @@ import { resolveSettingsCategories } from './settings';
 // 3 = adds reveal(). Bumped for the same reason: a consumer checking `apiVersion`
 //     before it wires a "jump to this comment" action must be able to tell a build
 //     that has reveal() from one that does not.
+// 5 = adds compose(): a companion can ask the USER to comment on a range,
+//     through Annoteca's own form. Bumped because a consumer wiring a
+//     "comment on this" action has to know the method is there.
 // 4 = promote() takes `closeRange` and reports `closed` (#84). Nothing existing
 //     changed shape: the request field is optional and the result field is new,
 //     and an older build ignores the request field. Bumped anyway because a
 //     consumer deciding whether to ask for ranges should not have to promote a
 //     comment to find out it cannot get one.
-export const API_VERSION = 4;
+export const API_VERSION = 5;
 
 // The shape a consumer sees. Deliberately NOT the internal `Comment`: that
 // carries the marker grammar, `unknownLines`, reply and addressed structures
@@ -69,6 +73,12 @@ export interface ApiComment {
 
 // Where a comment's prose actually sits in the current text, which is not the
 // marker position: a marker is written at the HEAD of the passage it concerns.
+// The text a compose() call asks the user to comment on, as editor offsets.
+export interface ComposeRange {
+	readonly start: number;
+	readonly end: number;
+}
+
 export interface AnchorRange {
 	readonly start: number;
 	readonly end: number;
@@ -167,6 +177,19 @@ export interface AnnotecaApi {
 	// vault is warmed the same way queryComments warms it, so a fresh session
 	// reveals a comment in a note nobody has opened yet.
 	reveal(commentId: string): Promise<boolean>;
+
+	// Ask the user to comment on exactly [start, end) of a note (apiVersion 5).
+	// Opens the note, selects that text and opens Annoteca's own comment form,
+	// so the comment is the USER's: their author tag, their words, and a
+	// closing marker so it covers exactly that text. Built for a companion that
+	// shows notes another way (a mind map node, an outline row) and wants a
+	// "comment on this" action. Nothing is written until the user saves.
+	//
+	// Offsets are into the note's editor text, the same text anchorsFor takes.
+	// Resolves false, opening nothing, for a path that is not a markdown note,
+	// a range that is empty, out of bounds, or starts or ends inside an
+	// existing comment marker, closer, store block or the note properties.
+	compose(path: string, range: ComposeRange): Promise<boolean>;
 
 	// Fires when the comment index changes. Returns its own unsubscribe; a
 	// consumer must call it on unload or the callback outlives the consumer.
@@ -305,6 +328,38 @@ export function createApi(plugin: AnnotecaPlugin): AnnotecaApi {
 			// and contract 4.1 exists because a second writer is how this format
 			// has been damaged before.
 			return plugin.comments.promote(path, requests, expected);
+		},
+
+		async compose(path: string, range: ComposeRange): Promise<boolean> {
+			// A runtime API: the declared types are documentation, not a
+			// guarantee, so every input is checked before anything opens.
+			const input: unknown = range;
+			if (typeof path !== 'string') return false;
+			if (typeof input !== 'object' || input === null) return false;
+			const { start, end } = input as { start: unknown; end: unknown };
+			if (
+				typeof start !== 'number' ||
+				typeof end !== 'number' ||
+				!Number.isInteger(start) ||
+				!Number.isInteger(end) ||
+				start < 0 ||
+				end <= start
+			)
+				return false;
+			const file = plugin.app.vault.getAbstractFileByPath(path);
+			if (!(file instanceof TFile) || file.extension !== 'md')
+				return false;
+			const note = await plugin.comments.currentNoteText(path, file);
+			if (end > note.text.length) return false;
+			// The same zones promote() refuses: a selection that starts or ends
+			// inside a marker, closer, store block or the properties would put
+			// the new marker or closer inside existing syntax.
+			const inside = (pos: number): boolean =>
+				forbiddenRanges(note.text).some(
+					(f) => pos > f.start && pos < f.end,
+				);
+			if (inside(start) || inside(end)) return false;
+			return plugin.commentOnRange(path, start, end);
 		},
 
 		async reveal(commentId: string): Promise<boolean> {

@@ -1218,20 +1218,23 @@ export default class AnnotecaPlugin extends Plugin {
 	// open the composer, which writes the closer like any selection. The
 	// Outline tree's "comment on this line" uses this, from the panel, where
 	// the note may not be the active leaf or even open yet.
+	// Resolves to whether the composer opened, which the API's compose()
+	// reports to its caller.
 	async commentOnRange(
 		path: string,
 		from: number,
 		to: number,
-	): Promise<void> {
+	): Promise<boolean> {
 		await this.navigateToOffset(path, from);
 		const leaf = this.findMarkdownLeafForPath(path);
 		const view = leaf?.view;
-		if (!(view instanceof MarkdownView) || to <= from) return;
+		if (!(view instanceof MarkdownView) || to <= from) return false;
 		const editor = view.editor;
 		const length = editor.getValue().length;
-		if (to > length) return;
+		if (to > length) return false;
 		editor.setSelection(editor.offsetToPos(from), editor.offsetToPos(to));
 		this.openModalForSelection(editor, view);
+		return true;
 	}
 
 	private openScratchpadModal(editor: Editor, view: MarkdownFileInfo): void {

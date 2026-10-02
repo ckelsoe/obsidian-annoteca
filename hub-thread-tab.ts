@@ -1053,11 +1053,11 @@ export class ThreadTabRenderer {
 			cls: 'annoteca-reviewer-expanded',
 		});
 		const host = this.markdownHost(path);
-		renderCommentMarkdown(
-			expandedSection.createDiv({ cls: 'annoteca-reviewer-body' }),
-			c.body,
-			host,
-		);
+		const bodyEl = expandedSection.createDiv({
+			cls: 'annoteca-reviewer-body',
+		});
+		renderCommentMarkdown(bodyEl, c.body, host);
+		this.makeBodyJumpTarget(bodyEl, path, c);
 
 		if (c.resolution) {
 			const res = expandedSection.createDiv({
@@ -1430,6 +1430,39 @@ export class ThreadTabRenderer {
 		el.addEventListener('keydown', (e) => {
 			if (e.key !== 'Enter' && e.key !== ' ') return;
 			e.preventDefault();
+			this.selectAndReveal(path, c, true);
+		});
+	}
+
+	// The comment's own text jumps to it in the note, as the original text
+	// does (#82, reported on beta.3: clicking a comment's text did nothing).
+	// Not a button role: the rendered body can hold links, and a control
+	// inside a control is invalid. The keyboard already has the sync button
+	// and Open for the same jump. A click on a link or other control inside
+	// the body does its own thing, and a click that ends a drag-selection
+	// does not jump, so copying from the body still works.
+	private makeBodyJumpTarget(
+		el: HTMLElement,
+		path: string,
+		c: Comment,
+	): void {
+		el.addClass('is-jump-target');
+		el.setAttribute('title', 'Click to go to this comment in the note');
+		el.addEventListener('click', (e) => {
+			const target = e.target;
+			if (
+				target instanceof Element &&
+				target.closest('a, button, input, textarea, select, label')
+			)
+				return;
+			const selection = el.win.getSelection();
+			if (
+				selection &&
+				!selection.isCollapsed &&
+				(el.contains(selection.anchorNode) ||
+					el.contains(selection.focusNode))
+			)
+				return;
 			this.selectAndReveal(path, c, true);
 		});
 	}

@@ -143,7 +143,9 @@ export function markerDamageMessage(finding: MalformedMarker): string {
 // computing offsets over raw markdown reaches this honestly: Plumbline masks
 // markers before linting, and a bug in that masking would arrive here as a
 // perfectly well-formed request.
-function forbiddenRanges(content: string): { start: number; end: number }[] {
+export function forbiddenRanges(
+	content: string,
+): { start: number; end: number }[] {
 	const out = parseAll(content).map((c) => ({
 		start: c.marker.start,
 		end: c.marker.end,

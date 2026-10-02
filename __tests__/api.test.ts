@@ -6,6 +6,7 @@ import {
 	type ApiCategory,
 	type ApiComment,
 	type ApiFilter,
+	type ComposeRange,
 } from '../api';
 import type { CreatedComment, PromoteRequest } from '../types';
 import type {
@@ -14,6 +15,7 @@ import type {
 	ApiCategory as PubApiCategory,
 	ApiComment as PubApiComment,
 	ApiFilter as PubApiFilter,
+	ComposeRange as PubComposeRange,
 	CreatedComment as PubCreatedComment,
 	PromoteRequest as PubPromoteRequest,
 } from '../annoteca-api';
@@ -21,7 +23,7 @@ import { CommentIndex } from '../index';
 import { normalizeSettings } from '../settings';
 import { parseAll, serializeLeanMarker } from '../parser';
 import { writeStoreRegion, type StoredComment } from '../store';
-import { Events } from 'obsidian';
+import { Events, TFile } from 'obsidian';
 import type AnnotecaPlugin from '../main';
 
 // A stand-in for the plugin carrying only what the API touches: the index and
@@ -97,10 +99,10 @@ describe('AnnotecaApi: version surface', () => {
 	it('reports its own version', () => {
 		const { api } = harness();
 		expect(api.apiVersion).toBe(API_VERSION);
-		// 4 since promote() took closeRange (#84). A consumer deciding whether
-		// to ask for range comments must be able to tell a build that writes
-		// them from one that silently ignores the request.
-		expect(api.apiVersion).toBe(4);
+		// 5 since compose() landed. A consumer wiring a "comment on this"
+		// action must be able to tell a build that has it from one that does
+		// not.
+		expect(api.apiVersion).toBe(5);
 	});
 });
 
@@ -448,6 +450,7 @@ describe('annoteca-api.d.ts: the published surface matches the runtime', () => {
 		const filterLock: Mutual<ApiFilter, PubApiFilter> = true;
 		const promoteLock: Mutual<PromoteRequest, PubPromoteRequest> = true;
 		const createdLock: Mutual<CreatedComment, PubCreatedComment> = true;
+		const composeLock: Mutual<ComposeRange, PubComposeRange> = true;
 		expect(
 			apiLock &&
 				commentLock &&
@@ -455,7 +458,89 @@ describe('annoteca-api.d.ts: the published surface matches the runtime', () => {
 				categoryLock &&
 				filterLock &&
 				promoteLock &&
-				createdLock,
+				createdLock &&
+				composeLock,
 		).toBe(true);
+	});
+});
+
+// compose(): a companion asks the USER to comment on a range, through
+// Annoteca's own form. These pin what it refuses before anything opens.
+describe('AnnotecaApi.compose', () => {
+	const NOTE = `---\ntitle: x\n---\nPlain prose here. <!-- annoteca/clarify: hi\n[id=aaaa1111]\n--> more.`;
+
+	function composeHarness(opens = true) {
+		const opened: [string, number, number][] = [];
+		const file = Object.assign(new TFile(), {
+			path: 'a.md',
+			extension: 'md',
+		});
+		const api = createApi({
+			commentIndex: new CommentIndex(),
+			events: new Events(),
+			scanVaultIfNeeded: () => Promise.resolve(),
+			indexUnseenFiles: () => Promise.resolve(),
+			settings: normalizeSettings({}),
+			app: {
+				vault: {
+					getAbstractFileByPath: (p: string) =>
+						p === 'a.md' ? file : null,
+				},
+			},
+			comments: {
+				currentNoteText: () =>
+					Promise.resolve({ text: NOTE, raw: NOTE }),
+			},
+			commentOnRange: (path: string, from: number, to: number) => {
+				opened.push([path, from, to]);
+				return Promise.resolve(opens);
+			},
+		} as unknown as AnnotecaPlugin);
+		return { api, opened };
+	}
+
+	const plain = NOTE.indexOf('Plain');
+
+	it('opens the form on a clean range and reports it', async () => {
+		const { api, opened } = composeHarness();
+		const range = { start: plain, end: plain + 'Plain prose'.length };
+		await expect(api.compose('a.md', range)).resolves.toBe(true);
+		expect(opened).toEqual([['a.md', range.start, range.end]]);
+	});
+
+	it('passes on a refusal from the editor', async () => {
+		const { api } = composeHarness(false);
+		await expect(
+			api.compose('a.md', { start: plain, end: plain + 5 }),
+		).resolves.toBe(false);
+	});
+
+	it.each([
+		['an unknown note', 'nope.md', { start: 0, end: 1 }],
+		['an empty range', 'a.md', { start: 30, end: 30 }],
+		['a reversed range', 'a.md', { start: 31, end: 30 }],
+		['past the end', 'a.md', { start: 30, end: 10_000 }],
+		['a fractional offset', 'a.md', { start: 30.5, end: 40 }],
+		['inside the properties', 'a.md', { start: 5, end: 30 }],
+		[
+			'inside a comment marker',
+			'a.md',
+			{ start: NOTE.indexOf('annoteca/'), end: NOTE.length },
+		],
+	])('refuses %s and opens nothing', async (_label, path, range) => {
+		const { api, opened } = composeHarness();
+		await expect(api.compose(path, range)).resolves.toBe(false);
+		expect(opened).toEqual([]);
+	});
+
+	it('refuses input that is not a range object', async () => {
+		const { api, opened } = composeHarness();
+		await expect(
+			api.compose(
+				'a.md',
+				null as unknown as { start: number; end: number },
+			),
+		).resolves.toBe(false);
+		expect(opened).toEqual([]);
 	});
 });

@@ -1,6 +1,6 @@
 /**
  * @jest-environment jsdom
- * @jest-environment-options {"html": "<html><body><div id=\"seeds\"><div></div><span></span><button></button><textarea></textarea><select><option></option></select></div></body></html>"}
+ * @jest-environment-options {"html": "<html><body><div id=\"seeds\"><div></div><span></span><button></button><textarea></textarea><select><option></option></select><a></a></div></body></html>"}
  */
 // #82: the Thread tab's "Original text" block jumps to its comment in the note,
 // and every way into the document from a card moves the editor's active
@@ -231,5 +231,44 @@ describe('#82: a highlight still in flight respects what happened meanwhile', ()
 		originalEl(h.container).click();
 		await settle();
 		expect(h.highlightActiveComment).not.toHaveBeenCalled();
+	});
+});
+
+// Reported on beta.3: clicking a comment's own text in an open card did
+// nothing; only the original text of an addressed comment jumped.
+describe('#82: the comment text in an open card jumps too', () => {
+	const bodyEl = (c: HTMLElement): HTMLElement => {
+		const el = c.querySelector<HTMLElement>('.annoteca-reviewer-body');
+		if (!el) throw new Error('no body');
+		return el;
+	};
+
+	it('a click on the text jumps to the comment', async () => {
+		const h = harness();
+		bodyEl(h.container).click();
+		await settle();
+		expect(h.navigateToOffset).toHaveBeenCalledWith(A, h.start, true);
+	});
+
+	it('a click on a link inside the text does not jump', () => {
+		const h = harness();
+		const link = bodyEl(h.container).createEl('a', { text: 'A link' });
+		link.click();
+		expect(h.navigateToOffset).not.toHaveBeenCalled();
+	});
+
+	it('a click that ends a text selection in it does not jump', () => {
+		const h = harness();
+		const body = bodyEl(h.container);
+		// The mock markdown renderer draws nothing, so give the body text of
+		// its own to select.
+		const text = body.createSpan({ text: 'selected words' }).firstChild;
+		if (!text) throw new Error('no text');
+		const range = document.createRange();
+		range.setStart(text, 0);
+		range.setEnd(text, 2);
+		window.getSelection()?.addRange(range);
+		body.click();
+		expect(h.navigateToOffset).not.toHaveBeenCalled();
 	});
 });

@@ -86,9 +86,10 @@ development, and all of it ships in the first public release (1.17.0) at level 3
 - `3`: adds `reveal`.
 - `4`: `promote` takes an optional `closeRange` per request and reports `closed` on each
   created comment. Nothing earlier changed shape.
+- `5`: adds `compose`.
 
 Gate on the level the method you call needs (`>= 2` to create, `>= 3` to reveal, `>= 4`
-to ask for range comments), and treat it as a floor:
+to ask for range comments, `>= 5` to compose), and treat it as a floor:
 
 - `apiVersion` moves up when a method you are expected to gate on lands. It never moves
   down, and a method never disappears or changes signature within a level.
@@ -114,6 +115,14 @@ The whole contract. Resolve `api` as above, then:
   Creating below. Needs `apiVersion >= 2`.
 - `reveal(commentId): Promise<boolean>`. Open the note holding a comment, scroll to it,
   open its thread. Resolves `false` when no comment has that id. Needs `apiVersion >= 3`.
+- `compose(path, range): Promise<boolean>`. Ask the user to comment on exactly
+  `range` (`{start, end}`, editor offsets) of a note: Annoteca opens the note, selects that
+  text and opens its own comment form, so the comment is the user's, with a closing marker
+  covering that text. Nothing is written until the user saves. Resolves `false`, opening
+  nothing, for a path that is not a markdown note or a range that is empty, out of bounds,
+  or starts or ends inside existing comment syntax or the note properties. Use it for a
+  "comment on this" action in your own view (a mind map node, an outline row). Needs
+  `apiVersion >= 5`.
 - `onChange(cb): () => void`. Fires when the comment index changes. Returns its own
   unsubscribe; call it on unload.
 
