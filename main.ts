@@ -49,6 +49,7 @@ import {
 	inlineBodiesBlockedBy,
 	refreshDecorationsEverywhere,
 	setActiveComment,
+	flashComment,
 } from './decorations';
 import {
 	decideScrollAction,
@@ -81,6 +82,10 @@ import {
 	ComposerPanelView,
 	ANNOTECA_HUB_VIEW_TYPE,
 	AnnotecaPanelView,
+	ANNOTECA_COMMENT_VIEW_TYPE,
+	AnnotecaCommentView,
+	commentTabState,
+	rekeyCommentTabState,
 } from './views';
 import type { ComposerRequest } from './composer';
 import { nowISO } from './parser';
@@ -214,6 +219,10 @@ export default class AnnotecaPlugin extends Plugin {
 		this.registerView(
 			COMPOSER_PANEL_VIEW_TYPE,
 			(leaf) => new ComposerPanelView(leaf, this),
+		);
+		this.registerView(
+			ANNOTECA_COMMENT_VIEW_TYPE,
+			(leaf) => new AnnotecaCommentView(leaf, this),
 		);
 
 		this.addSettingTab(new AnnotecaSettingTab(this.app, this));
@@ -464,6 +473,7 @@ export default class AnnotecaPlugin extends Plugin {
 				// Files and folders both: a folder scope, or a file scope inside
 				// a renamed folder, is anchored by path.
 				this.rekeyScopeOnRename(oldPath, file.path);
+				this.rekeyCommentTabsOnRename(oldPath, file.path);
 				if (file instanceof TFile) {
 					this.commentIndex.rename(oldPath, file.path);
 					this.markerDamage.rename(oldPath, file.path);
@@ -1990,6 +2000,11 @@ export default class AnnotecaPlugin extends Plugin {
 		);
 		this.applyScrollAction(view, target, action);
 		this.app.workspace.setActiveLeaf(targetLeaf, { focus: true });
+		// #82: a brief highlight on arrival, so the reader can see where the
+		// jump landed. Paints nothing when no marker starts at the target,
+		// which covers a heading jump and a marker deleted since the capture.
+		const cm = view.editor.cm;
+		if (cm) flashComment(cm, target);
 	}
 
 	// Execute a resolved scroll action against the editor. "top" anchors the
@@ -2108,6 +2123,49 @@ export default class AnnotecaPlugin extends Plugin {
 		this.openReviewerOnComment(target.comment, target.path);
 	}
 
+	// #83: open one comment in a main-area tab of its own, or bring forward
+	// the tab already showing it. An id-less comment cannot have one: the tab
+	// is restored from saved state, and only an id finds the comment again.
+	openCommentInTab(path: string, comment: Comment): void {
+		const id = comment.id;
+		if (id === undefined) return;
+		// Matched on the saved view STATE, not on the view object. A tab
+		// restored in the background holds a DeferredView until it is first
+		// shown, so an instanceof check misses it and stacks a duplicate tab,
+		// the same failure findMarkdownLeafForPath works around for notes.
+		const existing = this.app.workspace
+			.getLeavesOfType(ANNOTECA_COMMENT_VIEW_TYPE)
+			.find((leaf) => {
+				const shown = commentTabState(leaf.getViewState().state);
+				return shown?.path === path && shown.id === id;
+			});
+		if (existing) {
+			void this.app.workspace.revealLeaf(existing);
+			return;
+		}
+		void this.app.workspace.getLeaf('tab').setViewState({
+			type: ANNOTECA_COMMENT_VIEW_TYPE,
+			state: { path, id },
+			active: true,
+		});
+	}
+
+	// A renamed note, or a folder above it, takes its comment tabs (#83) with
+	// it. Done here rather than in the view, because a tab restored in the
+	// background is a DeferredView with no listeners of its own until it is
+	// first shown, and its saved path would otherwise go stale: shown later,
+	// it would report the comment missing. Rewriting the state loads the view
+	// with the new path, and a view already loaded refocuses on it.
+	private rekeyCommentTabsOnRename(oldPath: string, newPath: string): void {
+		for (const leaf of this.app.workspace.getLeavesOfType(
+			ANNOTECA_COMMENT_VIEW_TYPE,
+		)) {
+			const vs = leaf.getViewState();
+			const next = rekeyCommentTabState(vs.state, oldPath, newPath);
+			if (next) void leaf.setViewState({ ...vs, state: next });
+		}
+	}
+
 	// Reviewer pane wiring ----------------------------------------------
 
 	openReviewerOnComment(comment: Comment, path?: string): void {
@@ -2158,7 +2216,7 @@ export default class AnnotecaPlugin extends Plugin {
 	// F-276: paint the active-comment background in the editor showing `path`
 	// and clear it in every other markdown editor, so exactly one comment is
 	// highlighted at a time. `start` of null clears everywhere.
-	private highlightActiveComment(path: string, start: number | null): void {
+	highlightActiveComment(path: string, start: number | null): void {
 		for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
 			const v = leaf.view;
 			if (!(v instanceof MarkdownView)) continue;

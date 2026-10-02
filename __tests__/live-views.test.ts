@@ -31,6 +31,8 @@ import {
 	setShowCommentBodiesEverywhere,
 	isShowingCommentBodies,
 	refreshDecorationsEverywhere,
+	findMarkersInDoc,
+	flashComment,
 } from '../decorations';
 import { DEFAULT_SETTINGS } from '../settings';
 import type { AnnotecaSettings } from '../types';
@@ -156,5 +158,53 @@ describe('the live-view registry reaches real editors', () => {
 		// field's `create`. That is the only path that consults the flag, and
 		// it is what keeps a newly opened pane consistent with the rest.
 		expect(anchorCount(openView())).toBe(0);
+	});
+});
+
+// #82. The flash is a timed cue, so what matters is that it appears, that it
+// goes away on its own, and that a second jump inside the window is not cut
+// short by the first jump's timer.
+describe('the arrival flash clears itself', () => {
+	const flashCount = (view: EditorView): number =>
+		view.dom.querySelectorAll('.annoteca-flash-comment').length;
+	const markerStart = (): number => {
+		const m = findMarkersInDoc(DOC)[0];
+		if (!m) throw new Error('fixture has no marker');
+		return m.marker.start;
+	};
+
+	beforeEach(() => jest.useFakeTimers());
+	afterEach(() => jest.useRealTimers());
+
+	it('paints the anchored passage, then clears after the duration', () => {
+		const view = openView();
+		flashComment(view, markerStart());
+		expect(
+			view.dom.querySelector('.annoteca-flash-comment')?.textContent,
+		).toBe(ANCHOR);
+		jest.advanceTimersByTime(1499);
+		expect(flashCount(view)).toBe(1);
+		jest.advanceTimersByTime(1);
+		expect(flashCount(view)).toBe(0);
+	});
+
+	it('a second flash restarts the window instead of being cut short', () => {
+		const view = openView();
+		flashComment(view, markerStart());
+		jest.advanceTimersByTime(1000);
+		flashComment(view, markerStart());
+		jest.advanceTimersByTime(1000);
+		expect(flashCount(view)).toBe(1);
+		jest.advanceTimersByTime(500);
+		expect(flashCount(view)).toBe(0);
+	});
+
+	it('does not dispatch into an editor destroyed inside the window', () => {
+		const view = openView();
+		flashComment(view, markerStart());
+		const dispatch = jest.spyOn(view, 'dispatch');
+		views.pop()?.destroy();
+		jest.advanceTimersByTime(1500);
+		expect(dispatch).not.toHaveBeenCalled();
 	});
 });

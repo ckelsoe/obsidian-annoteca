@@ -195,6 +195,33 @@ describe('AnnotecaApi.anchorsFor', () => {
 		expect(api.anchorsFor('text with no markers')).toEqual([]);
 	});
 
+	// #84. Anchor matching only looks a short window past the marker and
+	// cannot cross the line break below; the closer states the extent.
+	it('reports a range comment as exactly the text between its markers', () => {
+		const { api } = harness();
+		const long = 'x'.repeat(300);
+		const doc =
+			'<!-- annoteca/tone: long one\n[id=rang0001]\n[anchor=short]\n--> ' +
+			`${long}\nsecond line<!-- /annoteca rang0001 --> tail`;
+		const ranges = api.anchorsFor(doc);
+		expect(ranges).toHaveLength(1);
+		const r = ranges[0];
+		if (!r) throw new Error('no range');
+		expect(doc.slice(r.start, r.end)).toBe(`${long}\nsecond line`);
+		expect(r.commentId).toBe('rang0001');
+	});
+
+	// A range whose text was deleted has nothing to report. Falling back to the
+	// anchor would report the matching text BEFORE the marker, which is not
+	// the comment's passage, and the editor draws nothing there.
+	it('reports nothing for a range emptied of its text', () => {
+		const { api } = harness();
+		const doc =
+			'short <!-- annoteca/tone: gone\n[id=rang0002]\n[anchor=short]\n-->' +
+			'<!-- /annoteca rang0002 --> tail';
+		expect(api.anchorsFor(doc)).toEqual([]);
+	});
+
 	// Content is passed in rather than read from the vault, so an editor with
 	// unsaved edits resolves against what the reader is looking at.
 	it('resolves against the content it is given', () => {

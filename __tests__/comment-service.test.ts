@@ -6,6 +6,7 @@ import type AnnotecaPlugin from '../main';
 import {
 	CommentService,
 	markerDamageMessage,
+	REJECT_BLOCKED_MESSAGE,
 	VANISHED_MESSAGE,
 } from '../comment-service';
 import { parseAll, serializeLeanMarker } from '../parser';
@@ -2665,5 +2666,157 @@ describe('delete all resolved on a CRLF note', () => {
 		expect(h.content).toBe(
 			'Intro paragraph.\r\n\r\nFollowing paragraph.\r\n\r\nTail. after.\r\n',
 		);
+	});
+});
+
+// #84: range comments. Every verb that removes or rewrites a comment's prose
+// has to treat the closer as part of the comment.
+describe('range comments (closing marker)', () => {
+	const RANGE = [
+		'Lead in. <!-- annoteca/tighten: wordy',
+		'[id=rng00001]',
+		'--> The covered sentence.',
+		'And its second line.<!-- /annoteca rng00001 --> After.',
+	].join('\n');
+
+	it('parses the closer onto its comment', () => {
+		const c = firstComment(RANGE);
+		const at = RANGE.indexOf('<!-- /annoteca');
+		expect(c.closer).toEqual({
+			start: at,
+			end: at + '<!-- /annoteca rng00001 -->'.length,
+		});
+	});
+
+	it('delete removes the marker and its closer, and keeps the prose', async () => {
+		const h = makeHarnessWith(RANGE);
+		await h.service.deleteComment('note.md', firstComment(h.content));
+		expect(h.content).toBe(
+			'Lead in. The covered sentence.\nAnd its second line. After.',
+		);
+	});
+
+	it('resolve and remove takes the closer too', async () => {
+		const h = makeHarnessWith(RANGE);
+		const outcome = await h.service.resolveAndRemoveComment(
+			'note.md',
+			firstComment(h.content),
+		);
+		expect(outcome).toBe('written');
+		expect(h.content).not.toContain('annoteca');
+		expect(h.content).toContain(
+			'The covered sentence.\nAnd its second line.',
+		);
+	});
+
+	it('resolve keeps the closer, so the range survives', async () => {
+		const h = makeHarnessWith(RANGE);
+		await h.service.resolveComment('note.md', firstComment(h.content));
+		const c = firstComment(h.content);
+		expect(c.resolution).toBeDefined();
+		expect(c.closer).toBeDefined();
+	});
+
+	it('delete all resolved removes the closers of resolved comments only', async () => {
+		const doc = [
+			'<!-- annoteca/tighten: done',
+			'[id=rng00001]',
+			'[resolved charles 2026-10-01]: ok',
+			'--> First.<!-- /annoteca rng00001 --> Gap.',
+			'<!-- annoteca/tighten: open',
+			'[id=rng00002]',
+			'--> Second.<!-- /annoteca rng00002 --> End.',
+		].join('\n');
+		const h = makeHarnessWith(doc);
+		const n = await h.service.deleteAllResolvedInFile('note.md');
+		expect(n).toBe(1);
+		expect(h.content).not.toContain('rng00001');
+		expect(h.content).toContain('<!-- /annoteca rng00002 -->');
+		const left = firstComment(h.content);
+		expect(left.id).toBe('rng00002');
+		expect(left.closer).toBeDefined();
+	});
+
+	it('reject restores exactly the span between the markers, across lines', async () => {
+		const doc = [
+			'<!-- annoteca/tighten: wordy',
+			'[id=rng00003]',
+			'[addressed claude 2026-10-01]: rewrote it',
+			'```annoteca-original',
+			'The old one-liner.',
+			'```',
+			'--> The new text',
+			'runs onto a second line.<!-- /annoteca rng00003 --> Untouched tail.',
+			'',
+			'Next paragraph.',
+		].join('\n');
+		const h = makeHarnessWith(doc);
+		await h.service.rejectAddressed('note.md', firstComment(h.content));
+		const c = firstComment(h.content);
+		expect(c.addressed).toBeUndefined();
+		expect(h.content).toContain(
+			'--> The old one-liner.<!-- /annoteca rng00003 --> Untouched tail.\n\nNext paragraph.',
+		);
+		expect(h.content).not.toContain('runs onto a second line');
+		// The range now covers the restored text.
+		expect(c.closer).toBeDefined();
+	});
+
+	it('reject refuses when the span holds another comment, and changes nothing', async () => {
+		const doc = [
+			'<!-- annoteca/tighten: wordy',
+			'[id=rng00005]',
+			'[addressed claude 2026-10-01]: rewrote',
+			'```annoteca-original',
+			'Old.',
+			'```',
+			'--> New text with <!-- annoteca/clarify: inner',
+			'[id=inr00001]',
+			'--> an inner comment.<!-- /annoteca rng00005 --> Tail.',
+		].join('\n');
+		const h = makeHarnessWith(doc);
+		const outer = parseAll(h.content).find((c) => c.id === 'rng00005');
+		if (!outer) throw new Error('no outer comment');
+		await h.service.rejectAddressed('note.md', outer);
+		expect(h.content).toBe(doc);
+		expect(noticeLog).toContain(REJECT_BLOCKED_MESSAGE);
+	});
+
+	it('eof mode: delete removes the lean marker, its store entry and its closer', async () => {
+		const stored: StoredComment = {
+			id: 'rng00004',
+			category: 'tighten',
+			body: 'wordy',
+			replies: [],
+		};
+		const prose = `Lead. ${serializeLeanMarker('tighten', 'rng00004')} Covered.<!-- /annoteca rng00004 --> Tail.\n`;
+		const doc = writeStoreRegion(prose, [stored]);
+		const h = makeHarnessWith(doc);
+		const c = parseDocument(h.content).comments[0];
+		if (!c) throw new Error('no comment');
+		expect(c.closer).toBeDefined();
+		await h.service.deleteComment('note.md', c);
+		expect(h.content).not.toContain('rng00004');
+		expect(h.content).toContain('Lead. Covered. Tail.');
+	});
+
+	it('promote refuses an anchor that starts inside a closer', async () => {
+		const h = makeHarnessWith(RANGE);
+		const inside = RANGE.indexOf('<!-- /annoteca') + 5;
+		const made = await h.service.promote(
+			'note.md',
+			[
+				{
+					category: 'prose-check',
+					body: 'Flagged.',
+					anchor: { start: inside, end: inside + 2 },
+					author: 'plumbline',
+					sourceKey: 'k1',
+				},
+			],
+			h.content,
+		);
+		expect(made).toEqual([]);
+		expect(h.content).toBe(RANGE);
 	});
 });

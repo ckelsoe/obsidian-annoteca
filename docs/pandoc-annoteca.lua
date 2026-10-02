@@ -6,6 +6,8 @@
 --     populates from in-vault annotations (F-260).
 --   * Every other `<!-- annoteca/<category>: ... -->` marker is stripped
 --     so revision-time annotations do not surface in published output.
+--   * Range closers, `<!-- /annoteca <id> -->`, are stripped too. They end
+--     a commented passage and carry nothing worth publishing.
 --
 -- Usage:
 --   pandoc --lua-filter=pandoc-annoteca.lua input.md -o output.tex
@@ -16,6 +18,7 @@
 -- formats; other formats receive a plain-text fallback.
 
 local ANNOTECA_RE = "^%s*<!%-%-%s*annoteca/([%a][%w%-]*)%s*:%s*(.-)%s*%-%->%s*$"
+local CLOSER_RE = "^%s*<!%-%-%s*/annoteca%s+[%l%d]+%s*%-%->%s*$"
 
 local function format_index_term(body)
   -- Strip any "— rest of body" tail emitted by the modal template.
@@ -29,6 +32,9 @@ end
 local function rewrite_raw(node, ctor)
   if not (node.format == "html" or node.format == "html5" or node.format == "html4") then
     return nil
+  end
+  if string.match(node.text, CLOSER_RE) then
+    return ctor("", node.format)
   end
   local category, body = string.match(node.text, ANNOTECA_RE)
   if not category then return nil end

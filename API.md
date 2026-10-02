@@ -125,7 +125,11 @@ Return and argument shapes, so you can build against this page alone:
   offsets are into the note's editor text, so a line break counts as one character even in a
   file saved with Windows (CRLF) line endings.
 - `AnchorRange` (from `anchorsFor`): `start`, `end`, `category`, `resolved`, `addressed`,
-  `commentId?`. Where the prose actually sits in the content you passed.
+  `commentId?`. Where the prose actually sits in the content you passed. For a range
+  comment, one that ends with a closing marker `<!-- /annoteca <id> -->`, this is exactly
+  the text between the two markers, however long. Otherwise it is located by matching the
+  captured anchor text next to the marker. If you detect markers yourself, skip closers
+  too: they are separate HTML comments, and they do not match the opener pattern below.
 - `PromoteRequest` (into `promote`): `category`, `body`, `anchor` as `{start, end}`,
   `author`, `sourceKey`. Shown in Creating below.
 - `CreatedComment` (from `promote`): `id`, `sourceKey`.

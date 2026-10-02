@@ -8,6 +8,7 @@ A Pandoc Lua filter that handles Annoteca markers at export time:
 
 - `<!-- annoteca/index-entry: <term> -->` becomes a LaTeX `\index{<term>}` when the output format is `latex` or `beamer`. A `term > subterm` chain becomes `\index{term!subterm}`. In other output formats the marker is dropped.
 - Every other Annoteca marker is stripped from published output, so revision-time annotations never leak into the rendered document.
+- Range closers (`<!-- /annoteca <id> -->`, which end a commented passage) are stripped too.
 
 ### Usage
 

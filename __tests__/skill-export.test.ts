@@ -70,6 +70,19 @@ describe('buildSkillMarkdown', () => {
 		expect(example.resolution?.author).toBe('reviewer');
 	});
 
+	// #84. An assistant taught a closer the parser cannot pair would write
+	// ranges that silently fall back to start-only comments.
+	it('ships a range example whose closer the real parser pairs', () => {
+		expect(skill).toContain('<!--\\s*/annoteca\\s+[a-z0-9]+\\s*-->');
+		const example = parseAll(skill).find((c) => c.id === 'k7q2m9p4');
+		expect(example?.closer).toBeDefined();
+		if (!example?.closer) return;
+		const from = example.marker.end + 1;
+		expect(skill.slice(from, example.closer.start)).toBe(
+			'The Q3 forecast assumes a hiring freeze through December.',
+		);
+	});
+
 	it('teaches the address-by-replace flow and the annoteca-original fence', () => {
 		expect(skill).toContain('[addressed');
 		expect(skill).toContain('annoteca-original');

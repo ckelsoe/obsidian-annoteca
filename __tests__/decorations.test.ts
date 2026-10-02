@@ -12,6 +12,7 @@ import {
 	buildMarkerDecorations,
 	findMarkersInDoc,
 	setActiveCommentEffect,
+	setFlashCommentEffect,
 	setHideAllCommentsEffect,
 	setHideAllCommentsEverywhere,
 	isHideAllComments,
@@ -626,6 +627,89 @@ describe('active-comment highlight', () => {
 	});
 });
 
+describe('arrival flash (#82)', () => {
+	const FLASH = 'annoteca-flash-comment';
+
+	// Every flash mark in the state, as [from, to] pairs.
+	function flashRanges(state: EditorState): [number, number][] {
+		const out: [number, number][] = [];
+		for (const set of state.facet(EditorView.decorations)) {
+			if (typeof set === 'function') continue;
+			for (let cur = set.iter(); cur.value !== null; cur.next()) {
+				const spec = cur.value.spec as { class?: string };
+				if (spec.class === FLASH) out.push([cur.from, cur.to]);
+			}
+		}
+		return out;
+	}
+
+	const flashed = (doc: string, start: number): EditorState =>
+		makeState({}, doc).update({
+			effects: setFlashCommentEffect.of(start),
+		}).state;
+
+	it('paints nothing until a flash is dispatched', () => {
+		expect(flashRanges(makeState())).toEqual([]);
+	});
+
+	it('flashes the marker of a comment with no anchor', () => {
+		const m = findMarkersInDoc(DOC)[0];
+		if (!m) throw new Error('fixture has no marker');
+		expect(flashRanges(flashed(DOC, m.marker.start))).toEqual([
+			[m.marker.start, m.marker.end],
+		]);
+	});
+
+	it('flashes the new prose of an addressed comment, not the marker', () => {
+		const marker = [
+			'<!-- annoteca/clarify: tighten this',
+			'[id=addr0001]',
+			'[addressed claude 2026-06-20]: replaced the sentence',
+			'```annoteca-original',
+			'The old sentence.',
+			'```',
+			'-->',
+		].join('\n');
+		const doc = `${marker} The new sentence.\n\nMore prose.`;
+		const m = findMarkersInDoc(doc)[0];
+		if (!m) throw new Error('fixture has no marker');
+		const from = doc.indexOf('The new sentence.');
+		expect(flashRanges(flashed(doc, m.marker.start))).toEqual([
+			[from, from + 'The new sentence.'.length],
+		]);
+	});
+
+	it('paints nothing when no marker starts at the target', () => {
+		expect(flashRanges(flashed(DOC, 0))).toEqual([]);
+	});
+
+	it('clears on a null effect', () => {
+		const on = flashed(DOC, MARKER_START);
+		const off = on.update({
+			effects: setFlashCommentEffect.of(null),
+		}).state;
+		expect(flashRanges(off)).toEqual([]);
+	});
+
+	it('follows its marker through an edit above', () => {
+		const on = flashed(DOC, MARKER_START);
+		const edited = on.update({
+			changes: { from: 0, insert: 'XXXX' },
+		}).state;
+		const m = findMarkersInDoc(edited.doc.toString())[0];
+		if (!m) throw new Error('marker lost');
+		expect(flashRanges(edited)).toEqual([[m.marker.start, m.marker.end]]);
+	});
+
+	it('paints nothing while every comment is hidden', () => {
+		const on = flashed(DOC, MARKER_START);
+		const hidden = on.update({
+			effects: setHideAllCommentsEffect.of(true),
+		}).state;
+		expect(flashRanges(hidden)).toEqual([]);
+	});
+});
+
 describe('selection popup', () => {
 	it('reacts to the setting without waiting for the selection to move', () => {
 		// The compute reads `selectionPopup` off the live settings object, which
@@ -706,5 +790,95 @@ describe('pinned surfaces track the comment, not a copy of it', () => {
 		const freshEnd = findMarkersInDoc(grown.doc.toString())[0]!.marker.end;
 		expect(freshEnd).toBeGreaterThan(findMarkersInDoc(DOC)[0]!.marker.end);
 		expect(after[0]!.end).toBe(freshEnd);
+	});
+});
+
+describe('range comments (#84)', () => {
+	const DOC_RANGE = [
+		'Lead. <!-- annoteca/tighten: wordy',
+		'[id=rng00001]',
+		'--> First line of the passage,',
+		'and its second line.<!-- /annoteca rng00001 --> Tail.',
+	].join('\n');
+	const covered = 'First line of the passage,\nand its second line.';
+	const closerAt = DOC_RANGE.indexOf('<!-- /annoteca');
+	const closerEnd = closerAt + '<!-- /annoteca rng00001 -->'.length;
+
+	// Every decoration with its range, so marks and replacements can be told
+	// apart by what they cover.
+	function ranges(state: EditorState) {
+		const out: { from: number; to: number; deco: Decoration }[] = [];
+		for (const set of state.facet(EditorView.decorations)) {
+			if (typeof set === 'function') continue;
+			for (let cur = set.iter(); cur.value !== null; cur.next())
+				out.push({ from: cur.from, to: cur.to, deco: cur.value });
+		}
+		return out;
+	}
+
+	const anchorMarks = (state: EditorState) =>
+		ranges(state).filter((r) =>
+			String((r.deco.spec as { class?: string }).class ?? '').includes(
+				'annoteca-anchor',
+			),
+		);
+
+	it('underlines exactly the passage between the markers, across lines', () => {
+		const state = makeState({ indicatorStyle: 'both' }, DOC_RANGE);
+		const marks = anchorMarks(state);
+		expect(marks).toHaveLength(1);
+		const m = marks[0];
+		if (!m) throw new Error('no mark');
+		expect(DOC_RANGE.slice(m.from, m.to)).toBe(covered);
+	});
+
+	it('hides the closer when markers are drawn as icons', () => {
+		const state = makeState({ indicatorStyle: 'both' }, DOC_RANGE);
+		const hidden = ranges(state).filter(
+			(r) => r.from === closerAt && r.to === closerEnd,
+		);
+		expect(hidden).toHaveLength(1);
+	});
+
+	it('leaves the closer visible in underline style, like the opener', () => {
+		const state = makeState({ indicatorStyle: 'underline' }, DOC_RANGE);
+		expect(
+			ranges(state).some(
+				(r) => r.from === closerAt && r.to === closerEnd,
+			),
+		).toBe(false);
+		expect(anchorMarks(state)).toHaveLength(1);
+	});
+
+	it('a stray closer is not hidden, so the reader can see it', () => {
+		const doc = 'Text.<!-- /annoteca zzzz0009 --> more';
+		const state = makeState({ indicatorStyle: 'both' }, doc);
+		expect(ranges(state)).toEqual([]);
+	});
+
+	it('the arrival flash on an addressed range covers the whole new passage', () => {
+		const doc = [
+			'<!-- annoteca/tighten: wordy',
+			'[id=rng00002]',
+			'[addressed claude 2026-10-01]: rewrote',
+			'```annoteca-original',
+			'Old.',
+			'```',
+			'--> New first line,',
+			'new second line.<!-- /annoteca rng00002 --> Tail.',
+		].join('\n');
+		const m = findMarkersInDoc(doc)[0];
+		if (!m) throw new Error('no marker');
+		const state = makeState({ indicatorStyle: 'both' }, doc).update({
+			effects: setFlashCommentEffect.of(m.marker.start),
+		}).state;
+		const flash = ranges(state).filter(
+			(r) =>
+				(r.deco.spec as { class?: string }).class ===
+				'annoteca-flash-comment',
+		);
+		expect(flash.map((r) => doc.slice(r.from, r.to))).toEqual([
+			'New first line,\nnew second line.',
+		]);
 	});
 });

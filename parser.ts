@@ -1083,6 +1083,77 @@ function walkTrailingLines(
 	};
 }
 
+// ---- range comments: the closing marker (#84) ------------------------------
+//
+// A range comment ends with `<!-- /annoteca <id> -->` after its passage, so the
+// commented text is exactly what lies between the opening marker and this one.
+// The opener is unchanged: a closer is an additive, separate shape, and the
+// opener pattern above cannot match it (no category, a slash before the name),
+// so the marker scan, the nested-opener guard and the malformed-marker report
+// never see it. An older version reads it as an ordinary invisible HTML
+// comment, which is what makes the format change safe to ship.
+//
+// Pairing is by id, not by nesting, so ranges can overlap or nest freely.
+const CLOSER_RE = /<!--\s*\/annoteca\s+([a-z0-9]{1,32})\s*-->/g;
+
+export interface RawCloser {
+	id: string;
+	start: number;
+	end: number;
+}
+
+export function serializeCloser(id: string): string {
+	return `<!-- /annoteca ${id} -->`;
+}
+
+// Every closer in the text that is not inside an opening marker. One quoted in
+// a comment body is prose, the same way a quoted opener is. Store entries need
+// no exclusion: their JSON escapes `<`, so no closer can appear in one.
+export function scanClosers(
+	content: string,
+	markers: readonly MarkerRange[] = scanMarkers(content),
+): RawCloser[] {
+	const out: RawCloser[] = [];
+	for (const m of content.matchAll(CLOSER_RE)) {
+		const id = m[1];
+		if (id === undefined) continue;
+		const start = m.index;
+		const end = start + m[0].length;
+		if (markers.some((r) => start >= r.start && start < r.end)) continue;
+		out.push({ id, start, end });
+	}
+	return out;
+}
+
+// Attach each closer to its opener, or to nothing when the pairing is not
+// certain. A comment gets a closer only when exactly one opener in the text
+// carries its id AND exactly one closer does, and the closer comes after the
+// opener. Anything else (a copied opener, a pasted second closer, a closer cut
+// and moved above its opener) leaves the comment as a start-only comment, which
+// is exactly how it behaved before ranges existed, and the orphan check reports
+// the stray. Guessing between two candidates is how a write lands on the wrong
+// prose, so this never guesses.
+function pairClosers(comments: Comment[], closers: readonly RawCloser[]): void {
+	if (closers.length === 0) return;
+	const openerCount = new Map<string, number>();
+	for (const c of comments)
+		if (c.id !== undefined)
+			openerCount.set(c.id, (openerCount.get(c.id) ?? 0) + 1);
+	const byId = new Map<string, RawCloser[]>();
+	for (const k of closers) {
+		const list = byId.get(k.id);
+		if (list) list.push(k);
+		else byId.set(k.id, [k]);
+	}
+	for (const c of comments) {
+		if (c.id === undefined || openerCount.get(c.id) !== 1) continue;
+		const mine = byId.get(c.id);
+		const only = mine?.length === 1 ? mine[0] : undefined;
+		if (only && only.start >= c.marker.end)
+			c.closer = { start: only.start, end: only.end };
+	}
+}
+
 export function parseAll(content: string): Comment[] {
 	const out: Comment[] = [];
 	for (const raw of scanMarkers(content)) {
@@ -1102,6 +1173,13 @@ export function parseAll(content: string): Comment[] {
 			marker: { start: raw.start, end: raw.end },
 		});
 	}
+	pairClosers(
+		out,
+		scanClosers(
+			content,
+			out.map((c) => c.marker),
+		),
+	);
 	return out;
 }
 
@@ -1118,6 +1196,14 @@ export function parseAt(content: string, start: number): Comment | undefined {
 	// edit composer (its only caller) would rewrite the merged range.
 	if (firstUnescaped(inner, NESTED_OPENER_RE) >= 0) return undefined;
 	const tail = parseInnerContent(inner);
+	// The closer comes from the whole document, paired the same way parseAll
+	// pairs it, so the two never disagree about a comment's range.
+	const closer =
+		tail.id === undefined
+			? undefined
+			: parseAll(content).find(
+					(c) => c.marker.start === match.index && c.id === tail.id,
+				)?.closer;
 	return {
 		id: tail.id,
 		category,
@@ -1131,6 +1217,7 @@ export function parseAt(content: string, start: number): Comment | undefined {
 		unknownLines: tail.unknownLines,
 		source: tail.source,
 		marker: { start: match.index, end: match.index + match[0].length },
+		...(closer ? { closer } : {}),
 	};
 }
 

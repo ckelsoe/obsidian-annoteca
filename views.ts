@@ -1,10 +1,11 @@
-import { ItemView, WorkspaceLeaf } from 'obsidian';
+import { ItemView, WorkspaceLeaf, type ViewStateResult } from 'obsidian';
 
 import type AnnotecaPlugin from './main';
 import type { LocatedComment, CategoryDefinition } from './types';
 import { getCategoryOrFallback } from './categories';
 import { resolveSettingsCategories } from './settings';
 import { extractIndexTerm } from './view-utils';
+import { rekeyScopeAnchor } from './scope';
 import { ThreadTabRenderer } from './hub-thread-tab';
 import { OutlineTabRenderer } from './hub-outline-tab';
 import { StarredTabRenderer } from './hub-starred-tab';
@@ -417,6 +418,10 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 		this.registerEvent(
 			this.plugin.events.on('active-comment-changed', (payload) => {
 				const event = payload as { path: string; start: number };
+				this.threadRenderer.leaveFocusUnlessSelected(
+					event.path,
+					event.start,
+				);
 				this.threadRenderer.setActiveComment(event.path, event.start);
 				// Marker clicks force the Thread tab; the user's intent is to see
 				// the comment they clicked, not whatever tab was last viewed.
@@ -429,6 +434,14 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 		this.registerEvent(
 			this.plugin.events.on('index-changed', () =>
 				this.scheduleRefresh(),
+			),
+		);
+		// A focused comment (#83) is named by path. The plugin's own rename
+		// handler re-keys the index and fires index-changed, whose refresh is
+		// deferred to a microtask, so the focus is re-keyed before it renders.
+		this.registerEvent(
+			this.app.vault.on('rename', (file, oldPath) =>
+				this.threadRenderer.rekeyFocusOnRename(oldPath, file.path),
 			),
 		);
 		// The panel reads display settings (markdown rendering, among others)
@@ -475,7 +488,7 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 		this.plugin.clearActiveCommentHighlight();
 		// Unload the last render's markdown lifetime. contentEl.empty() in
 		// super.onClose() removes the DOM but not the components attached to it.
-		this.threadRenderer.dispose();
+		this.threadRenderer.close();
 		this.unsubscribeFindings?.();
 		this.unsubscribeFindings = null;
 		await super.onClose();
@@ -585,4 +598,209 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 			});
 		}
 	}
+}
+
+// One comment in its own tab (#83) ------------------------------------------
+//
+// A main-area tab that shows a single comment's conversation: its body, the
+// thread, the reply box and every action, and nothing from any other comment.
+// It is the Thread tab's renderer, held permanently in focus on that comment,
+// so the card is the same card the panel draws rather than a second copy of it
+// that could drift.
+//
+// The tab is restored with the workspace, so its state is just the note path
+// and the comment id. Only comments with an id can have one: the id is the
+// only identity that survives a restart.
+
+export const ANNOTECA_COMMENT_VIEW_TYPE = 'annoteca-comment-view';
+
+// Saved state, checked on the way in because it comes back from the workspace
+// file, which a sync, a hand edit, or an older version can leave in any shape.
+const COMMENT_ID_RE = /^[a-z0-9]{1,32}$/;
+
+export function commentTabState(
+	state: unknown,
+): { path: string; id: string } | undefined {
+	if (typeof state !== 'object' || state === null) return undefined;
+	const s = state as Record<string, unknown>;
+	if (typeof s.path !== 'string' || s.path === '') return undefined;
+	if (typeof s.id !== 'string' || !COMMENT_ID_RE.test(s.id)) return undefined;
+	return { path: s.path, id: s.id };
+}
+
+// A comment tab's saved state after `oldPath` was renamed to `newPath`, or
+// undefined when the rename does not touch it. A folder rename moves every tab
+// whose note is inside it.
+export function rekeyCommentTabState(
+	state: unknown,
+	oldPath: string,
+	newPath: string,
+): { path: string; id: string } | undefined {
+	const shown = commentTabState(state);
+	if (!shown) return undefined;
+	const path = rekeyScopeAnchor(shown.path, oldPath, newPath);
+	return path === undefined ? undefined : { ...shown, path };
+}
+
+export class AnnotecaCommentView extends AnnotecaBaseView {
+	private readonly renderer: ThreadTabRenderer;
+	private target: { path: string; id: string } | undefined;
+	private refreshQueued = false;
+	private closed = false;
+
+	constructor(leaf: WorkspaceLeaf, plugin: AnnotecaPlugin) {
+		super(leaf, plugin);
+		this.renderer = new ThreadTabRenderer(
+			plugin,
+			this.app,
+			() => this.scheduleRefresh(),
+			true,
+		);
+	}
+
+	getViewType(): string {
+		return ANNOTECA_COMMENT_VIEW_TYPE;
+	}
+
+	// The category and the id, the two things the reporter asked to see on
+	// the tab. Read when Obsidian draws the tab header.
+	getDisplayText(): string {
+		const target = this.target;
+		if (!target) return 'Annoteca comment';
+		const c = this.renderer.focusedComment;
+		const name = c
+			? getCategoryOrFallback(
+					c.category,
+					resolveSettingsCategories(this.plugin.settings),
+				).displayName
+			: 'Comment';
+		return `${name} · ${target.id}`;
+	}
+
+	getIcon(): string {
+		return 'message-square';
+	}
+
+	getState(): Record<string, unknown> {
+		return this.target ? { ...this.target } : {};
+	}
+
+	async setState(state: unknown, result: ViewStateResult): Promise<void> {
+		const target = commentTabState(state);
+		this.target = target;
+		if (target) this.renderer.focusOnId(target.path, target.id);
+		this.scheduleRefresh();
+		// The index can still be empty this early after a restart. The scan is
+		// NOT awaited: Obsidian gives a restored tab a time limit to load, a
+		// first scan of a large vault takes longer, and a tab that misses the
+		// limit is replaced by an empty one (seen in the running app as "Failed
+		// to load deferred view: Timeout"). The focus is by id, so the
+		// index-changed render after the scan finds the comment.
+		// A failed scan still renders: whatever the index holds is shown.
+		void this.plugin
+			.scanVaultIfNeeded()
+			.catch(() => undefined)
+			.then(() => {
+				if (this.target === target && target)
+					this.renderer.focusOnId(target.path, target.id);
+				this.scheduleRefresh();
+			});
+		await super.setState(state, result);
+	}
+
+	onOpen(): Promise<void> {
+		this.contentEl.addClass('annoteca-hub-root', 'annoteca-comment-tab');
+		this.registerEvent(
+			this.plugin.events.on('index-changed', () =>
+				this.scheduleRefresh(),
+			),
+		);
+		this.registerEvent(
+			this.plugin.events.on('settings-changed', () =>
+				this.scheduleRefresh(),
+			),
+		);
+		this.registerEvent(
+			this.plugin.events.on('starred-changed', () =>
+				this.scheduleRefresh(),
+			),
+		);
+		this.scheduleRefresh();
+		return Promise.resolve();
+	}
+
+	async onClose(): Promise<void> {
+		this.closed = true;
+		this.renderer.close();
+		await super.onClose();
+	}
+
+	// One render per tick, for the same reason as the panel: several events
+	// fire for a single action.
+	private scheduleRefresh(): void {
+		if (this.refreshQueued || this.closed) return;
+		this.refreshQueued = true;
+		queueMicrotask(() => {
+			this.refreshQueued = false;
+			if (this.closed) return;
+			this.render();
+		});
+	}
+
+	private render(): void {
+		// The tab rebuilds on every index change, and an index change arrives
+		// while the reader is typing a reply (an autosave of the note, another
+		// writer). Without this the reply box they were in is replaced and the
+		// next keystroke goes nowhere. The draft text survives on its own; this
+		// puts the cursor back in it.
+		const restoreFocus = captureFocus(this.contentEl);
+		this.renderer.dispose();
+		// Obsidian draws the view header once, when the view opens, which is
+		// before setState says which comment this is, so it read "Annoteca
+		// comment" while the tab itself read "Clarify · <id>" (seen in the
+		// running app). There is no public call to redraw it, so its text is
+		// kept in step here. Nothing happens if the header is not there.
+		this.containerEl
+			.querySelector('.view-header-title')
+			?.setText(this.getDisplayText());
+		const container = this.contentEl;
+		container.empty();
+		// Both, because the renderer without a focus draws the full list, and
+		// this tab must never show more than its one comment.
+		if (!this.target || !this.renderer.isFocused) {
+			container.createEl('p', {
+				cls: 'annoteca-empty',
+				text: 'This tab has no comment to show. Close it, and open the comment again from the comments pane.',
+			});
+			return;
+		}
+		this.renderer.render(
+			container.createDiv({ cls: 'annoteca-hub-content' }),
+		);
+		restoreFocus();
+	}
+}
+
+// Remember which control inside `root` has focus, and where its text cursor is,
+// so a rebuild of `root` can put both back. The control is found again by its
+// class and its position among controls with that class, which is stable here
+// because the tab always draws the same one comment. A no-op when focus is
+// outside `root`, so a rebuild never pulls focus from elsewhere.
+function captureFocus(root: HTMLElement): () => void {
+	const active = root.ownerDocument.activeElement;
+	if (!(active instanceof HTMLElement) || !root.contains(active))
+		return () => undefined;
+	const cls = active.classList.item(0);
+	if (cls === null) return () => undefined;
+	const index = Array.from(root.getElementsByClassName(cls)).indexOf(active);
+	const selection = active.instanceOf(HTMLTextAreaElement)
+		? { start: active.selectionStart, end: active.selectionEnd }
+		: undefined;
+	return () => {
+		const again = root.getElementsByClassName(cls).item(index);
+		if (!(again instanceof HTMLElement)) return;
+		again.focus();
+		if (selection && again.instanceOf(HTMLTextAreaElement))
+			again.setSelectionRange(selection.start, selection.end);
+	};
 }

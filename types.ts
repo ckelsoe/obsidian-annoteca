@@ -53,6 +53,13 @@ export interface Comment {
 	// that this build has no name for. See the walk in parser.ts.
 	unknownLines: readonly string[];
 	marker: MarkerRange;
+	// The paired closing marker of a range comment (#84), when it has one:
+	// `<!-- /annoteca <id> -->` after the passage, so the commented text is
+	// exactly what lies between the two markers. Absent for a comment that
+	// marks only where its passage starts, which is every comment written
+	// before ranges existed and every comment made at the cursor. Set only
+	// when the pairing is unambiguous; see pairClosers in parser.ts.
+	closer?: MarkerRange;
 	// Where a machine-created comment came from (F-282), absent for one a person
 	// wrote. `tag` is the creating plugin's id and `key` is that plugin's own
 	// identity for the finding, so it can tell whether it already promoted this

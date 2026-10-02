@@ -10,6 +10,7 @@ import {
 	detectMarkerConflicts,
 	detectOrphans,
 	detectStoreOrphans,
+	detectRangeIssues,
 	validateMarkers,
 	type ConflictFinding,
 } from './diagnostics';
@@ -102,6 +103,7 @@ export class DiagnosticsService {
 			detect: (content, path) => [
 				...detectOrphans(content, path),
 				...detectStoreOrphans(content, path),
+				...detectRangeIssues(content, path),
 			],
 			scanIndexFirst: true,
 		});

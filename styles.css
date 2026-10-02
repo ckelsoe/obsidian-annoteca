@@ -158,6 +158,26 @@ settings:
 	border-radius: 3px;
 }
 
+/* Arrival flash (#82): a short pulse over the passage a jump landed on, so the
+ * reader sees where it is. Fades out on its own; the plugin removes the class
+ * shortly after. Reduced motion gets a steady tint for the same span instead. */
+.annoteca-flash-comment {
+	border-radius: 3px;
+	animation: annoteca-flash 1.5s ease-out;
+}
+
+@keyframes annoteca-flash {
+	from { background-color: var(--text-highlight-bg-active, var(--text-highlight-bg)); }
+	to { background-color: transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.annoteca-flash-comment {
+		animation: none;
+		background-color: var(--text-highlight-bg);
+	}
+}
+
 .annoteca-icon:hover {
 	color: var(--text-normal);
 	transform: scale(1.15);
@@ -1059,6 +1079,20 @@ settings:
 	overflow-wrap: anywhere;
 }
 
+/* #82: the original text jumps to the comment in the note. */
+.annoteca-reviewer-addressed-original.is-jump-target {
+	cursor: pointer;
+}
+
+.annoteca-reviewer-addressed-original.is-jump-target:hover {
+	background-color: var(--background-modifier-hover);
+}
+
+.annoteca-reviewer-addressed-original.is-jump-target:focus-visible {
+	box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+	outline: none;
+}
+
 .annoteca-reviewer-thread {
 	margin-bottom: 12px;
 }
@@ -1204,6 +1238,41 @@ settings:
 	margin-bottom: 10px;
 	padding-bottom: 8px;
 	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+/* A comment in its own tab (#83). The main area is wide; cap the card at the
+ * editor's readable line width so the conversation reads like the note. */
+.annoteca-comment-tab .annoteca-hub-content {
+	max-width: var(--file-line-width);
+	margin: 0 auto;
+	padding: var(--size-4-4);
+}
+
+/* Focus mode (#83): takes the scope toolbar's place while the Thread tab shows
+ * one comment. Same rule and spacing, so the card below does not shift. */
+.annoteca-focus-bar {
+	display: flex;
+	gap: 6px;
+	align-items: center;
+	margin-bottom: 10px;
+	padding-bottom: 8px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.annoteca-focus-label {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--text-muted);
+}
+
+.annoteca-focus-exit {
+	display: inline-flex;
+	gap: 4px;
+	align-items: center;
+	flex-shrink: 0;
 }
 
 .annoteca-scope-select {

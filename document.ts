@@ -86,6 +86,9 @@ function merge(marker: Comment, stored: StoredComment): Comment {
 		resolution: stored.resolution,
 		unknownLines: stored.unknownLines ? stored.unknownLines.slice() : [],
 		marker: marker.marker,
+		// The closer is prose-side, like the marker, so it comes from the
+		// lean marker's parse and never from the store.
+		...(marker.closer ? { closer: marker.closer } : {}),
 	};
 }
 
