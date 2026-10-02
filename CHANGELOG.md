@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- API (version 5): `compose(path, range)` lets another plugin ask you to comment on exact text in a note. Annoteca opens the note, selects that text and opens its own comment form, so the comment is yours, with a closing marker. Nothing is written until you save. It is the hook a companion view, such as a mind map, needs for a "comment on this" action.
+
+### Fixed
+- Clicking a comment's text in an open card in the Thread tab now jumps to the comment in the note, the same as the original text of an addressed comment. Clicking a link in the text still follows the link, and selecting text to copy it does not jump. (#82)
+
 ## [1.20.0-beta.4] - 2026-10-02
 
 ### Added

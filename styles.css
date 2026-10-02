@@ -1079,6 +1079,11 @@ settings:
 	overflow-wrap: anywhere;
 }
 
+/* #82: a comment's own text in an open card jumps to it too. */
+.annoteca-reviewer-body.is-jump-target {
+	cursor: pointer;
+}
+
 /* #82: the original text jumps to the comment in the note. */
 .annoteca-reviewer-addressed-original.is-jump-target {
 	cursor: pointer;
