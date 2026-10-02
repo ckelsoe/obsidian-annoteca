@@ -88,7 +88,8 @@ import {
 	rekeyCommentTabState,
 } from './views';
 import type { ComposerRequest } from './composer';
-import { nowISO } from './parser';
+import { nowISO, parseAll, scanClosers } from './parser';
+import { sentenceAt } from './sentence';
 import {
 	convertAllComments,
 	type ImportFormat,
@@ -528,6 +529,16 @@ export default class AnnotecaPlugin extends Plugin {
 									this.openModalAtCursor(editor, view),
 								),
 						);
+						menu.addItem((item) =>
+							item
+								.setTitle(
+									'Annoteca: add comment for this sentence',
+								)
+								.setIcon('text-select')
+								.onClick(() =>
+									this.openModalForSentence(editor, view),
+								),
+						);
 					}
 
 					const file = view.file;
@@ -615,6 +626,12 @@ export default class AnnotecaPlugin extends Plugin {
 			name: 'Add comment for selection',
 			editorCallback: (editor: Editor, view: MarkdownFileInfo) =>
 				this.openModalForSelection(editor, view),
+		});
+		this.addCommand({
+			id: 'add-comment-for-sentence',
+			name: 'Add comment for current sentence',
+			editorCallback: (editor: Editor, view: MarkdownFileInfo) =>
+				this.openModalForSentence(editor, view),
 		});
 		this.addCommand({
 			id: 'add-scratchpad-comment',
@@ -1173,6 +1190,28 @@ export default class AnnotecaPlugin extends Plugin {
 		// request. Kept as a named method so the command and menu wiring stay
 		// self-documenting.
 		this.openModalAtCursor(editor, view);
+	}
+
+	// Select the sentence around the cursor, then open the composer exactly as
+	// "for selection" does, so the comment covers that sentence with a closer.
+	// The selection is what the composer reads, which keeps this one path.
+	private openModalForSentence(editor: Editor, view: MarkdownFileInfo): void {
+		const content = editor.getValue();
+		const markers = parseAll(content).map((c) => c.marker);
+		const sentence = sentenceAt(
+			content,
+			editor.posToOffset(editor.getCursor()),
+			[...markers, ...scanClosers(content, markers)],
+		);
+		if (!sentence) {
+			new Notice('Click inside a sentence first, then add the comment.');
+			return;
+		}
+		editor.setSelection(
+			editor.offsetToPos(sentence.from),
+			editor.offsetToPos(sentence.to),
+		);
+		this.openModalForSelection(editor, view);
 	}
 
 	private openScratchpadModal(editor: Editor, view: MarkdownFileInfo): void {
