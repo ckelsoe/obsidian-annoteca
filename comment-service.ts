@@ -29,7 +29,7 @@ import type {
 	Reply,
 } from './types';
 import { ConfirmPromotionModal } from './confirm-modal';
-import { frontmatterEnd } from './range-placement';
+import { frontmatterEnd, planCloser } from './range-placement';
 import {
 	findRemovalBlocker,
 	parseAll,
@@ -42,6 +42,7 @@ import {
 	isCommentSource,
 	isSerializableCategory,
 	scanClosers,
+	serializeCloser,
 	type MalformedMarker,
 } from './parser';
 import {
@@ -189,6 +190,8 @@ function isValidPromoteRequest(
 	const anchor = r.anchor as Record<string, unknown>;
 	if (typeof anchor.start !== 'number') return false;
 	if (typeof anchor.end !== 'number') return false;
+	if (r.closeRange !== undefined && typeof r.closeRange !== 'boolean')
+		return false;
 
 	if (!isSerializableCategory(r.category)) return false;
 	if (r.body.trim() === '') return false;
@@ -665,6 +668,7 @@ export class CommentService {
 				date: reopened.date,
 				author: reopened.author,
 				anchor: reopened.anchor,
+				range: reopened.range,
 				source: reopened.source,
 				replies: reopened.replies,
 				resolution: reopened.resolution,
@@ -830,13 +834,29 @@ export class CommentService {
 			this.plugin.settings.storageMode,
 		);
 		const splices: SpliceRange[] = [];
+		// Closers are collected apart and go FIRST. Splices at the same offset
+		// land in list order, and when one request's passage ends exactly where
+		// the next one's starts, the first comment's closer has to come before
+		// the second comment's marker, or the first range would swallow it.
+		const closerSplices: SpliceRange[] = [];
 		const created: CreatedComment[] = [];
 		const stored: StoredComment[] = [];
+		// Existing markers and closers, which a new closer must not split.
+		const markers = parseAll(content).map((c) => c.marker);
+		const occupied = [...markers, ...scanClosers(content, markers)];
 		for (const r of valid) {
 			const id = this.freshId(content, created);
 			const anchorText = buildAnchorFromSelection(
 				content.slice(r.anchor.start, r.anchor.end),
 			);
+			// #84, opt-in: a closer at the end of the consumer's range, placed by
+			// the same rules as the composer's, so it never lands where HTML
+			// shows. Anything but a clean range quietly stays start-only, and
+			// `closed` on the result says so.
+			const plan = r.closeRange
+				? planCloser(content, r.anchor.start, r.anchor.end, occupied)
+				: undefined;
+			const closeAt = plan?.kind === 'range' ? plan.at : undefined;
 			const comment = {
 				id,
 				category: r.category,
@@ -845,6 +865,7 @@ export class CommentService {
 				author: r.author,
 				anchor: anchorText,
 				source: { tag: r.author, key: r.sourceKey },
+				...(closeAt !== undefined ? { range: 'closed' as const } : {}),
 			};
 			const text =
 				mode === 'eof'
@@ -860,6 +881,7 @@ export class CommentService {
 					anchor: comment.anchor,
 					replies: [],
 					source: comment.source,
+					...(comment.range ? { range: comment.range } : {}),
 				});
 			}
 			// Beginning-placement, the same as the composer: the marker goes at
@@ -869,8 +891,19 @@ export class CommentService {
 				to: r.anchor.start,
 				insert: `${text} `,
 			});
-			created.push({ id, sourceKey: r.sourceKey });
+			if (closeAt !== undefined)
+				closerSplices.push({
+					from: closeAt,
+					to: closeAt,
+					insert: serializeCloser(id),
+				});
+			created.push({
+				id,
+				sourceKey: r.sourceKey,
+				closed: closeAt !== undefined,
+			});
 		}
+		splices.unshift(...closerSplices);
 		if (stored.length > 0) {
 			// Appended to whatever the note already stores, not replacing it. The
 			// existing entries come from parseStore rather than being assumed
@@ -1096,6 +1129,7 @@ export class CommentService {
 			date: next.date,
 			author: next.author,
 			anchor: next.anchor,
+			range: next.range,
 			source: next.source,
 			replies: next.replies,
 			addressed: next.addressed,

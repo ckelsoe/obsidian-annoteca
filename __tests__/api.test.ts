@@ -97,10 +97,10 @@ describe('AnnotecaApi: version surface', () => {
 	it('reports its own version', () => {
 		const { api } = harness();
 		expect(api.apiVersion).toBe(API_VERSION);
-		// 3 since reveal() landed. A consumer checking this before it wires a
-		// "jump to this comment" action must be able to tell a build that has
-		// reveal() from one that does not.
-		expect(api.apiVersion).toBe(3);
+		// 4 since promote() took closeRange (#84). A consumer deciding whether
+		// to ask for range comments must be able to tell a build that writes
+		// them from one that silently ignores the request.
+		expect(api.apiVersion).toBe(4);
 	});
 });
 

@@ -84,9 +84,11 @@ development, and all of it ships in the first public release (1.17.0) at level 3
 - `1`: read only (`queryComments`, `anchorsFor`, `onChange`).
 - `2`: adds `promote`, plus `categories` beside it.
 - `3`: adds `reveal`.
+- `4`: `promote` takes an optional `closeRange` per request and reports `closed` on each
+  created comment. Nothing earlier changed shape.
 
-Gate on the level the method you call needs (`>= 2` to create, `>= 3` to reveal), and
-treat it as a floor:
+Gate on the level the method you call needs (`>= 2` to create, `>= 3` to reveal, `>= 4`
+to ask for range comments), and treat it as a floor:
 
 - `apiVersion` moves up when a method you are expected to gate on lands. It never moves
   down, and a method never disappears or changes signature within a level.
@@ -222,6 +224,12 @@ Notes on `promote`:
 - `expected` guards against a stale write. If the note moved on since you read it, the
   call returns an empty array rather than placing a marker in the wrong prose. Re-read
   and call again. A returned `CreatedComment` is the only proof a comment was written.
+- Range comments (`apiVersion >= 4`). Set `closeRange: true` on a request and Annoteca
+  also writes a closing marker, `<!-- /annoteca <id> -->`, at `anchor.end`, so the
+  comment covers exactly `start..end` instead of marking only where it starts. It is off
+  by default, and an older build ignores it. No closer is written where HTML would show
+  (a code block, inline code, the note properties) or when the range is only whitespace;
+  `closed` on the returned `CreatedComment` says whether one was.
 
 Reveal, to jump to a comment from your own indicator:
 

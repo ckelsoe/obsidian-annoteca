@@ -171,4 +171,28 @@ describe('#84: a comment on a selection covers exactly the selection', () => {
 		expect(host.content).not.toContain('/annoteca');
 		expect(host.transactions).toBe(0);
 	});
+
+	it('a comment made with a closer carries [range=closed]; one without does not', async () => {
+		const doc = 'Before. The vague clause here. After.';
+		const ranged = makeHost(doc, doc.indexOf('The'), doc.indexOf(' After'));
+		await create(ranged);
+		expect(parseAll(ranged.content)[0]?.range).toBe('closed');
+
+		const cursor = makeHost(doc, 5, 5);
+		await create(cursor);
+		expect(parseAll(cursor.content)[0]?.range).toBeUndefined();
+		expect(cursor.content).not.toContain('[range=');
+
+		const code = 'Intro text.\n\n```\ncode line\n```\n';
+		const refused = makeHost(code, 0, code.indexOf('line'));
+		await create(refused);
+		expect(parseAll(refused.content)[0]?.range).toBeUndefined();
+	});
+
+	it('in end-of-file storage, the flag lands in the store', async () => {
+		const doc = 'Alpha beta gamma.';
+		const host = makeHost(doc, 6, 10);
+		await create(host, 'eof');
+		expect(parseDocument(host.content).comments[0]?.range).toBe('closed');
+	});
 });

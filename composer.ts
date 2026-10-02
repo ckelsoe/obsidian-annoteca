@@ -669,6 +669,9 @@ export class ComposerForm {
 				// to — per data-format.md the anchor reflects the original
 				// commented text and is not updated by edits.
 				anchor: fresh.anchor,
+				// Carried for the same reason: editing the body does not change
+				// whether the comment was made with a closer (#84).
+				range: fresh.range,
 				// Carried, like unknownLines below. Editing a comment does not
 				// change where it came from, and dropping it here would strip
 				// provenance on the first ordinary interaction, after which the
@@ -697,11 +700,25 @@ export class ComposerForm {
 				? buildAnchorFromSelection(selection)
 				: undefined;
 
-		const comment = this.buildCommentForCreate(category, finalBody, anchor);
+		const created = this.buildCommentForCreate(category, finalBody, anchor);
 		// The mode is resolved against the buffer BEFORE the marker is inserted, so
 		// "does this note already have comments" reads the note as it stands now.
 		const mode = this.noteStorageMode(editor.getValue());
-		const id = comment.id;
+		const id = created.id;
+
+		// #84: a selection also gets a closer at its END, so the comment covers
+		// exactly the selection. Planned against the note before anything is
+		// inserted, and BEFORE the marker is serialized, because a comment made
+		// with a closer says so in its own marker ([range=closed]) and the flag
+		// is what lets a closer that later goes missing be reported.
+		const from = editor.getCursor('from');
+		const fromOffset = editor.posToOffset(from);
+		const plan =
+			selection.length > 0 && id !== undefined
+				? this.closerPlan(editor, fromOffset)
+				: ({ kind: 'none' } as const);
+		const comment: Comment =
+			plan.kind === 'range' ? { ...created, range: 'closed' } : created;
 
 		// What lands at the passage: a full inline marker, or a lean category+id
 		// marker whose body/thread move to the eof store below. The id guard is
@@ -717,6 +734,7 @@ export class ComposerForm {
 					date: comment.date,
 					author: comment.author,
 					anchor: comment.anchor,
+					range: comment.range,
 				});
 
 		let markerStart: number;
@@ -727,16 +745,9 @@ export class ComposerForm {
 			// the marker and the anchored prose, and findAnchorRange tolerates it
 			// on the forward (begin-placed) side just as it did on the backward
 			// (end-placed) side.
-			const from = editor.getCursor('from');
-			const fromOffset = editor.posToOffset(from);
-			// #84: and a closer at the END, so the comment covers exactly the
-			// selection. Both go in ONE transaction, so a single undo removes
+			// Marker and closer go in ONE transaction, so a single undo removes
 			// the comment whole rather than leaving half of it. The changes are
 			// in the document's coordinates before either lands.
-			const plan =
-				id === undefined
-					? ({ kind: 'none' } as const)
-					: this.closerPlan(editor, fromOffset);
 			if (plan.kind === 'range' && id !== undefined) {
 				editor.transaction({
 					changes: [

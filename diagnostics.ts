@@ -193,6 +193,9 @@ export function detectStoreOrphans(
 //     the passage cannot be told.
 //   - duplicate-opener: more than one marker carries this id (a copied comment),
 //     so which one the closer belongs to cannot be told.
+//   - missing-closer: the comment was made with a closer (it carries
+//     `[range=closed]`) and no closer with its id is left in the note. Usually
+//     an edit that rewrote the passage and dropped the closer with the old text.
 // The fix is a hand edit, and the report says which id to look for.
 export interface RangeFinding {
 	path: string;
@@ -200,9 +203,11 @@ export interface RangeFinding {
 		| 'orphaned-closer'
 		| 'closer-before-opener'
 		| 'duplicate-closer'
-		| 'duplicate-opener';
+		| 'duplicate-opener'
+		| 'missing-closer';
 	id: string;
-	// Where the closer is, in editor offsets, so it can be found in the note.
+	// Where to look, in editor offsets: the closer, or for a missing closer the
+	// comment's own marker.
 	offset: number;
 }
 
@@ -210,12 +215,26 @@ export function detectRangeIssues(
 	content: string,
 	path: string,
 ): RangeFinding[] {
-	const comments = parseAll(content);
+	// parseDocument, not parseAll: under end-of-file storage the range flag
+	// lives in the store entry, not in the lean marker.
+	const comments = parseDocument(content).comments;
 	const closers = scanClosers(
 		content,
 		comments.map((c) => c.marker),
 	);
 	const out: RangeFinding[] = [];
+	for (const c of comments) {
+		if (c.range !== 'closed' || c.id === undefined || c.closer) continue;
+		// A closer that exists but did not pair is reported below, as what it
+		// is. This is only for the one that is gone.
+		if (closers.some((k) => k.id === c.id)) continue;
+		out.push({
+			path,
+			kind: 'missing-closer',
+			id: c.id,
+			offset: c.marker.start,
+		});
+	}
 	for (const k of closers) {
 		const openers = comments.filter((c) => c.id === k.id);
 		const siblings = closers.filter((o) => o.id === k.id);
