@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- The Outline tab is now a tree. Headings nest under their parent headings, and **List items** adds the note's list items under them, nested as the note nests them. Each line shows a badge for the comments on it, and each heading shows its open and resolved counts rolled up from everything below it, so a collapsed branch still shows its work. **Only with comments** hides the lines that have none. Click a row to jump to it and see its comments, with buttons to open the thread, go to the text, or open the comment in its own tab. The button on each row comments on exactly that line, leaving out list, task and heading markup. The tree works from the keyboard: Enter selects a row, and the left and right arrows fold and unfold. (#84)
+
+### Fixed
+- On a note saved with Windows line endings, the Outline tab could count a comment under the wrong heading.
+- The Outline tab could show the previous version of a note, or "No headings" for a new one, until something else refreshed it. It now updates when Obsidian finishes reading the note.
+
 ## [1.20.0-beta.3] - 2026-10-02
 
 ### Added

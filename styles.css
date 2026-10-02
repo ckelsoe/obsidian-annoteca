@@ -1190,15 +1190,175 @@ settings:
 	background-color: var(--background-modifier-hover);
 }
 
-.annoteca-density-row[data-level="2"] { padding-left: 12px; }
-.annoteca-density-row[data-level="3"] { padding-left: 24px; }
-.annoteca-density-row[data-level="4"] { padding-left: 36px; }
-.annoteca-density-row[data-level="5"] { padding-left: 48px; }
-.annoteca-density-row[data-level="6"] { padding-left: 60px; }
+/* The Outline tree indents by depth in the tree, set per row as a variable,
+ * so a list item sits under its heading however deep the heading is. */
+.annoteca-outline-tree .annoteca-density-row {
+	padding-left: calc(4px + var(--annoteca-outline-depth, 0) * 16px);
+}
+
+.annoteca-density-row.is-selected {
+	background-color: var(--background-modifier-active-hover);
+}
+
+.annoteca-density-row:focus-visible {
+	box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+	outline: none;
+}
 
 .annoteca-density-heading {
 	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 	color: var(--text-normal);
+}
+
+.annoteca-outline-heading .annoteca-density-heading {
+	font-weight: var(--font-semibold);
+}
+
+.annoteca-outline-preamble .annoteca-density-heading {
+	color: var(--text-muted);
+	font-style: italic;
+}
+
+.annoteca-outline-chevron {
+	display: inline-flex;
+	flex-shrink: 0;
+	width: 14px;
+	color: var(--text-muted);
+}
+
+.annoteca-outline-tag {
+	flex-shrink: 0;
+	padding: 0 4px;
+	border-radius: 3px;
+	background-color: var(--background-modifier-hover);
+	color: var(--text-muted);
+	font-size: var(--font-smallest);
+	font-weight: var(--font-bold);
+}
+
+.annoteca-outline-bullet {
+	flex-shrink: 0;
+	color: var(--text-muted);
+}
+
+.annoteca-outline-own {
+	display: inline-flex;
+	gap: 3px;
+	align-items: center;
+	padding: 0 6px;
+	border: 1px solid var(--text-accent);
+	border-radius: 10px;
+	color: var(--text-normal);
+	font-weight: var(--font-semibold);
+}
+
+.annoteca-outline-own svg {
+	width: 11px;
+	height: 11px;
+	color: var(--text-accent);
+}
+
+/* The per-row "comment on this line" button: shown on hover and keyboard
+ * focus, and always on the selected row, which is how a touch screen with no
+ * hover reaches it. */
+.annoteca-outline-add {
+	flex-shrink: 0;
+	visibility: hidden;
+}
+
+.annoteca-density-row:hover .annoteca-outline-add,
+.annoteca-density-row:focus-within .annoteca-outline-add,
+.annoteca-density-row.is-selected .annoteca-outline-add {
+	visibility: visible;
+}
+
+.annoteca-outline-toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-bottom: 8px;
+}
+
+.annoteca-outline-toggle {
+	display: inline-flex;
+	gap: 5px;
+	align-items: center;
+	font-size: var(--font-smaller);
+}
+
+.annoteca-outline-toggle.is-active {
+	color: var(--text-accent);
+	border-color: var(--text-accent);
+}
+
+.annoteca-outline-toggle-icon {
+	display: inline-flex;
+}
+
+.annoteca-outline-toggle-icon svg {
+	width: 13px;
+	height: 13px;
+}
+
+.annoteca-outline-preview {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin: 2px 0 8px;
+	padding-left: calc(26px + var(--annoteca-outline-depth, 0) * 16px);
+}
+
+.annoteca-outline-card {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 8px 10px;
+	border-left: 3px solid var(--text-accent);
+	border-radius: 6px;
+	background-color: var(--background-secondary);
+}
+
+.annoteca-outline-card.is-resolved {
+	border-left-color: var(--text-muted);
+	opacity: 0.8;
+}
+
+.annoteca-outline-card-head {
+	display: flex;
+	gap: 8px;
+	align-items: baseline;
+}
+
+.annoteca-outline-card-category {
+	color: var(--text-accent);
+	font-weight: var(--font-semibold);
+}
+
+.annoteca-outline-card-meta {
+	color: var(--text-muted);
+	font-size: var(--font-smaller);
+}
+
+.annoteca-outline-card-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.annoteca-outline-card-action {
+	display: inline-flex;
+	gap: 4px;
+	align-items: center;
+	font-size: var(--font-smaller);
+}
+
+.annoteca-outline-card-action svg {
+	width: 12px;
+	height: 12px;
 }
 
 .annoteca-density-counts {
