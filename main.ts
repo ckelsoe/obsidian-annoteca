@@ -7,6 +7,7 @@ import {
 	Plugin,
 	TFile,
 	getAllTags,
+	apiVersion,
 	normalizePath,
 	type MarkdownFileInfo,
 	type WorkspaceLeaf,
@@ -113,8 +114,13 @@ import { CommentService, fileGoneMessage } from './comment-service';
 import { DiagnosticsService } from './diagnostics-service';
 import {
 	applyFrontmatterSummary,
+	classTagFor,
+	computeSummary,
+	frontmatterMatches,
+	type DesiredSummary,
 	type FrontmatterSummaryOptions,
 } from './frontmatter-summary';
+import { DebugLog, elapsedMs } from './debug-log';
 
 // The element a note-side action came from, for finding its leaf: a command
 // or menu gets the note's view, which in a pop-out window is how the comment
@@ -140,6 +146,20 @@ export default class AnnotecaPlugin extends Plugin {
 	readonly api: AnnotecaApi = createApi(this);
 	comments!: CommentService;
 	diagnostics!: DiagnosticsService;
+	debug!: DebugLog;
+	// Debug mode only: when each note's summary was written and what it wrote,
+	// so the metadata cache catching up can be timed. The cache is checked
+	// against the whole written summary, because a cache update for the
+	// comment's own save can arrive after the summary write.
+	private readonly summaryWrites = new Map<
+		string,
+		{
+			at: number;
+			desired: DesiredSummary;
+			property: string;
+			writeClassTag: boolean;
+		}
+	>();
 	private vaultScanned = false;
 	private readonly markerDamage = new MarkerDamageReporter();
 	// #39: per-path debounce timers for the frontmatter-summary writer.
@@ -159,6 +179,14 @@ export default class AnnotecaPlugin extends Plugin {
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
+		this.debug = new DebugLog(
+			this.app,
+			this.manifest.dir ??
+				normalizePath(
+					`${this.app.vault.configDir}/plugins/${this.manifest.id}`,
+				),
+			() => this.settings,
+		);
 		this.comments = new CommentService(this);
 		this.diagnostics = new DiagnosticsService(this);
 
@@ -282,6 +310,31 @@ export default class AnnotecaPlugin extends Plugin {
 			this.refreshActiveFileIndex();
 			this.ensureRightSidebarTab();
 			void this.checkSkillStaleness();
+			this.logDebugStart();
+		});
+	}
+
+	private async copyDebugLog(): Promise<void> {
+		const log = await this.debug.read();
+		if (log === '') {
+			new Notice('The debug log is empty.');
+			return;
+		}
+		await navigator.clipboard.writeText(log);
+		new Notice(
+			`Copied the debug log (${log.split('\n').length - 1} entries).`,
+		);
+	}
+
+	// Debug mode: the context every log needs to be read, written when logging
+	// starts (at load, or when the setting is turned on).
+	logDebugStart(): void {
+		this.debug.log('debug-start', {
+			version: this.manifest.version,
+			obsidian: apiVersion,
+			notes: this.app.vault.getMarkdownFiles().length,
+			storage: this.settings.storageMode,
+			frontmatterSummary: this.settings.frontmatterSummary,
 		});
 	}
 
@@ -502,6 +555,11 @@ export default class AnnotecaPlugin extends Plugin {
 					this.markerDamage.rename(oldPath, file.path);
 					this.rekeyFrontmatterTimer(oldPath, file);
 					this.frontmatterFailedPaths.delete(oldPath);
+					const pendingWrite = this.summaryWrites.get(oldPath);
+					if (pendingWrite !== undefined) {
+						this.summaryWrites.delete(oldPath);
+						this.summaryWrites.set(file.path, pendingWrite);
+					}
 					this.events.trigger('index-changed');
 				}
 			}),
@@ -513,8 +571,32 @@ export default class AnnotecaPlugin extends Plugin {
 					this.markerDamage.forget(file.path);
 					this.cancelFrontmatterTimer(file.path);
 					this.frontmatterFailedPaths.delete(file.path);
+					this.summaryWrites.delete(file.path);
 					this.events.trigger('index-changed');
 				}
+			}),
+		);
+		// Debug mode: the summary reaching Obsidian's metadata cache, which is
+		// the moment a Bases view or any other property reader can see it.
+		this.registerEvent(
+			this.app.metadataCache.on('changed', (file, _data, cache) => {
+				const write = this.summaryWrites.get(file.path);
+				if (write === undefined) return;
+				const fm: Record<string, unknown> = cache.frontmatter ?? {};
+				if (
+					!frontmatterMatches(
+						fm,
+						write.desired,
+						write.property,
+						write.writeClassTag,
+					)
+				)
+					return;
+				this.summaryWrites.delete(file.path);
+				this.debug.log('metadata-indexed', {
+					path: file.path,
+					msAfterSummaryWrite: elapsedMs(write.at),
+				});
 			}),
 		);
 		this.registerEvent(
@@ -975,6 +1057,22 @@ export default class AnnotecaPlugin extends Plugin {
 			},
 		});
 		this.addCommand({
+			id: 'copy-debug-log',
+			name: 'Copy debug log',
+			checkCallback: (checking) => {
+				if (
+					!this.settings.debugMode ||
+					this.settings.debugLogTarget !== 'vault'
+				)
+					return false;
+				if (!checking)
+					this.runGuarded('Copy debug log', () =>
+						this.copyDebugLog(),
+					);
+				return true;
+			},
+		});
+		this.addCommand({
 			id: 'detect-position-drift',
 			name: 'Detect position drift',
 			callback: () => {
@@ -1044,8 +1142,18 @@ export default class AnnotecaPlugin extends Plugin {
 	// File / index helpers ------------------------------------------------
 
 	private async rebuildIndexForFile(file: TFile): Promise<void> {
+		const readStart = performance.now();
 		const content = await this.app.vault.cachedRead(file);
+		const parseStart = performance.now();
 		const idx = this.commentIndex.rebuild(file.path, content);
+		if (this.debug.enabled)
+			this.debug.log('rebuild', {
+				path: file.path,
+				chars: content.length,
+				comments: idx.comments.length,
+				readMs: elapsedMs(readStart, parseStart),
+				parseMs: elapsedMs(parseStart),
+			});
 		// Surfaced HERE and not in `rebuild` itself, nor on the index-changed
 		// event, because this is the rebuild that means "a note the user is
 		// working in": it runs on open, on save, and on a file arriving. The
@@ -1074,6 +1182,7 @@ export default class AnnotecaPlugin extends Plugin {
 		if (!this.settings.frontmatterSummary) return;
 		const path = file.path;
 		this.cancelFrontmatterTimer(path);
+		const scheduledAt = performance.now();
 		const timer = window.setTimeout(() => {
 			this.frontmatterTimers.delete(path);
 			if (this.unloaded) return;
@@ -1096,6 +1205,7 @@ export default class AnnotecaPlugin extends Plugin {
 				fileclassProperty: this.settings.frontmatterFileclassProperty,
 			};
 			this.frontmatterInFlight.add(file);
+			const writeStart = performance.now();
 			void applyFrontmatterSummary(
 				this.app,
 				file,
@@ -1103,10 +1213,30 @@ export default class AnnotecaPlugin extends Plugin {
 				opts,
 				() => !this.unloaded,
 			)
-				.then(() => {
+				.then((written) => {
 					this.frontmatterFailedPaths.delete(file.path);
+					if (!this.debug.enabled) return;
+					this.debug.log('frontmatter-summary', {
+						path: file.path,
+						waitMs: elapsedMs(scheduledAt, writeStart),
+						writeMs: elapsedMs(writeStart),
+						written,
+					});
+					if (written)
+						this.summaryWrites.set(file.path, {
+							at: performance.now(),
+							desired: computeSummary(idx.comments, opts),
+							...classTagFor(opts),
+						});
 				})
 				.catch((err: unknown) => {
+					this.debug.log('frontmatter-summary', {
+						path: file.path,
+						waitMs: elapsedMs(scheduledAt, writeStart),
+						writeMs: elapsedMs(writeStart),
+						written: false,
+						failed: true,
+					});
 					// Malformed YAML or a failed write. Log once per file, never
 					// Notice: this is a background writer that fires on every edit.
 					if (!this.frontmatterFailedPaths.has(file.path)) {
@@ -1143,6 +1273,8 @@ export default class AnnotecaPlugin extends Plugin {
 
 	async scanVaultIfNeeded(): Promise<void> {
 		if (this.vaultScanned) return;
+		const scanStart = performance.now();
+		let indexed = 0;
 		const files = this.app.vault.getMarkdownFiles();
 		for (const f of files) {
 			// A note already indexed keeps its entry, as in indexUnseenFiles:
@@ -1155,8 +1287,14 @@ export default class AnnotecaPlugin extends Plugin {
 			const { text } = await this.comments.currentNoteText(f.path, f);
 			if (this.commentIndex.get(f.path)) continue;
 			this.commentIndex.rebuild(f.path, text);
+			indexed++;
 		}
 		this.vaultScanned = true;
+		this.debug.log('vault-scan', {
+			notes: files.length,
+			indexed,
+			ms: elapsedMs(scanStart),
+		});
 		this.events.trigger('index-changed');
 	}
 

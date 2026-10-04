@@ -25,6 +25,9 @@ beforeEach(() => {
 	noticeLog.length = 0;
 });
 
+// Debug mode off: the service asks before timing anything.
+const QUIET_DEBUG = { enabled: false, log: () => undefined };
+
 const NOTE = [
 	'Prose under review. <!-- annoteca/clarify: which products?',
 	'[id=a1b2c3d4]',
@@ -69,6 +72,7 @@ function makeHarness(deleteOnResolve: boolean) {
 		},
 		commentIndex: { rebuild: () => undefined },
 		events: { trigger: () => undefined },
+		debug: QUIET_DEBUG,
 	} as unknown as AnnotecaPlugin;
 	return {
 		service: new CommentService(plugin),
@@ -121,6 +125,7 @@ function makeHarnessWith(initial: string, deleteOnResolve = false) {
 		},
 		commentIndex: { rebuild: () => undefined },
 		events: { trigger: () => undefined },
+		debug: QUIET_DEBUG,
 	} as unknown as AnnotecaPlugin;
 	return {
 		service: new CommentService(plugin),
@@ -864,6 +869,7 @@ describe('#12: a write aimed at a missing file reports instead of no-oping', () 
 			},
 			commentIndex: { rebuild: () => undefined },
 			events: { trigger: () => undefined },
+			debug: QUIET_DEBUG,
 		} as unknown as AnnotecaPlugin;
 		return new CommentService(plugin);
 	}
@@ -1147,6 +1153,7 @@ function makeRacingHarness(initial: string) {
 		},
 		commentIndex: { rebuild: () => undefined },
 		events: { trigger: () => undefined },
+		debug: QUIET_DEBUG,
 	} as unknown as AnnotecaPlugin;
 	return {
 		service: new CommentService(plugin),
@@ -1212,6 +1219,7 @@ function makeEditorHarness(initial: string) {
 		},
 		commentIndex: { rebuild: () => undefined },
 		events: { trigger: () => undefined },
+		debug: QUIET_DEBUG,
 	} as unknown as AnnotecaPlugin;
 	return {
 		service: new CommentService(plugin),
@@ -1456,6 +1464,7 @@ function makeConvertHarness(initial: string) {
 		},
 		commentIndex: { rebuild: () => undefined },
 		events: { trigger: () => undefined },
+		debug: QUIET_DEBUG,
 	} as unknown as AnnotecaPlugin;
 	return {
 		service: new CommentService(plugin),

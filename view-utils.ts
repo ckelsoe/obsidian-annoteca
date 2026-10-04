@@ -58,11 +58,21 @@ export function authorPickerOptions(
 // should submit. When submitOnEnter is true, Enter submits and Shift+Enter
 // inserts a newline; when false, Cmd/Ctrl+Enter submits and plain Enter inserts
 // a newline. Pure so the rule is unit-tested once and shared by both composers.
+//
+// Never while an input method is composing: Enter there commits the composed
+// characters (Japanese, Chinese, Korean and others), and treating it as send
+// posts the text before the user has finished typing it.
 export function shouldSubmitOnKeydown(
-	e: { key: string; shiftKey: boolean; ctrlKey: boolean; metaKey: boolean },
+	e: {
+		key: string;
+		shiftKey: boolean;
+		ctrlKey: boolean;
+		metaKey: boolean;
+		isComposing?: boolean;
+	},
 	submitOnEnter: boolean,
 ): boolean {
-	if (e.key !== 'Enter') return false;
+	if (e.key !== 'Enter' || e.isComposing === true) return false;
 	return submitOnEnter ? !e.shiftKey : e.ctrlKey || e.metaKey;
 }
 
