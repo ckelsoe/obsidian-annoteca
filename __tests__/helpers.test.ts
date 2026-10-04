@@ -178,6 +178,22 @@ describe('shouldSubmitOnKeydown', () => {
 			).toBe(true);
 		});
 	});
+
+	// Enter during input-method composition commits the composed characters.
+	describe('while an input method is composing', () => {
+		it.each([
+			[true, {}],
+			[false, { ctrlKey: true }],
+			[false, { metaKey: true }],
+		])('never submits (submitOnEnter %p, %p)', (submitOnEnter, mods) => {
+			expect(
+				shouldSubmitOnKeydown(
+					{ ...key('Enter', mods), isComposing: true },
+					submitOnEnter,
+				),
+			).toBe(false);
+		});
+	});
 });
 
 describe('decideScrollAction (F-276, F-289)', () => {

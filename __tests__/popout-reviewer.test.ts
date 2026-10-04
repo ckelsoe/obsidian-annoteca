@@ -16,6 +16,9 @@ import { CommentIndex } from '../index';
 import { serializeLeanMarker } from '../parser';
 import type { Comment } from '../types';
 
+// Debug mode off: the plugin asks before timing anything.
+const QUIET_DEBUG = { enabled: false, log: () => undefined };
+
 interface PluginUnderTest {
 	openReviewerOnComment(
 		comment: Comment,
@@ -90,6 +93,7 @@ function setup(opts: {
 		AnnotecaPlugin.prototype,
 	) as unknown as PluginUnderTest;
 	Object.assign(plugin, {
+		debug: QUIET_DEBUG,
 		commentIndex,
 		events: {
 			trigger: (name: string, payload: unknown) => {
@@ -237,6 +241,7 @@ describe('scanVaultIfNeeded', () => {
 			scanVaultIfNeeded(): Promise<void>;
 		};
 		Object.assign(plugin, {
+			debug: QUIET_DEBUG,
 			commentIndex,
 			vaultScanned: false,
 			events: { trigger: () => undefined },
@@ -264,6 +269,7 @@ describe('scanVaultIfNeeded', () => {
 			scanVaultIfNeeded(): Promise<void>;
 		};
 		Object.assign(plugin, {
+			debug: QUIET_DEBUG,
 			commentIndex,
 			vaultScanned: false,
 			events: { trigger: () => undefined },
@@ -320,6 +326,7 @@ describe('openCommentInTab beside a pop-out note', () => {
 			openCommentInTab(path: string, c: Comment, beside?: unknown): void;
 		};
 		Object.assign(plugin, {
+			debug: QUIET_DEBUG,
 			app: {
 				workspace: {
 					getLeavesOfType: () => tabs,
@@ -392,6 +399,7 @@ describe('jumpToAdjacentComment across notes', () => {
 			): Promise<void>;
 		};
 		Object.assign(plugin, {
+			debug: QUIET_DEBUG,
 			commentIndex: index,
 			computeScopeFiles: () => [PATH, OTHER],
 			navigateToOffset: (path: string) => {

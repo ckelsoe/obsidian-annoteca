@@ -22,6 +22,9 @@ import { CommentIndex } from '../index';
 import { serialize } from '../parser';
 import { noteText } from '../note-text';
 
+// Debug mode off: the plugin asks before timing anything.
+const QUIET_DEBUG = { enabled: false, log: () => undefined };
+
 beforeEach(() => {
 	noticeLog.length = 0;
 });
@@ -61,6 +64,7 @@ function makeHarness(initial: Record<string, string>) {
 		AnnotecaPlugin.prototype,
 	) as unknown as PluginUnderTest;
 	Object.assign(plugin, {
+		debug: QUIET_DEBUG,
 		commentIndex: new CommentIndex(),
 		vaultScanned: false,
 		settings: { starredComments: [] as string[] },
@@ -171,6 +175,7 @@ describe('registerFileEvents', () => {
 			AnnotecaPlugin.prototype,
 		) as unknown as PluginUnderTest;
 		Object.assign(plugin, {
+			debug: QUIET_DEBUG,
 			registerEvent: () => undefined,
 			app: {
 				vault: {
@@ -179,6 +184,7 @@ describe('registerFileEvents', () => {
 						return {};
 					},
 				},
+				metadataCache: { on: () => ({}) },
 				workspace: {
 					on: () => ({}),
 					onLayoutReady: (fn: () => void) => {
@@ -225,6 +231,7 @@ describe('runDriftCheck against a stale index', () => {
 			AnnotecaPlugin.prototype,
 		) as unknown as DriftPlugin;
 		Object.assign(plugin, {
+			debug: QUIET_DEBUG,
 			commentIndex: new CommentIndex(),
 			vaultScanned: false,
 			settings: {
@@ -291,6 +298,7 @@ describe('indexUnseenFiles content source', () => {
 			AnnotecaPlugin.prototype,
 		) as unknown as PluginUnderTest;
 		Object.assign(plugin, {
+			debug: QUIET_DEBUG,
 			commentIndex: new CommentIndex(),
 			vaultScanned: false,
 			settings: { starredComments: [] as string[] },

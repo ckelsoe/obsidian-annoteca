@@ -1070,19 +1070,19 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 				items: [
 					{
 						name: 'Debug mode',
-						desc: 'Log additional information for troubleshooting. Off by default to avoid log spam.',
+						desc: 'Log how long Annoteca takes to index notes, write comments, and update the frontmatter summary, for troubleshooting slowness. Off by default.',
 						control: { type: 'toggle', key: 'debugMode' },
 					},
 					{
 						name: 'Debug log destination',
-						desc: 'Where diagnostic output is written.',
+						desc: 'The log file is debug.log in the plugin folder and keeps roughly the newest 1 MB. Run "Copy debug log" to paste it into an issue.',
 						visible: () => this.plugin.settings.debugMode,
 						control: {
 							type: 'dropdown',
 							key: 'debugLogTarget',
 							options: {
-								console: 'Browser console',
-								vault: 'Log file in the vault',
+								console: 'Developer console',
+								vault: 'Log file in the plugin folder',
 							},
 						},
 					},
@@ -1287,9 +1287,13 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			case 'resolvedBrightness':
 				this.plugin.applyAnchorAppearance();
 				break;
+			case 'debugMode':
+			case 'debugLogTarget':
+				this.plugin.logDebugStart();
+				repaint = true;
+				break;
 			case 'enableIndexEntryPreset':
 			case 'enableAuthorTag':
-			case 'debugMode':
 				repaint = true;
 				break;
 		}

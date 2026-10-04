@@ -167,32 +167,45 @@ export function isManagedNote(
 	return fileclassHasAnnoteca(fm[fileclassProperty]);
 }
 
+// The class-tag property a write targets, and whether the tag is written at all.
+// Shared by the writer and by Debug mode's check that the cache has caught up,
+// so the two can never disagree about what was written.
+export function classTagFor(opts: FrontmatterSummaryOptions): {
+	property: string;
+	writeClassTag: boolean;
+} {
+	const property =
+		opts.fileclassProperty.trim() || DEFAULT_FILECLASS_PROPERTY;
+	// Never let the class tag point at a managed summary field; that would make
+	// the write fight itself and loop.
+	return {
+		property,
+		writeClassTag: opts.writeClassTag && !isReservedProperty(property),
+	};
+}
+
 // Write the summary into the note's frontmatter, only when something changed.
 // Preserves every other frontmatter key via processFrontMatter. A no-op when the
-// note is not managed or already matches.
+// note is not managed or already matches. Resolves to whether it wrote.
 export async function applyFrontmatterSummary(
 	app: App,
 	file: TFile,
 	comments: readonly Comment[],
 	opts: FrontmatterSummaryOptions,
 	shouldContinue?: () => boolean,
-): Promise<void> {
-	const property =
-		opts.fileclassProperty.trim() || DEFAULT_FILECLASS_PROPERTY;
-	// Never let the class tag point at a managed summary field; that would make
-	// the write fight itself and loop.
-	const writeClassTag = opts.writeClassTag && !isReservedProperty(property);
+): Promise<boolean> {
+	const { property, writeClassTag } = classTagFor(opts);
 	const cache = app.metadataCache.getFileCache(file);
 	const fm = (cache?.frontmatter ?? {}) as Record<string, unknown>;
 
-	if (!isManagedNote(comments.length > 0, fm, property)) return;
+	if (!isManagedNote(comments.length > 0, fm, property)) return false;
 
 	const desired = computeSummary(comments, opts);
-	if (frontmatterMatches(fm, desired, property, writeClassTag)) return;
+	if (frontmatterMatches(fm, desired, property, writeClassTag)) return false;
 
 	// Bail if the caller (the plugin) has been unloaded since this write was
 	// scheduled; do not mutate a note after teardown.
-	if (shouldContinue && !shouldContinue()) return;
+	if (shouldContinue && !shouldContinue()) return false;
 
 	await app.fileManager.processFrontMatter(
 		file,
@@ -217,4 +230,5 @@ export async function applyFrontmatterSummary(
 			}
 		},
 	);
+	return true;
 }

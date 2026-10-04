@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Debug mode** did nothing. The setting and its log destination have been in the settings tab since the first version, but nothing read them, so turning it on logged nothing. It now records how long Annoteca takes to index each note, how long a comment write waits behind earlier writes and how long it takes, how long the frontmatter summary waits and takes to write, and when Obsidian's metadata cache picks the summary up, which is when a Bases view can see it. Each entry is one line of JSON, sent to the developer console or to `debug.log` in the plugin folder. The file keeps roughly the newest 1 MB, and **Copy debug log** copies it so you can paste it into an issue.
+- The reply box in the Thread tab and in a comment's own tab ignored **Send comment on Enter**, so Enter always started a new line there. It now follows the setting, like the comment form and the reply box in the note.
+
 ## [1.20.0-beta.5] - 2026-10-02
 
 ### Added

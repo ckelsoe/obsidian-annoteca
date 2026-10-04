@@ -35,6 +35,8 @@ function makeView(scan: () => Promise<void> = () => Promise.resolve()) {
 			}),
 	);
 	const drafts = new Map<string, string>();
+	const replies: { path: string; id: string | undefined; body: string }[] =
+		[];
 	const tfile = (p: string): TFile =>
 		Object.assign(new TFile(), { path: p, extension: 'md', basename: p });
 	const plugin = {
@@ -50,6 +52,16 @@ function makeView(scan: () => Promise<void> = () => Promise.resolve()) {
 		loadDraft: (id: string) => drafts.get(id) ?? '',
 		saveDraft: (id: string, body: string) => drafts.set(id, body),
 		clearDraft: (id: string) => drafts.delete(id),
+		appendReply: (
+			path: string,
+			c: { id: string | undefined },
+			reply: { body: string },
+		) =>
+			// An executor, so a throw here rejects like the real async write.
+			new Promise<boolean>((resolve) => {
+				replies.push({ path, id: c.id, body: reply.body });
+				resolve(true);
+			}),
 	} as unknown as AnnotecaPlugin;
 	const app = {
 		workspace: {
@@ -81,6 +93,8 @@ function makeView(scan: () => Promise<void> = () => Promise.resolve()) {
 	return {
 		view,
 		index,
+		plugin,
+		replies,
 		contentEl,
 		headerTitle: () =>
 			containerEl.querySelector('.view-header-title')?.textContent,
@@ -186,6 +200,97 @@ describe('the comment tab', () => {
 		expect(document.activeElement).toBe(again);
 		expect(again?.value).toBe('half a reply');
 		expect([again?.selectionStart, again?.selectionEnd]).toEqual([4, 6]);
+	});
+});
+
+// The reply box obeys "Send comment on Enter" like the composer and the in-note
+// reply box. Reported from a pop-out comment tab where Enter only ever started a
+// new line, because this box had no key handler at all.
+describe('the comment tab reply box and Send comment on Enter', () => {
+	async function openWithDraft(submitOnEnter: boolean) {
+		const h = makeView();
+		h.plugin.settings.submitCommentOnEnter = submitOnEnter;
+		await h.view.onOpen();
+		await h.view.setState({ path: A, id: 'bbbbbbbb' }, result);
+		await tick();
+		const box = h.contentEl.querySelector<HTMLTextAreaElement>(
+			'.annoteca-reply-input',
+		);
+		if (!box) throw new Error('no reply box');
+		box.value = 'a reply';
+		return { ...h, box };
+	}
+
+	function press(
+		box: HTMLTextAreaElement,
+		mods: { shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean } = {},
+	): KeyboardEvent {
+		const e = new KeyboardEvent('keydown', {
+			key: 'Enter',
+			cancelable: true,
+			...mods,
+		});
+		box.dispatchEvent(e);
+		return e;
+	}
+
+	it('sends on Enter when the setting is on', async () => {
+		const h = await openWithDraft(true);
+		const e = press(h.box);
+		expect(e.defaultPrevented).toBe(true);
+		expect(h.replies).toEqual([
+			{ path: A, id: 'bbbbbbbb', body: 'a reply' },
+		]);
+	});
+
+	it('leaves Shift+Enter as a new line when the setting is on', async () => {
+		const h = await openWithDraft(true);
+		const e = press(h.box, { shiftKey: true });
+		expect(e.defaultPrevented).toBe(false);
+		expect(h.replies).toEqual([]);
+	});
+
+	it('leaves Enter as a new line when the setting is off', async () => {
+		const h = await openWithDraft(false);
+		const e = press(h.box);
+		expect(e.defaultPrevented).toBe(false);
+		expect(h.replies).toEqual([]);
+	});
+
+	it.each([{ ctrlKey: true }, { metaKey: true }])(
+		'sends on %p plus Enter when the setting is off',
+		async (mods) => {
+			const h = await openWithDraft(false);
+			const e = press(h.box, mods);
+			expect(e.defaultPrevented).toBe(true);
+			expect(h.replies).toHaveLength(1);
+		},
+	);
+
+	it('reads the setting when the key is pressed, not when the box was built', async () => {
+		const h = await openWithDraft(false);
+		h.plugin.settings.submitCommentOnEnter = true;
+		press(h.box);
+		expect(h.replies).toHaveLength(1);
+	});
+
+	it('does not send on the Enter that commits input-method text', async () => {
+		const h = await openWithDraft(true);
+		const e = new KeyboardEvent('keydown', {
+			key: 'Enter',
+			cancelable: true,
+			isComposing: true,
+		});
+		h.box.dispatchEvent(e);
+		expect(e.defaultPrevented).toBe(false);
+		expect(h.replies).toEqual([]);
+	});
+
+	it('sends once when Enter is pressed twice before the write finishes', async () => {
+		const h = await openWithDraft(true);
+		press(h.box);
+		press(h.box);
+		expect(h.replies).toHaveLength(1);
 	});
 });
 

@@ -62,6 +62,7 @@ import {
 	type StoredComment,
 } from './store';
 import { noteText, spliceRaw, type NoteText } from './note-text';
+import { elapsedMs } from './debug-log';
 
 // What a lifecycle write actually did. Three outcomes rather than a boolean,
 // because the caller's message differs: "declined" means the transition looked
@@ -1554,6 +1555,7 @@ export class CommentService {
 			}
 		}
 
+		const startedAt = performance.now();
 		const view = this.getOpenMarkdownView(path);
 		let updated: string;
 
@@ -1604,6 +1606,12 @@ export class CommentService {
 
 		this.plugin.commentIndex.rebuild(path, updated);
 		this.plugin.events.trigger('index-changed', { path });
+		if (this.plugin.debug.enabled)
+			this.plugin.debug.log('write', {
+				path,
+				via: view ? 'editor' : 'vault',
+				ms: elapsedMs(startedAt),
+			});
 		return true;
 	}
 
@@ -1620,9 +1628,20 @@ export class CommentService {
 	// is why this wraps whole verbs rather than sitting inside applySplices.
 	private enqueue<T>(path: string, task: () => Promise<T>): Promise<T> {
 		const previous = this.writeQueue.get(path) ?? Promise.resolve();
-		// `then(task, task)`: a verb that threw must not wedge every later write
+		// Debug mode: how long this verb waited behind earlier writes to the
+		// same note.
+		const queuedAt = performance.now();
+		const run = (): Promise<T> => {
+			if (this.plugin.debug.enabled)
+				this.plugin.debug.log('queue', {
+					path,
+					waitMs: elapsedMs(queuedAt),
+				});
+			return task();
+		};
+		// `then(run, run)`: a verb that threw must not wedge every later write
 		// to the same file behind a rejected promise.
-		const result = previous.then(task, task);
+		const result = previous.then(run, run);
 		const tail = result.then(
 			() => undefined,
 			() => undefined,

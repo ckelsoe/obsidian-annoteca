@@ -362,3 +362,9 @@ export function installObsidianDomHelpers(): void {
 		return el;
 	};
 }
+
+// Collapses repeated and trailing slashes, which is all the code under test
+// relies on.
+export function normalizePath(path: string): string {
+	return path.replace(/\/+/g, '/').replace(/\/$/, '');
+}

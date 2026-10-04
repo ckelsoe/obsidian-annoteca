@@ -20,6 +20,7 @@ import {
 	hasUniqueId,
 	truncate,
 	replyCountLabel,
+	shouldSubmitOnKeydown,
 } from './view-utils';
 import {
 	renderReplyRow,
@@ -1228,6 +1229,20 @@ export class ThreadTabRenderer {
 		const submitBtn = controls.createEl('button', {
 			cls: 'annoteca-reply-submit',
 			text: 'Reply',
+		});
+		// The same rule as the composer and the in-note reply box, read at key
+		// time so a settings change applies without a repaint. Routed through
+		// the button so the single-flight guard below covers the key as well.
+		textarea.addEventListener('keydown', (e) => {
+			if (
+				shouldSubmitOnKeydown(
+					e,
+					this.plugin.settings.submitCommentOnEnter,
+				)
+			) {
+				e.preventDefault();
+				submitBtn.click();
+			}
 		});
 		// Single-flight, matching the popover composer. The write is asynchronous
 		// and can be refused, so without this a second press starts a second
