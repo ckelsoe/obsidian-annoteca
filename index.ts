@@ -31,8 +31,18 @@ export interface VaultFilter {
 	author?: string;
 }
 
+// Told about every change to what the index holds, so per-comment events
+// (comment-events.ts) see every rebuild whichever of the many call sites made
+// it, without each of them having to remember to report.
+export interface IndexObserver {
+	changed(path: string, comments: readonly Comment[]): void;
+	removed(path: string): void;
+	renamed(oldPath: string, newPath: string): void;
+}
+
 export class CommentIndex {
 	private readonly files = new Map<string, FileIndex>();
+	observer: IndexObserver | undefined;
 
 	get(path: string): FileIndex | undefined {
 		return this.files.get(path);
@@ -59,11 +69,12 @@ export class CommentIndex {
 			parsedAt: Date.now(),
 		};
 		this.files.set(path, idx);
+		this.observer?.changed(path, idx.comments);
 		return idx;
 	}
 
 	remove(path: string): void {
-		this.files.delete(path);
+		if (this.files.delete(path)) this.observer?.removed(path);
 	}
 
 	rename(oldPath: string, newPath: string): void {
@@ -71,6 +82,7 @@ export class CommentIndex {
 		if (!prev) return;
 		this.files.delete(oldPath);
 		this.files.set(newPath, { ...prev, path: newPath });
+		this.observer?.renamed(oldPath, newPath);
 	}
 
 	clear(): void {

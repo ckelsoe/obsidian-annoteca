@@ -164,4 +164,41 @@ export interface AnnotecaApi {
 	// Fires when the comment index changes. Returns its own unsubscribe; call it
 	// on unload or the callback outlives your plugin.
 	onChange(cb: () => void): () => void;
+
+	// apiVersion >= 6. What happened to which comment: created, replied,
+	// addressed, resolved, reopened, moved, deleted. Reported once a burst of
+	// changes settles (a few seconds), diffed by comment id, so a comment with
+	// no id is never reported. Subscribing starts the vault scan if needed;
+	// events begin with a `resync` event, and anything earlier is read with
+	// queryComments. Returns its own unsubscribe.
+	onCommentEvent(cb: (event: ApiCommentEvent) => void): () => void;
+}
+
+// One thing that happened to one comment. Metadata only: read the note for the
+// body. `author` and `date` are whoever did this thing (the reply's author for
+// replied, the resolver for resolved), absent when the note does not say.
+export interface ApiCommentEvent {
+	readonly type:
+		| 'created'
+		| 'replied'
+		| 'addressed'
+		| 'resolved'
+		| 'reopened'
+		| 'moved'
+		| 'deleted'
+		| 'resync';
+	// Absent only on resync.
+	readonly id?: string;
+	// The note the comment is in now; for deleted, the note it was in.
+	readonly path?: string;
+	// moved only: the note it was in before.
+	readonly oldPath?: string;
+	readonly category?: string;
+	readonly author?: string;
+	readonly date?: string;
+	// Set for a comment a plugin created through promote().
+	readonly source?: { readonly tag: string; readonly key: string };
+	// resync only: 'scan' when events start after indexing the vault,
+	// 'journal-on' in the event journal when the user turns it on.
+	readonly reason?: 'scan' | 'journal-on';
 }

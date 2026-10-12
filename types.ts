@@ -270,6 +270,10 @@ export interface AnnotecaSettings {
 	debugMode: boolean;
 	debugLogTarget: 'console' | 'vault';
 
+	// #95: append every comment event to events.jsonl in the plugin folder,
+	// for tools outside Obsidian. Off by default. See event-journal.ts.
+	eventJournal: boolean;
+
 	settingsBackupPath: string | undefined;
 
 	// Namespaces the marker-conflict scan treats as known and does not report

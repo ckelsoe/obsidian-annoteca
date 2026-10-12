@@ -4,6 +4,7 @@ import {
 	type AnchorRange,
 	type AnnotecaApi,
 	type ApiCategory,
+	type ApiCommentEvent,
 	type ApiComment,
 	type ApiFilter,
 	type ComposeRange,
@@ -13,6 +14,7 @@ import type {
 	AnchorRange as PubAnchorRange,
 	AnnotecaApi as PubAnnotecaApi,
 	ApiCategory as PubApiCategory,
+	ApiCommentEvent as PubApiCommentEvent,
 	ApiComment as PubApiComment,
 	ApiFilter as PubApiFilter,
 	ComposeRange as PubComposeRange,
@@ -99,10 +101,9 @@ describe('AnnotecaApi: version surface', () => {
 	it('reports its own version', () => {
 		const { api } = harness();
 		expect(api.apiVersion).toBe(API_VERSION);
-		// 5 since compose() landed. A consumer wiring a "comment on this"
-		// action must be able to tell a build that has it from one that does
-		// not.
-		expect(api.apiVersion).toBe(5);
+		// 6 since onCommentEvent() landed. A consumer that polls must be
+		// able to tell a build it can subscribe to from one it cannot.
+		expect(api.apiVersion).toBe(6);
 	});
 });
 
@@ -298,6 +299,38 @@ describe('AnnotecaApi.onChange', () => {
 	});
 });
 
+describe('AnnotecaApi.onCommentEvent', () => {
+	it('opens with a resync, delivers events, and stops after unsubscribing', async () => {
+		const { api, events, scans } = harness();
+		const got: ApiCommentEvent[] = [];
+		const off = api.onCommentEvent((e) => got.push(e));
+		expect(scans).toEqual(['scanVaultIfNeeded']);
+		// Joined after the scan: its own resync, before anything else.
+		await Promise.resolve();
+		expect(got).toEqual([{ type: 'resync', reason: 'scan' }]);
+		got.length = 0;
+		const ev: ApiCommentEvent = {
+			type: 'created',
+			id: 'aaaa1111',
+			path: 'a.md',
+		};
+		events.trigger('comment-event', ev);
+		expect(got).toEqual([ev]);
+		off();
+		events.trigger('comment-event', ev);
+		expect(got).toHaveLength(1);
+	});
+
+	it('sends a subscriber that saw the global resync no second one', async () => {
+		const { api, events } = harness();
+		const got: ApiCommentEvent[] = [];
+		api.onCommentEvent((e) => got.push(e));
+		events.trigger('comment-event', { type: 'resync', reason: 'scan' });
+		await Promise.resolve();
+		expect(got.filter((e) => e.type === 'resync')).toHaveLength(1);
+	});
+});
+
 describe('AnnotecaApi.reveal', () => {
 	it('navigates to the comment carrying the id', async () => {
 		const { api, index, navs } = harness();
@@ -451,6 +484,7 @@ describe('annoteca-api.d.ts: the published surface matches the runtime', () => {
 		const promoteLock: Mutual<PromoteRequest, PubPromoteRequest> = true;
 		const createdLock: Mutual<CreatedComment, PubCreatedComment> = true;
 		const composeLock: Mutual<ComposeRange, PubComposeRange> = true;
+		const eventLock: Mutual<ApiCommentEvent, PubApiCommentEvent> = true;
 		expect(
 			apiLock &&
 				commentLock &&
@@ -459,7 +493,8 @@ describe('annoteca-api.d.ts: the published surface matches the runtime', () => {
 				filterLock &&
 				promoteLock &&
 				createdLock &&
-				composeLock,
+				composeLock &&
+				eventLock,
 		).toBe(true);
 	});
 });

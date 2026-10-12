@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- API (version 6): `onCommentEvent(cb)` tells another plugin what happened to which comment: created, replied, addressed, resolved, reopened, moved or deleted, with the comment's id, note, category and source, and who did it and when. Events arrive once a burst of changes settles, a few seconds after the last one, so a comment that flickers out and back while a note saves is not reported as deleted and created again. Comments without an id are not reported. (#95)
+- **Write event journal**, in Settings > AI integration, off by default. When on, Annoteca adds a line of JSON to `events.jsonl` in the plugin folder for each of those events, so a tool outside Obsidian can follow comments by watching a file instead of re-reading notes. It records ids, categories, authors and dates, never comment text, and it stays on your device. Past about 5 MB the file is renamed to `events.1.jsonl` and a new one starts. (#95)
+
 ## [1.20.0] - 2026-10-04
 
 Everything from the 1.20.0 betas, listed in full below, plus two fixes: Debug mode now logs, and the reply box in the side panel follows **Send comment on Enter**.
