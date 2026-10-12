@@ -2,7 +2,7 @@
 # accepted and what would let us drop it. Revisit whenever the dependency tree
 # changes (a new lockfile may remove the transitive path entirely).
 #
-# Currently empty, on purpose.
+# One entry: braces, which has no fixed release. See its reason.
 #
 # The brace-expansion entry for GHSA-mh99-v99m-4gvg was dropped on 2026-08-03,
 # following its own stated exit condition. Two things had changed:
@@ -24,3 +24,8 @@
 #
 # If a transitive dependency drags a vulnerable brace-expansion back in, the
 # right response is another `npm update brace-expansion`, not a new entry here.
+
+[[IgnoredVulns]]
+id = "GHSA-vfj7-8cjw-p6xm"
+ignoreUntil = 2026-12-31
+reason = "braces: stack exhaustion on deeply nested patterns. No fixed release exists (every version through 3.0.3, the latest, is affected; published 2026-09-18, widened 2026-10-02). Dev-only: reached through type-coverage > fast-glob > micromatch, which globs this repo's own source at lint time and never ships in main.js. Drop this entry, and add a package.json override, as soon as braces publishes a fixed version."
