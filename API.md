@@ -87,9 +87,11 @@ development, and all of it ships in the first public release (1.17.0) at level 3
 - `4`: `promote` takes an optional `closeRange` per request and reports `closed` on each
   created comment. Nothing earlier changed shape.
 - `5`: adds `compose`.
+- `6`: adds `onCommentEvent`.
 
 Gate on the level the method you call needs (`>= 2` to create, `>= 3` to reveal, `>= 4`
-to ask for range comments, `>= 5` to compose), and treat it as a floor:
+to ask for range comments, `>= 5` to compose, `>= 6` for comment events), and treat it as
+a floor:
 
 - `apiVersion` moves up when a method you are expected to gate on lands. It never moves
   down, and a method never disappears or changes signature within a level.
@@ -125,6 +127,9 @@ The whole contract. Resolve `api` as above, then:
   `apiVersion >= 5`.
 - `onChange(cb): () => void`. Fires when the comment index changes. Returns its own
   unsubscribe; call it on unload.
+- `onCommentEvent(cb): () => void`. Calls `cb` with an `ApiCommentEvent` for each thing
+  that happened to a comment. See Following changes below. Returns its own unsubscribe;
+  call it on unload. Needs `apiVersion >= 6`.
 
 Return and argument shapes, so you can build against this page alone:
 
@@ -145,6 +150,9 @@ Return and argument shapes, so you can build against this page alone:
   `author`, `sourceKey`, and optional `closeRange` (`apiVersion >= 4`). Shown in Creating
   below.
 - `CreatedComment` (from `promote`): `id`, `sourceKey`, and `closed?` (`apiVersion >= 4`).
+- `ApiCommentEvent` (from `onCommentEvent`): `type`, `id?`, `path?`, `oldPath?`,
+  `category?`, `author?`, `date?`, `source?` as `{tag, key}`, `reason?`. Shown in
+  Following changes below.
 
 The exact declarations, with `readonly` and optionality, are in `annoteca-api.d.ts`.
 
@@ -198,6 +206,76 @@ const categories = api.categories(); // [{ id, displayName }]
 const off = api.onChange(() => this.refresh());
 this.register(off);
 ```
+
+## Following changes
+
+`onChange` says only that something changed. `onCommentEvent` says what happened to which
+comment, so a consumer that answers or tracks comments does not have to re-read and diff
+the vault:
+
+```ts
+if (api.apiVersion >= 6) {
+	const off = api.onCommentEvent((e) => {
+		if (e.type === 'resync') return void this.reconcile(); // re-read with queryComments
+		if (e.type === 'created' && e.source === undefined) this.queue(e.id, e.path);
+	});
+	this.register(off);
+}
+```
+
+Each event has a `type`:
+
+| `type` | Meaning | `author` / `date` |
+| --- | --- | --- |
+| `created` | A new comment appeared. | The comment's author and date. |
+| `replied` | A reply was added. One event per new reply. | The reply's. |
+| `addressed` | A proposed edit was applied and awaits review. | Who applied it. |
+| `resolved` | The comment was resolved. | Who resolved it. |
+| `reopened` | A resolved comment is open again. | Absent. |
+| `moved` | The comment is now in another note: the note was renamed, or the comment was cut from one note and pasted in another. `oldPath` is where it was. | Absent. |
+| `deleted` | The comment is gone. `path` is where it was. | Absent. |
+| `resync` | Events start here. Anything earlier, read with `queryComments`. | Absent. |
+
+Every event except `resync` carries `id`, `path` and `category`, and `source` when the
+comment was created through `promote`, so you can tell your own findings from the
+user's without a side index. Events carry no comment text: read the note, or call
+`queryComments`, for the body.
+
+How events behave:
+
+- They come from Annoteca's comment index, so a comment written by the composer, by
+  `promote`, by hand in the note, or by another device through sync is reported the same
+  way.
+- They arrive once a burst of changes settles: about 2.5 seconds after the last change,
+  and no more than about 10 seconds after the first while a note keeps changing. A note's
+  content can briefly read stale while it saves; reporting the settled state keeps that
+  from showing up as deleted and created again.
+- They follow comments by id. A comment without an id is never reported.
+- Subscribing starts the vault scan if it has not run. Every subscription opens with one
+  `resync` event once the scan is done, also one made long after, and nothing else
+  arrives before it. A note seen for the first time before the scan finished was already
+  there, not new.
+- Reply events count replies. A reply that was edited or removed reports nothing.
+- Nothing is reported while Obsidian is closed. Reconcile with `queryComments` when you
+  start, then follow events.
+
+### The event journal (outside Obsidian)
+
+A tool that runs outside Obsidian cannot subscribe. For those, the user can turn on
+**Write event journal** in Settings > AI integration (off by default). Each event is then
+appended as one line of JSON to `events.jsonl` in the plugin folder
+(`<vault>/.obsidian/plugins/annoteca/events.jsonl`), with an `at` timestamp added:
+
+```json
+{"at":"2026-10-12T15:50:22.798Z","type":"created","id":"zzev0001","path":"notes/draft.md","category":"clarify","author":"ed","date":"2026-10-12"}
+```
+
+Follow it with `tail -F`, or any watcher that follows a file by name. The file is only
+ever appended to. Past about 5 MB it is renamed to `events.1.jsonl`, replacing the
+previous one, and a new `events.jsonl` starts, which `tail -F` picks up. A `resync` line
+with `"reason": "journal-on"` is written when the user turns the journal on, and one with
+`"reason": "scan"` when events start after Obsidian loads; treat either as "reconcile now".
+Nothing in the journal leaves the device, and it holds no comment text.
 
 ## Creating and revealing comments
 

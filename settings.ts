@@ -87,6 +87,7 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 
 	debugMode: false,
 	debugLogTarget: 'console',
+	eventJournal: false,
 	// Seeded rather than empty. Plumbline is a sibling this project ships and
 	// its directives are a known non-conflict, so a user who installs both
 	// should not have to dismiss a diagnostic to learn that.
@@ -523,6 +524,7 @@ const SETTING_VALIDATORS: {
 	markerScrollAlign: oneOf('top', 'center', 'minimal'),
 	debugMode: bool,
 	debugLogTarget: oneOf('console', 'vault'),
+	eventJournal: bool,
 	conflictNamespaceAllowlist: validNamespaceAllowlist,
 	promotionBudget: validPromotionBudget,
 	settingsBackupPath: str,
@@ -1005,6 +1007,11 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 							max: PROMOTION_BUDGET_MAX,
 						},
 					},
+					{
+						name: 'Write event journal',
+						desc: 'Add a line to events.jsonl in the plugin folder each time a comment is created, replied to, addressed, resolved, reopened, moved or deleted, so a tool outside Obsidian can follow along. Records comment IDs, categories, authors and dates, never comment text. Stays on this device. Off by default.',
+						control: { type: 'toggle', key: 'eventJournal' },
+					},
 					this.customBlock((host) => this.renderSkillExport(host)),
 				],
 			},
@@ -1295,6 +1302,10 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			case 'enableIndexEntryPreset':
 			case 'enableAuthorTag':
 				repaint = true;
+				break;
+			case 'eventJournal':
+				if (this.plugin.settings.eventJournal)
+					this.plugin.onEventJournalEnabled();
 				break;
 		}
 

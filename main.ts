@@ -22,6 +22,12 @@ import type {
 	StatusFilter,
 } from './types';
 import { CommentIndex } from './index';
+import {
+	CommentEventTracker,
+	debounceWithMaxWait,
+	type CommentEvent,
+} from './comment-events';
+import { EventJournal } from './event-journal';
 import { MarkerDamageReporter } from './diagnostics';
 import { createApi, type AnnotecaApi } from './api';
 import {
@@ -161,6 +167,17 @@ export default class AnnotecaPlugin extends Plugin {
 		}
 	>();
 	private vaultScanned = false;
+	// Per-comment events (#95) for the API's onCommentEvent and the event
+	// journal. Flushed once a burst of index changes settles, never sooner
+	// than 2.5 s after the last one and never later than 10 s after the
+	// first, so a note being edited continuously still reports.
+	readonly commentEvents = new CommentEventTracker();
+	private readonly commentEventFlush = debounceWithMaxWait(
+		() => this.flushCommentEvents(),
+		2500,
+		10_000,
+	);
+	journal!: EventJournal;
 	private readonly markerDamage = new MarkerDamageReporter();
 	// #39: per-path debounce timers for the frontmatter-summary writer.
 	private readonly frontmatterTimers = new Map<string, number>();
@@ -179,13 +196,33 @@ export default class AnnotecaPlugin extends Plugin {
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
-		this.debug = new DebugLog(
-			this.app,
+		const pluginDir =
 			this.manifest.dir ??
-				normalizePath(
-					`${this.app.vault.configDir}/plugins/${this.manifest.id}`,
-				),
-			() => this.settings,
+			normalizePath(
+				`${this.app.vault.configDir}/plugins/${this.manifest.id}`,
+			);
+		this.debug = new DebugLog(this.app, pluginDir, () => this.settings);
+		this.journal = new EventJournal(
+			this.app,
+			pluginDir,
+			() => this.settings.eventJournal,
+		);
+		this.commentIndex.observer = {
+			changed: (path, comments) => {
+				this.commentEvents.changed(path, comments);
+				this.scheduleCommentEvents();
+			},
+			removed: (path) => {
+				this.commentEvents.removed(path);
+				this.scheduleCommentEvents();
+			},
+			renamed: (oldPath, newPath) => {
+				this.commentEvents.renamed(oldPath, newPath);
+				this.scheduleCommentEvents();
+			},
+		};
+		this.registerEvent(
+			this.events.on('vault-scanned', () => this.armCommentEvents()),
 		);
 		this.comments = new CommentService(this);
 		this.diagnostics = new DiagnosticsService(this);
@@ -311,6 +348,53 @@ export default class AnnotecaPlugin extends Plugin {
 			this.ensureRightSidebarTab();
 			void this.checkSkillStaleness();
 			this.logDebugStart();
+			if (this.settings.eventJournal) this.startCommentEvents();
+		});
+	}
+
+	private scheduleCommentEvents(): void {
+		// Nothing is reported before the resync that arming sends.
+		if (this.unloaded || !this.commentEvents.isArmed) return;
+		if (this.commentEvents.hasPending) this.commentEventFlush.trigger();
+	}
+
+	private flushCommentEvents(): void {
+		if (!this.commentEvents.isArmed) return;
+		this.deliverCommentEvents(this.commentEvents.flush());
+	}
+
+	private deliverCommentEvents(events: readonly CommentEvent[]): void {
+		if (events.length === 0) return;
+		this.journal.write(events);
+		for (const e of events) this.events.trigger('comment-event', e);
+	}
+
+	// Events start once the vault has been indexed: before that, a note seen
+	// for the first time was already there, not new. The resync tells a
+	// consumer that anything earlier has to be read with queryComments.
+	private armCommentEvents(): void {
+		if (this.commentEvents.isArmed) return;
+		this.commentEvents.arm();
+		this.deliverCommentEvents([{ type: 'resync', reason: 'scan' }]);
+	}
+
+	// Settings: the journal was just turned on. It missed everything before
+	// now, which its first line says, and it needs the vault indexed to report
+	// comments in notes nobody has opened.
+	onEventJournalEnabled(): void {
+		this.journal.write([{ type: 'resync', reason: 'journal-on' }]);
+		this.startCommentEvents();
+	}
+
+	// Events need the vault scan to arm. Fire and forget, but never an
+	// unhandled rejection: a failed scan is logged, and the next caller of
+	// scanVaultIfNeeded tries again because the latch was never set.
+	private startCommentEvents(): void {
+		this.scanVaultIfNeeded().catch((err: unknown) => {
+			console.error(
+				'Annoteca: vault scan for comment events failed',
+				err,
+			);
 		});
 	}
 
@@ -452,6 +536,9 @@ export default class AnnotecaPlugin extends Plugin {
 		// extensions automatically. The only custom resource is the
 		// frontmatter-summary debounce timers.
 		this.unloaded = true;
+		// Whatever has settled so far still reaches the journal.
+		this.commentEventFlush.cancel();
+		this.flushCommentEvents();
 		for (const timer of this.frontmatterTimers.values()) {
 			window.clearTimeout(timer);
 		}
@@ -1290,6 +1377,7 @@ export default class AnnotecaPlugin extends Plugin {
 			indexed++;
 		}
 		this.vaultScanned = true;
+		this.events.trigger('vault-scanned');
 		this.debug.log('vault-scan', {
 			notes: files.length,
 			indexed,

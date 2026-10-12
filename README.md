@@ -95,7 +95,7 @@ To teach an assistant the format, run **Export AI skill**. It writes a skill fil
 
 ## Public API
 
-Annoteca has a public, versioned API for other plugins. A companion plugin can attach comments and AI-readable notes to a place in a document without building its own comment store: detect a comment marker with no dependency at all, read your comments, then create and jump to them through the API. There is no hard dependency in either direction, and Annoteca stays the only writer of note markers. Full guide and copyable types: [API.md](./API.md).
+Annoteca has a public, versioned API for other plugins. A companion plugin can attach comments and AI-readable notes to a place in a document without building its own comment store: detect a comment marker with no dependency at all, read your comments, then create and jump to them through the API, and follow what happens to each comment as it happens. There is no hard dependency in either direction, and Annoteca stays the only writer of note markers. Full guide and copyable types: [API.md](./API.md).
 
 ## Settings overview
 
@@ -108,7 +108,7 @@ Settings are grouped in the order they appear in the tab:
 - **Reading view**: the indicator that stands in for comments where markers are invisible: a note banner, per-section badges, both, or off.
 - **Panel and navigation**: whether the hub collapses files you are not editing, and where a marker lands when you jump to a comment (top, center, or minimal scroll).
 - **Authors**: your author tag, plus collaborators each with a color so a multi-party thread is easy to scan.
-- **AI integration**: where the exported skill file is written, the export button, and the out-of-date indicator that appears after an update changes the guidance.
+- **AI integration**: where the exported skill file is written, the export button, the out-of-date indicator that appears after an update changes the guidance, and the optional event journal, a file a tool outside Obsidian can watch to follow comment changes (off by default; ids and metadata only, never comment text).
 - **Frontmatter summary (Bases)**: maintain a Bases-friendly summary of each note's open comments in its frontmatter, choose whether to include the oldest-open date and the open categories, and an optional class tag (off by default, mainly for Fileclass or Metadata Menu users) with its property name.
 - **Diagnostics**: debug logging and where the log is written.
 

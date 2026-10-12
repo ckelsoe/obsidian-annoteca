@@ -12,6 +12,7 @@ import { resolveSettingsCategories } from './settings';
 import { forbiddenRanges } from './comment-service';
 import { parseAll, scanClosers } from './parser';
 import { planCloser } from './range-placement';
+import type { CommentEvent } from './comment-events';
 
 // The read-only API other plugins call (F-284, interop-contract section 7).
 //
@@ -46,7 +47,9 @@ import { planCloser } from './range-placement';
 //     and an older build ignores the request field. Bumped anyway because a
 //     consumer deciding whether to ask for ranges should not have to promote a
 //     comment to find out it cannot get one.
-export const API_VERSION = 5;
+// 6 = adds onCommentEvent(): what happened to which comment (#95). Bumped
+//     because a consumer that would otherwise poll has to know it can stop.
+export const API_VERSION = 6;
 
 // The shape a consumer sees. Deliberately NOT the internal `Comment`: that
 // carries the marker grammar, `unknownLines`, reply and addressed structures
@@ -99,6 +102,10 @@ export interface AnchorRange {
 	readonly addressed: boolean;
 	readonly commentId: string | undefined;
 }
+
+// One thing that happened to one comment, from onCommentEvent. Metadata only:
+// the body is in the note, which is still the source of truth.
+export type ApiCommentEvent = CommentEvent;
 
 export interface ApiCategory {
 	readonly id: string;
@@ -196,6 +203,15 @@ export interface AnnotecaApi {
 	// Fires when the comment index changes. Returns its own unsubscribe; a
 	// consumer must call it on unload or the callback outlives the consumer.
 	onChange(cb: () => void): () => void;
+
+	// What happened to which comment (apiVersion 6, #95): created, replied,
+	// addressed, resolved, reopened, moved, deleted. Reported once a burst of
+	// changes settles (a few seconds), not on every keystroke, and diffed by
+	// comment id, so a comment with no id is never reported. Subscribing
+	// starts the vault scan if it has not run: events begin when it finishes,
+	// marked by a `resync` event, and anything before that is read with
+	// queryComments. Returns its own unsubscribe.
+	onCommentEvent(cb: (event: ApiCommentEvent) => void): () => void;
 }
 
 // A copy, never the indexed object. The index hands out its live `Comment`
@@ -400,6 +416,42 @@ export function createApi(plugin: AnnotecaPlugin): AnnotecaApi {
 		onChange(cb: () => void): () => void {
 			const ref: EventRef = plugin.events.on('index-changed', cb);
 			return () => {
+				plugin.events.offref(ref);
+			};
+		},
+
+		onCommentEvent(cb: (event: ApiCommentEvent) => void): () => void {
+			// Every subscriber gets a resync before any other event, also one
+			// that joins after the vault scan, when the global resync is long
+			// gone. A subscriber that joins before the scan gets the global one
+			// and is not sent a second.
+			let synced = false;
+			let active = true;
+			// Only main.ts triggers 'comment-event', always with a CommentEvent.
+			const ref: EventRef = plugin.events.on(
+				'comment-event',
+				(event: unknown) => {
+					const e = event as ApiCommentEvent;
+					if (e.type === 'resync') synced = true;
+					else if (!synced) return;
+					cb(e);
+				},
+			);
+			plugin
+				.scanVaultIfNeeded()
+				.then(() => {
+					if (!active || synced) return;
+					synced = true;
+					cb({ type: 'resync', reason: 'scan' });
+				})
+				.catch((err: unknown) => {
+					console.error(
+						'Annoteca: vault scan for comment events failed',
+						err,
+					);
+				});
+			return () => {
+				active = false;
 				plugin.events.offref(ref);
 			};
 		},

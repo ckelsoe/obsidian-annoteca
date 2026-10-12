@@ -1,6 +1,6 @@
 # Privacy Policy
 
-_Last updated: 2026-06-11_
+_Last updated: 2026-10-12_
 
 This policy explains what the **Annoteca** Obsidian plugin ("the plugin") does and does not do with your data. It applies to the plugin as distributed through the Obsidian Community Plugins marketplace, GitHub releases, and BRAT.
 
@@ -10,7 +10,7 @@ The plugin collects nothing, stores nothing outside your own vault, and sends no
 
 ## What the plugin does
 
-The plugin reads the markdown files in your vault to find its comment markers, and writes to a markdown file only when you take an explicit action on it: adding, editing, replying to, resolving, or deleting a comment, or running one of the bulk conversion or cleanup commands (each of which asks for confirmation first). The "Export AI skill" command writes a skill file into a folder inside your vault at your request. The optional debug log and the settings backup, when you enable or run them, are also written inside your vault. The plugin touches no files outside the vault.
+The plugin reads the markdown files in your vault to find its comment markers, and writes to a markdown file only when you take an explicit action on it: adding, editing, replying to, resolving, or deleting a comment, or running one of the bulk conversion or cleanup commands (each of which asks for confirmation first). The "Export AI skill" command writes a skill file into a folder inside your vault at your request. The optional debug log, the optional event journal (comment ids, categories, authors and dates, never comment text), and the settings backup, when you enable or run them, are also written inside your vault. The plugin touches no files outside the vault.
 
 Two behaviors worth naming explicitly:
 
