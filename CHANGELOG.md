@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.22.0] - 2026-10-12
+
+Other plugins can now offer Resolve and Reopen on a comment, so the Annoteca MindMap Bridge can resolve comments from a mind map.
+
 ### Added
 - API (version 7): `resolve(commentId)` and `reopen(commentId)` let another plugin offer the reader Resolve and Reopen on a comment, for example from a mind map node. They run exactly as a click in the hub does, with the same notice, and `resolve` follows the delete-on-resolve setting. `resolve` refuses a comment with a proposed edit waiting for accept, revise or reject, and writes nothing. The answer says what happened: done, unchanged, not found, addressed, or blocked.
 
