@@ -7,8 +7,10 @@ import {
 	type ApiCommentEvent,
 	type ApiComment,
 	type ApiFilter,
+	type ApiWriteResult,
 	type ComposeRange,
 } from '../api';
+import type { WriteOutcome } from '../comment-service';
 import type { CreatedComment, PromoteRequest } from '../types';
 import type {
 	AnchorRange as PubAnchorRange,
@@ -17,6 +19,7 @@ import type {
 	ApiCommentEvent as PubApiCommentEvent,
 	ApiComment as PubApiComment,
 	ApiFilter as PubApiFilter,
+	ApiWriteResult as PubApiWriteResult,
 	ComposeRange as PubComposeRange,
 	CreatedComment as PubCreatedComment,
 	PromoteRequest as PubPromoteRequest,
@@ -36,6 +39,8 @@ function harness(): {
 	events: Events;
 	scans: string[];
 	navs: { path: string; start: number; commentId: string | undefined }[];
+	writes: { verb: string; path: string; commentId: string | undefined }[];
+	answer: { outcome: WriteOutcome | 'addressed' };
 } {
 	const index = new CommentIndex();
 	const events = new Events();
@@ -45,6 +50,21 @@ function harness(): {
 		start: number;
 		commentId: string | undefined;
 	}[] = [];
+	const writes: {
+		verb: string;
+		path: string;
+		commentId: string | undefined;
+	}[] = [];
+	// What the service's write reports; a test sets it to drive each branch.
+	const answer: { outcome: WriteOutcome | 'addressed' } = {
+		outcome: 'written',
+	};
+	const write =
+		(verb: string) =>
+		(path: string, comment: { id: string | undefined }) => {
+			writes.push({ verb, path, commentId: comment.id });
+			return Promise.resolve(answer.outcome);
+		};
 	const api = createApi({
 		commentIndex: index,
 		events,
@@ -70,8 +90,13 @@ function harness(): {
 		// The real settings, because categories() resolves through the same
 		// path the composer uses and a stub list would test the stub.
 		settings: normalizeSettings({}),
+		// resolve() and reopen() delegate here; the service owns every write.
+		comments: {
+			resolveComment: write('resolve'),
+			reopenComment: write('reopen'),
+		},
 	} as unknown as AnnotecaPlugin);
-	return { api, index, events, scans, navs };
+	return { api, index, events, scans, navs, writes, answer };
 }
 
 const NOTE = [
@@ -101,9 +126,10 @@ describe('AnnotecaApi: version surface', () => {
 	it('reports its own version', () => {
 		const { api } = harness();
 		expect(api.apiVersion).toBe(API_VERSION);
-		// 6 since onCommentEvent() landed. A consumer that polls must be
-		// able to tell a build it can subscribe to from one it cannot.
-		expect(api.apiVersion).toBe(6);
+		// 7 since resolve() and reopen() landed. A consumer offering those
+		// actions must be able to tell a build that has them from one that
+		// does not.
+		expect(api.apiVersion).toBe(7);
 	});
 });
 
@@ -461,6 +487,91 @@ describe('AnnotecaApi.categories', () => {
 	});
 });
 
+describe('AnnotecaApi.resolve and reopen', () => {
+	const addressedNote = [
+		'Prose before it. <!-- annoteca/tone: soften this',
+		'[id=bbbb2222]',
+		'[anchor=the rough draft]',
+		'[addressed charles 2026-09-08T10:00:00]: proposed a rewrite',
+		'--> the rough draft carries on here.',
+		'',
+	].join('\n');
+
+	const resolvedNote = [
+		'Prose before it. <!-- annoteca/tone: soften this',
+		'[id=cccc3333]',
+		'[anchor=the rough draft]',
+		'[resolved charles 2026-09-08T10:00:00]: done',
+		'--> the rough draft carries on here.',
+		'',
+	].join('\n');
+
+	it('resolves an open comment through the service', async () => {
+		const { api, index, writes } = harness();
+		index.rebuild('a.md', NOTE);
+		expect(await api.resolve('aaaa1111')).toBe('done');
+		expect(writes).toEqual([
+			{ verb: 'resolve', path: 'a.md', commentId: 'aaaa1111' },
+		]);
+	});
+
+	it('reopens a resolved comment through the service', async () => {
+		const { api, index, writes } = harness();
+		index.rebuild('a.md', resolvedNote);
+		expect(await api.reopen('cccc3333')).toBe('done');
+		expect(writes).toEqual([
+			{ verb: 'reopen', path: 'a.md', commentId: 'cccc3333' },
+		]);
+	});
+
+	// The index can lag a write still in the queue, so the API decides
+	// nothing from it: even a snapshot that already shows the target state, or
+	// a proposed edit, goes to the service, which judges the file.
+	it('leaves every state decision to the queued write', async () => {
+		const { api, index, writes } = harness();
+		index.rebuild('a.md', NOTE);
+		index.rebuild('b.md', resolvedNote);
+		index.rebuild('c.md', addressedNote);
+		await api.reopen('aaaa1111');
+		await api.resolve('cccc3333');
+		await api.resolve('bbbb2222');
+		expect(writes.map((w) => `${w.verb}:${w.commentId}`)).toEqual([
+			'reopen:aaaa1111',
+			'resolve:cccc3333',
+			'resolve:bbbb2222',
+		]);
+	});
+
+	it('answers not-found for an unknown or malformed id', async () => {
+		const { api, index, writes } = harness();
+		index.rebuild('a.md', NOTE);
+		expect(await api.resolve('nosuchid')).toBe('not-found');
+		expect(await api.reopen('')).toBe('not-found');
+		expect(await api.resolve(42 as unknown as string)).toBe('not-found');
+		expect(writes).toEqual([]);
+	});
+
+	it('warms the index before looking the id up', async () => {
+		const { api, index, scans } = harness();
+		index.rebuild('a.md', NOTE);
+		await api.resolve('aaaa1111');
+		expect(scans).toEqual(['scanVaultIfNeeded', 'indexUnseenFiles']);
+	});
+
+	it.each([
+		['declined', 'unchanged'],
+		['missing', 'not-found'],
+		['blocked', 'blocked'],
+		// An edit proposed after the index was read, caught inside the write.
+		['addressed', 'addressed'],
+	] as const)("maps the service's %s to %s", async (outcome, expected) => {
+		const { api, index, answer } = harness();
+		index.rebuild('a.md', NOTE);
+		answer.outcome = outcome;
+		expect(await api.resolve('aaaa1111')).toBe(expected);
+	});
+});
+
 // annoteca-api.d.ts is the file a consumer copies to get types. It has to stay
 // byte-for-byte compatible with the runtime surface, or a consumer builds against
 // a shape the plugin does not expose. This locks the two together at compile time:
@@ -485,6 +596,7 @@ describe('annoteca-api.d.ts: the published surface matches the runtime', () => {
 		const createdLock: Mutual<CreatedComment, PubCreatedComment> = true;
 		const composeLock: Mutual<ComposeRange, PubComposeRange> = true;
 		const eventLock: Mutual<ApiCommentEvent, PubApiCommentEvent> = true;
+		const writeLock: Mutual<ApiWriteResult, PubApiWriteResult> = true;
 		expect(
 			apiLock &&
 				commentLock &&
@@ -494,7 +606,8 @@ describe('annoteca-api.d.ts: the published surface matches the runtime', () => {
 				promoteLock &&
 				createdLock &&
 				composeLock &&
-				eventLock,
+				eventLock &&
+				writeLock,
 		).toBe(true);
 	});
 });

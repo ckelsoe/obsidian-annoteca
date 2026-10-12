@@ -88,10 +88,11 @@ development, and all of it ships in the first public release (1.17.0) at level 3
   created comment. Nothing earlier changed shape.
 - `5`: adds `compose`.
 - `6`: adds `onCommentEvent`.
+- `7`: adds `resolve` and `reopen`.
 
 Gate on the level the method you call needs (`>= 2` to create, `>= 3` to reveal, `>= 4`
-to ask for range comments, `>= 5` to compose, `>= 6` for comment events), and treat it as
-a floor:
+to ask for range comments, `>= 5` to compose, `>= 6` for comment events, `>= 7` to
+resolve or reopen), and treat it as a floor:
 
 - `apiVersion` moves up when a method you are expected to gate on lands. It never moves
   down, and a method never disappears or changes signature within a level.
@@ -125,6 +126,10 @@ The whole contract. Resolve `api` as above, then:
   or starts or ends inside existing comment syntax or the note properties. Use it for a
   "comment on this" action in your own view (a mind map node, an outline row). Needs
   `apiVersion >= 5`.
+- `resolve(commentId): Promise<ApiWriteResult>` and `reopen(commentId):
+  Promise<ApiWriteResult>`. Resolve or reopen a comment exactly as a click in the hub
+  does. Only for an action the reader takes in your view. See Resolving and reopening
+  below. Needs `apiVersion >= 7`.
 - `onChange(cb): () => void`. Fires when the comment index changes. Returns its own
   unsubscribe; call it on unload.
 - `onCommentEvent(cb): () => void`. Calls `cb` with an `ApiCommentEvent` for each thing
@@ -150,6 +155,8 @@ Return and argument shapes, so you can build against this page alone:
   `author`, `sourceKey`, and optional `closeRange` (`apiVersion >= 4`). Shown in Creating
   below.
 - `CreatedComment` (from `promote`): `id`, `sourceKey`, and `closed?` (`apiVersion >= 4`).
+- `ApiWriteResult` (from `resolve` and `reopen`): `'done'`, `'unchanged'`, `'not-found'`,
+  `'addressed'` or `'blocked'`. Shown in Resolving and reopening below.
 - `ApiCommentEvent` (from `onCommentEvent`): `type`, `id?`, `path?`, `oldPath?`,
   `category?`, `author?`, `date?`, `source?` as `{tag, key}`, `reason?`. Shown in
   Following changes below.
@@ -299,8 +306,9 @@ const created = await api.promote(
 
 Notes on `promote`:
 
-- Create only. There is no path to resolve, edit, delete, or reply. If a finding needs
-  retracting, the user replies to it by hand; the API has no reply.
+- Create only. `promote` never edits, deletes or replies to a comment. If a finding needs
+  retracting, the user replies to it by hand; the API has no reply. Resolving and
+  reopening are separate calls for the reader's own actions, below.
 - Idempotent on `author:sourceKey`. Promoting the same finding twice is a no-op, not a
   second marker, so re-running over a note you already commented on is safe.
 - Budget-gated. Above the user's promotion budget (default 10 in one call) the user is
@@ -330,6 +338,29 @@ const ok = await api.reveal(commentId); // false if no comment has that id
 `reveal` navigates only, it never writes. Pair it with detection or `queryComments`: draw
 an indicator for a comment, and on click call `reveal(comment.id)`.
 
+## Resolving and reopening
+
+For a Resolve or Reopen action the reader clicks in your own view (`apiVersion >= 7`):
+
+```ts
+const result = await api.resolve(commentId); // or api.reopen(commentId)
+```
+
+- It is the hub's own action, not a second one: the same write queue and freshness
+  guards, the reader's author tag on the resolution, and the same notice ("Resolved.",
+  "Reopened.", "Already resolved."). Do not show your own notice for `'done'` or
+  `'unchanged'`.
+- `resolve` honours the reader's delete-on-resolve setting. With it on, the comment and
+  its thread are removed from the note, as a hub click would do.
+- `resolve` never decides a proposed edit. A comment with `addressed: true` answers
+  `'addressed'` and nothing is written; send the reader to it with `reveal` so they
+  accept, revise or reject it there.
+- The other answers: `'not-found'` (no indexed note carries that id, so it may have been
+  deleted since you read it), `'unchanged'` (already resolved, or already open for
+  `reopen`), and `'blocked'` (Annoteca refused because the comment syntax around it is
+  damaged, and has already told the reader).
+- Only for the reader's own click. Never call these from a scan, a timer or a rule.
+
 ## Author and source conventions
 
 Pick a stable `author` (use your plugin id) and a stable `sourceKey` (your own identity
@@ -340,7 +371,8 @@ tell it apart from a human comment without a side index. The idempotency above k
 
 ## Etiquette
 
-- Never resolve, edit, or delete a comment your plugin did not create.
+- Never resolve, reopen, edit, or delete a comment on your own initiative. `resolve` and
+  `reopen` are for an action the reader takes, on the comment they chose.
 - Do not batch huge promotions to dodge the budget prompt; it exists to protect the
   user's note from any consumer.
 - Degrade cleanly. With Annoteca absent, your plugin should be a complete product on its

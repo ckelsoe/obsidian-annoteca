@@ -47,6 +47,14 @@ export interface ApiComment {
 	readonly marker: { readonly start: number; readonly end: number };
 }
 
+// What a resolve() or reopen() call did. 'done': the note was changed.
+// 'unchanged': it was already in that state. 'not-found': no indexed note
+// carries that id. 'addressed': resolve() refused because a proposed edit is
+// waiting for accept, revise or reject. 'blocked': Annoteca would not write
+// because the note's comment syntax is damaged around it.
+export type ApiWriteResult =
+	'done' | 'unchanged' | 'not-found' | 'addressed' | 'blocked';
+
 // The text a compose() call asks the user to comment on, as editor offsets.
 export interface ComposeRange {
 	readonly start: number;
@@ -135,8 +143,9 @@ export interface AnnotecaApi {
 	// on-disk copy), and it parses that rather than the vault or the stale index.
 	anchorsFor(content: string): readonly AnchorRange[];
 
-	// Create comments on your behalf. CREATE ONLY: there is no path to resolve,
-	// delete, edit or reply, because resolution is a judgement about the writing.
+	// Create comments on your behalf. It never resolves, deletes, edits or replies,
+	// because resolution is a judgement about the writing; resolve() and reopen()
+	// exist only for an action the reader takes.
 	// Idempotent on `author:sourceKey`. Above the user's promotion budget it asks
 	// first, and a refusal (or a stale `expected`) returns an empty array rather
 	// than throwing. `expected` is the note's editor text the anchors were
@@ -160,6 +169,15 @@ export interface AnnotecaApi {
 	// markdown note, or a range that is empty, out of bounds, or starts or ends
 	// inside existing comment syntax or the note properties.
 	compose(path: string, range: ComposeRange): Promise<boolean>;
+
+	// apiVersion >= 7. Resolve or reopen a comment by id, exactly as a click in
+	// the hub does: the same write queue and freshness guards, the reader's author
+	// tag, and the same notice ("Resolved.", "Reopened."). resolve() honours the
+	// delete-on-resolve setting, so with it on the comment is removed from the
+	// note. resolve() never decides a proposed edit: an addressed comment answers
+	// 'addressed' and nothing is written.
+	resolve(commentId: string): Promise<ApiWriteResult>;
+	reopen(commentId: string): Promise<ApiWriteResult>;
 
 	// Fires when the comment index changes. Returns its own unsubscribe; call it
 	// on unload or the callback outlives your plugin.

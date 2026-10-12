@@ -9,16 +9,16 @@ import {
 	resolveAnchorRangeInWindows,
 } from './view-utils';
 import { resolveSettingsCategories } from './settings';
-import { forbiddenRanges } from './comment-service';
+import { forbiddenRanges, type WriteOutcome } from './comment-service';
 import { parseAll, scanClosers } from './parser';
 import { planCloser } from './range-placement';
 import type { CommentEvent } from './comment-events';
 
-// The read-only API other plugins call (F-284, interop-contract section 7).
+// The API other plugins call (F-284, interop-contract section 7).
 //
-// Read-only on purpose, and first. The compatibility promise starts as small as
-// it can be, and until `promote()` lands in AN-C2 a consumer bug cannot damage a
-// note. Everything here is a pure read over the comment index.
+// It began read-only on purpose: the compatibility promise started as small as
+// it could be. Every write since (promote, resolve, reopen) is delegated to
+// comment-service, the only writer of note markers.
 //
 // Consumers must resolve this at CALL time through
 // `app.plugins.getPlugin('annoteca')?.api` and never cache it in their own
@@ -49,7 +49,10 @@ import type { CommentEvent } from './comment-events';
 //     comment to find out it cannot get one.
 // 6 = adds onCommentEvent(): what happened to which comment (#95). Bumped
 //     because a consumer that would otherwise poll has to know it can stop.
-export const API_VERSION = 6;
+// 7 = adds resolve() and reopen(): a companion can offer the reader the same
+//     resolve and reopen a hub click does. Bumped because a consumer showing
+//     those actions has to know the methods are there.
+export const API_VERSION = 7;
 
 // The shape a consumer sees. Deliberately NOT the internal `Comment`: that
 // carries the marker grammar, `unknownLines`, reply and addressed structures
@@ -79,6 +82,14 @@ export interface ApiComment {
 // Where a comment's prose actually sits in the current text, which is not the
 // marker position: a marker is written at the HEAD of the passage it concerns.
 // The text a compose() call asks the user to comment on, as editor offsets.
+// What a resolve() or reopen() call did. 'done': the note was changed.
+// 'unchanged': it was already in that state. 'not-found': no indexed note
+// carries that id. 'addressed': resolve() refused because a proposed edit is
+// waiting for accept, revise or reject. 'blocked': Annoteca would not write
+// because the note's comment syntax is damaged around it.
+export type ApiWriteResult =
+	'done' | 'unchanged' | 'not-found' | 'addressed' | 'blocked';
+
 export interface ComposeRange {
 	readonly start: number;
 	readonly end: number;
@@ -150,10 +161,12 @@ export interface AnnotecaApi {
 	anchorsFor(content: string): readonly AnchorRange[];
 	// Create comments on this consumer's behalf (F-281).
 	//
-	// CREATE ONLY, and that is the design. There is no path here to resolve,
-	// delete, edit or reply: resolution is a judgement about the writing, and
-	// machine tooling does not close a human's thread. If a finding needs
-	// retracting, the user replies to it by hand; this API has no reply.
+	// CREATE ONLY, and that is the design. promote never resolves, deletes,
+	// edits or replies: resolution is a judgement about the writing, and
+	// machine tooling does not close a human's thread. resolve() and reopen()
+	// below exist only for the reader's own click in a companion's view. If a
+	// finding needs retracting, the user replies to it by hand; this API has no
+	// reply.
 	//
 	// Idempotent on `sourceKey`, so a consumer re-running over a note it already
 	// promoted creates nothing and gets back only what it made this time. Above
@@ -200,6 +213,15 @@ export interface AnnotecaApi {
 	// existing comment marker, closer, store block or the note properties.
 	compose(path: string, range: ComposeRange): Promise<boolean>;
 
+	// Resolve or reopen a comment by id (apiVersion 7), exactly as a click in
+	// the hub does: the same write queue and freshness guards, the reader's
+	// author tag, and the same notice ("Resolved.", "Reopened."). resolve()
+	// honours the delete-on-resolve setting, so with it on the comment is
+	// removed from the note. resolve() never decides a proposed edit: an
+	// addressed comment answers 'addressed' and nothing is written.
+	resolve(commentId: string): Promise<ApiWriteResult>;
+	reopen(commentId: string): Promise<ApiWriteResult>;
+
 	// Fires when the comment index changes. Returns its own unsubscribe; a
 	// consumer must call it on unload or the callback outlives the consumer.
 	onChange(cb: () => void): () => void;
@@ -233,6 +255,31 @@ function toApiComment(path: string, c: Comment): ApiComment {
 			: undefined,
 		marker: { start: c.marker.start, end: c.marker.end },
 	};
+}
+
+// The comment with this id, after the same warm-up queryComments does, so a
+// fresh session finds a comment in a note nobody has opened.
+async function locate(
+	plugin: AnnotecaPlugin,
+	commentId: unknown,
+): Promise<{ path: string; comment: Comment } | null> {
+	if (typeof commentId !== 'string' || commentId === '') return null;
+	await plugin.scanVaultIfNeeded();
+	await plugin.indexUnseenFiles();
+	return plugin.commentIndex.locateById(commentId) ?? null;
+}
+
+function writeResult(outcome: WriteOutcome): ApiWriteResult {
+	switch (outcome) {
+		case 'written':
+			return 'done';
+		case 'declined':
+			return 'unchanged';
+		case 'missing':
+			return 'not-found';
+		case 'blocked':
+			return 'blocked';
+	}
 }
 
 export function createApi(plugin: AnnotecaPlugin): AnnotecaApi {
@@ -411,6 +458,32 @@ export function createApi(plugin: AnnotecaPlugin): AnnotecaApi {
 				located.comment,
 			);
 			return true;
+		},
+
+		// Nothing is decided from the index here: it can lag a write still in
+		// the queue (a resolve in flight, a proposed edit just written), so the
+		// service judges the comment as the file holds it, inside the queue.
+		async resolve(commentId: string): Promise<ApiWriteResult> {
+			const located = await locate(plugin, commentId);
+			if (!located) return 'not-found';
+			const outcome = await plugin.comments.resolveComment(
+				located.path,
+				located.comment,
+				{ fromApi: true },
+			);
+			return outcome === 'addressed' ? 'addressed' : writeResult(outcome);
+		},
+
+		async reopen(commentId: string): Promise<ApiWriteResult> {
+			const located = await locate(plugin, commentId);
+			if (!located) return 'not-found';
+			return writeResult(
+				await plugin.comments.reopenComment(
+					located.path,
+					located.comment,
+					{ fromApi: true },
+				),
+			);
 		},
 
 		onChange(cb: () => void): () => void {

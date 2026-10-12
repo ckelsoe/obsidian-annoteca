@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- API (version 7): `resolve(commentId)` and `reopen(commentId)` let another plugin offer the reader Resolve and Reopen on a comment, for example from a mind map node. They run exactly as a click in the hub does, with the same notice, and `resolve` follows the delete-on-resolve setting. `resolve` refuses a comment with a proposed edit waiting for accept, revise or reject, and writes nothing. The answer says what happened: done, unchanged, not found, addressed, or blocked.
+
+### Changed
+- README: documents end-of-file comment storage, the Findings tab, "Open beside note" from pop-out windows, clicking a comment's text in the hub to jump to it, the Comment storage settings, the promotion budget and known comment namespaces, and a new "Works with" section for Plumbline and Annoteca MindMap Bridge.
+
 ## [1.21.0] - 2026-10-12
 
 Other plugins, and tools outside Obsidian, can now follow what happens to each comment as it happens.

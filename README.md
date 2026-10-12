@@ -11,15 +11,17 @@ Annoteca is built for revision work on long documents: book manuscripts, theses,
 ## Features
 
 - **Categorized comments**: every comment carries a category that says what kind of feedback it is. Seven defaults ship for general revision work (Tone, Clarify, Cut, Expand, Tighten, Source needed, Uncategorized); presets add sets for scholarly writing, fiction, code review, and project planning. Categories are fully editable, each with its own icon, color, underline urgency tier and optional default text, and you can save your own preset lists. A category's default text is saved when you insert a comment with the body left empty, so a Cut can simply say "Remove this."
-- **Anchored to the text**: comment a selection and the commented words get a category-tinted underline in the editor; new markers sit at the start of the passage they concern, and a closing marker after it records exactly where it ends. Comment at the cursor and a small marker icon shows the location. Underline style and thickness are configurable. Opening a comment highlights its passage in the editor, and jumping to a comment no longer yanks your reading position. A jump briefly flashes the passage it lands on, and clicking an addressed comment's original text in the hub jumps to it.
+- **Anchored to the text**: comment a selection and the commented words get a category-tinted underline in the editor; new markers sit at the start of the passage they concern, and a closing marker after it records exactly where it ends. Comment at the cursor and a small marker icon shows the location. Underline style and thickness are configurable. Opening a comment highlights its passage in the editor, and jumping to a comment keeps your reading position. A jump briefly flashes the passage it lands on. In the hub, clicking a comment's text, or an addressed comment's original text, jumps to it in the note.
 - **Threaded conversations**: replies live inside the same marker, in order, each signed with an author tag and date. A per-reply author picker lets several collaborators each sign their own reply, and you can give each author a color so a multi-party thread is easy to scan. A conversation about a sentence stays attached to that sentence, even when the paragraph moves. A marker with replies shows how many, so a one-line note and a long back-and-forth are told apart at a glance.
 - **AI revision flow**: when an assistant rewrites a passage in response to a comment, it marks the comment *addressed* and keeps the original text verbatim inside the marker. The comment stays in your queue with an accept, revise, or reject choice: accept resolves it, revise reopens it for more work, and reject restores the original prose automatically. You always see what changed and stay in control.
-- **Comment hub**: a right-sidebar panel with three tabs: Thread (the conversation view), Outline (a tree of the note's headings and, optionally, its list items, with comment counts rolled up per heading; click to jump, or comment on a line), and Starred (bookmarked comments). The Thread tab scopes to the current file, a folder with or without subfolders, the whole vault, a frontmatter property value, or a tag, and the scope can be pinned. Focus on one comment to see only its conversation until you choose Show all, or open it in a tab of its own.
+- **Comment hub**: a right-sidebar panel with three tabs: Thread (the conversation view), Outline (a tree of the note's headings and, optionally, its list items, with comment counts rolled up per heading; click to jump, or comment on a line), and Starred (bookmarked comments). A fourth tab, Findings, appears when Plumbline is installed. The Thread tab scopes to the current file, a folder with or without subfolders, the whole vault, a frontmatter property value, or a tag, and the scope can be pinned. Focus on one comment to see only its conversation until you choose Show all, or open it in a tab of its own. A comment opened from a pop-out window opens in a tab beside its note in that window ("Open beside note").
 - **Reading view indicators**: markers are invisible in reading view by design, so Annoteca can show a note-level banner with open and resolved totals, a badge on each section that has comments, both, or nothing. Click an indicator to open the hub on that comment.
-- **Resolve your way**: resolving keeps the comment in the file as a dimmed record by default, and resolved comments can be reopened with one click. Prefer clean files? Use "Resolve and remove", turn on delete-on-resolve, or sweep a file with "Delete all resolved comments".
+- **Resolve your way**: resolving keeps the comment in the file as a dimmed record by default, and resolved comments can be reopened with one click. Prefer clean files? Use "Resolve and remove", turn on delete-on-resolve, or sweep a file with "Delete all resolved comments in this file".
+- **Two ways to store comments**: inline keeps the whole comment in its marker, right at the passage. End-of-file storage shrinks the marker to a short category-and-id tag and keeps the body, replies and history in a block at the bottom of the note, so the prose stays readable. A setting picks the default for new comments, an `annoteca_storage: inline` or `annoteca_storage: eof` property overrides it for one note, and commands convert one note or the whole vault either way.
 - **Hover popup**: hover a marker to read the thread and reply, resolve, or jump to the hub without leaving the editor.
 - **Comments read as Markdown**: bodies, replies, and notes render as formatted Markdown in the popup and the hub, so links, emphasis, code, and lists look the way they were written rather than showing their source. `[[Wikilinks]]` resolve against the note the comment lives in. There is a setting to turn it off, and the one-line body shown beside a marker in the editor stays plain text either way so it cannot reflow the document.
 - **Read the whole document's comments at once**: "Toggle inline comment bodies" prints each comment beside the passage it is about, so a chapter's feedback reads in a single pass instead of one hover at a time. Bodies are trimmed to a single line and disappear again on the next press.
+- **Quick capture and overview views**: "Add scratchpad comment" opens the comment form with Uncategorized already chosen, for a thought you will sort later. "Open unresolved comments view" lists every open comment in the vault, and "Open index entries view" lists your index-entry comments.
 - **Import what you already have**: commands convert Obsidian `%%comments%%` and plain HTML comments into Annoteca markers, with a backup confirmation first.
 - **AI-ready by design**: the file is the API: any assistant that can read and edit markdown can read and write Annoteca comments. An "Export AI skill" command writes a skill file into your vault that teaches the assistant the format and your category vocabulary. The exported skill is versioned, so the plugin tells you when it has gone out of date after an update and should be re-exported.
 - **Bases-ready summary (optional)**: turn on a setting and Annoteca keeps a small summary of each note's review state in the note's frontmatter: the number of open comments, and optionally the oldest open date and the categories in play. An Obsidian Base can then filter and sort your notes by review status, for example every note with open comments across a project, as a work queue. Off by default; the comments stay in the note and your existing frontmatter is preserved.
@@ -32,7 +34,7 @@ A comment is an HTML comment with a typed prefix, placed at the text it concerns
 The pricing model needs revisiting before Q3. <!-- annoteca/clarify: which products? -->
 ```
 
-Threads, metadata, and resolution live inside the same marker:
+With the default inline storage, threads, metadata, and resolution live inside the same marker:
 
 ```markdown
 The Q3 forecast assumes a hiring freeze through December.
@@ -53,6 +55,22 @@ A comment on a selection also marks where the selection ends, with a closing mar
 [id=a3b9c2x7]
 [range=closed]
 --> The Q3 forecast assumes a hiring freeze through December.<!-- /annoteca a3b9c2x7 -->
+```
+
+With end-of-file storage the marker in the text is a short tag, and the rest of the comment sits in a store block at the bottom of the note:
+
+```markdown
+- <!-- annoteca/tighten: [id=a3b9c2x7] --> The Q3 forecast assumes a hiring freeze.<!-- /annoteca a3b9c2x7 -->
+
+<!-- annoteca:store
+{
+  "v": 1,
+  "id": "a3b9c2x7",
+  "category": "tighten",
+  "body": "wordy",
+  ...
+}
+-->
 ```
 
 The underline and highlight cover exactly that passage, and Reject restores exactly that passage. The `[range=closed]` line records that the comment was made with a closing marker, so if an edit later drops the closing marker, the orphan check reports it. A comment made at the cursor, and every comment from an earlier version, marks only where its passage starts, and works as it always has. A selection that starts or ends inside a code block, inline code, or the note properties gets no closing marker, since HTML would show there.
@@ -95,22 +113,28 @@ To teach an assistant the format, run **Export AI skill**. It writes a skill fil
 
 ## Public API
 
-Annoteca has a public, versioned API for other plugins. A companion plugin can attach comments and AI-readable notes to a place in a document without building its own comment store: detect a comment marker with no dependency at all, read your comments, then create and jump to them through the API, and follow what happens to each comment as it happens. There is no hard dependency in either direction, and Annoteca stays the only writer of note markers. Full guide and copyable types: [API.md](./API.md).
+Annoteca has a public, versioned API for other plugins. A companion plugin can attach comments and AI-readable notes to a place in a document without building its own comment store: detect a comment marker with no dependency at all, read your comments, then create and jump to them through the API, and follow what happens to each comment as it happens. There is no hard dependency in either direction, and Annoteca stays the only writer of note markers. A companion can also offer the reader Resolve and Reopen on a comment, which run exactly as they do in the hub. Full guide and copyable types: [API.md](./API.md).
+
+## Works with
+
+- [Plumbline](https://github.com/ckelsoe/obsidian-plumbline) flags prose that reads as machine-written. With both installed, its findings show in the hub's Findings tab, and a finding can be promoted to an Annoteca comment.
+- [Annoteca MindMap Bridge](https://github.com/ckelsoe/obsidian-annoteca-mindmap-bridge) puts your comments on the Mind map editor plugin's maps: a badge on each node with comments, and a "+" to comment on a node.
 
 ## Settings overview
 
 Settings are grouped in the order they appear in the tab:
 
 - **Categories**: edit the category list, browse and save presets, and set each category's icon, color, underline tier and default text. Pick the default category, and turn on the index-entry preset for print indexing.
+- **Comment storage**: where new comments keep their body, replies and history: inline in the marker, or at the end of the note.
 - **Editor indicators**: how comments look in the editor. Indicator style (icon, underline, both, or hidden) and size; the hover preview and its delay; what a click or tap does (open the side panel or a popover); whether bodies render as Markdown; the reply count on markers; underline style and thickness; and whether comments show when a file opens.
 - **Resolved comments**: whether resolved comments are dimmed or hidden, how strongly they dim, and whether resolving deletes the marker instead of keeping it as history.
 - **Composer**: where the comment form opens (modal or side panel), whether Enter sends or adds a line break, and the floating comment button on selected text.
 - **Reading view**: the indicator that stands in for comments where markers are invisible: a note banner, per-section badges, both, or off.
 - **Panel and navigation**: whether the hub collapses files you are not editing, and where a marker lands when you jump to a comment (top, center, or minimal scroll).
 - **Authors**: your author tag, plus collaborators each with a color so a multi-party thread is easy to scan.
-- **AI integration**: where the exported skill file is written, the export button, the out-of-date indicator that appears after an update changes the guidance, and the optional event journal, a file a tool outside Obsidian can watch to follow comment changes (off by default; ids and metadata only, never comment text).
+- **AI integration**: where the exported skill file is written, the export button, the out-of-date indicator that appears after an update changes the guidance, how many comments another plugin may add at once before you are asked (default 10), and the optional event journal, a file a tool outside Obsidian can watch to follow comment changes (off by default; ids and metadata only, never comment text).
 - **Frontmatter summary (Bases)**: maintain a Bases-friendly summary of each note's open comments in its frontmatter, choose whether to include the oldest-open date and the open categories, and an optional class tag (off by default, mainly for Fileclass or Metadata Menu users) with its property name.
-- **Diagnostics**: debug logging and where the log is written.
+- **Diagnostics**: debug logging and where the log is written, and the known comment namespaces: other tools' comment prefixes (such as `plumbline`) that the marker-conflict check should not report.
 
 ## Installation
 
