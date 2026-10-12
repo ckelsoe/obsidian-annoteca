@@ -234,17 +234,36 @@ export class CommentService {
 
 	constructor(private readonly plugin: AnnotecaPlugin) {}
 
-	async resolveComment(path: string, comment: Comment): Promise<void> {
+	// `fromApi` is another plugin's call. Its snapshot comes from the index,
+	// which can lag a write still in the queue, so nothing is decided from it:
+	// the state checks below run against the comment as the file holds it,
+	// inside the queue. And it never decides a proposed edit, so an addressed
+	// comment refuses, again judged from the file, not the snapshot.
+	async resolveComment(
+		path: string,
+		comment: Comment,
+		opts?: { fromApi?: boolean },
+	): Promise<WriteOutcome | 'addressed'> {
 		return this.enqueue(path, () =>
-			this.resolveCommentUnqueued(path, comment),
+			this.resolveCommentUnqueued(path, comment, opts),
 		);
 	}
 
 	private async resolveCommentUnqueued(
 		path: string,
 		comment: Comment,
-	): Promise<void> {
-		if (comment.resolution) return;
+		opts?: { fromApi?: boolean },
+	): Promise<WriteOutcome | 'addressed'> {
+		if (!opts?.fromApi && comment.resolution) return 'declined';
+		let refused = false;
+		const stillOpen = (current: Comment): boolean => {
+			if (current.resolution) return false;
+			if (opts?.fromApi && current.addressed) {
+				refused = true;
+				return false;
+			}
+			return true;
+		};
 		if (this.plugin.settings.deleteOnResolve) {
 			// The toggle is the opt-in for destructive resolve; no per-action
 			// confirmation here. The explicit "Resolve and remove" action keeps
@@ -253,25 +272,28 @@ export class CommentService {
 			const outcome = await this.resolveAndRemoveCommentUnqueued(
 				path,
 				comment,
-				(c) => !c.resolution,
+				stillOpen,
 			);
+			if (refused) return 'addressed';
 			if (outcome === 'declined') new Notice('Already resolved.');
-			return;
+			return outcome;
 		}
 		const author = this.resolvedAuthor();
 		const outcome = await this.replaceMarkerUnqueued(
 			path,
 			comment,
 			(current) =>
-				current.resolution
-					? undefined
-					: {
+				stillOpen(current)
+					? {
 							...current,
 							resolution: { author, date: nowISO(), note: '' },
-						},
+						}
+					: undefined,
 		);
+		if (refused) return 'addressed';
 		if (outcome === 'written') new Notice('Resolved.');
 		else if (outcome === 'declined') new Notice('Already resolved.');
+		return outcome;
 	}
 
 	// Resolve with file cleanup: removes the marker entirely instead of
@@ -336,17 +358,23 @@ export class CommentService {
 		return 'written';
 	}
 
-	async reopenComment(path: string, comment: Comment): Promise<void> {
+	// `fromApi`: decided from the file inside the queue, as for resolveComment.
+	async reopenComment(
+		path: string,
+		comment: Comment,
+		opts?: { fromApi?: boolean },
+	): Promise<WriteOutcome> {
 		return this.enqueue(path, () =>
-			this.reopenCommentUnqueued(path, comment),
+			this.reopenCommentUnqueued(path, comment, opts),
 		);
 	}
 
 	private async reopenCommentUnqueued(
 		path: string,
 		comment: Comment,
-	): Promise<void> {
-		if (!comment.resolution) return;
+		opts?: { fromApi?: boolean },
+	): Promise<WriteOutcome> {
+		if (!opts?.fromApi && !comment.resolution) return 'declined';
 		const outcome = await this.replaceMarkerUnqueued(
 			path,
 			comment,
@@ -359,6 +387,7 @@ export class CommentService {
 		// 'declined' means another writer reopened it first. Every sibling verb
 		// narrates that; without this the button looks broken.
 		else if (outcome === 'declined') new Notice('Already open.');
+		return outcome;
 	}
 
 	async deleteComment(path: string, comment: Comment): Promise<void> {
@@ -718,10 +747,12 @@ export class CommentService {
 	// Used by the delete-all-resolved command to size its confirmation modal.
 	// Create comments on behalf of another plugin (F-281, interop-contract 7).
 	//
-	// CREATE ONLY. There is no API path here to resolve, delete, edit or reply to
-	// a comment, and that is the design rather than an omission: resolution is a
+	// CREATE ONLY. promote never resolves, deletes, edits or replies to a
+	// comment, and that is the design rather than an omission: resolution is a
 	// judgement about the writing, and machine tooling does not close a human's
-	// thread. A consumer that wants a finding retracted replies to it.
+	// thread. The API's resolve and reopen are the reader's own action, routed
+	// through resolveComment and reopenComment. A consumer that wants a finding
+	// retracted replies to it.
 	//
 	// The write goes through the same serializer and the same applySplices lock
 	// every other verb uses, per contract 4.1. A second writer is exactly the

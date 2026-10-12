@@ -746,6 +746,88 @@ describe('#12: a vanished marker aborts instead of writing at stale offsets', ()
 	});
 });
 
+// The API's resolve() must never decide a proposed edit. Its own check reads
+// the index snapshot, so the queued write checks again against the file: an
+// edit proposed after the snapshot was taken still refuses, in both branches.
+describe('resolveComment and reopenComment from the API', () => {
+	const OPEN = [
+		'Prose. <!-- annoteca/clarify: tighten this',
+		'[id=refadd01]',
+		'--> The old sentence.',
+	].join('\n');
+
+	it.each([false, true])(
+		'refuses an edit proposed after the snapshot (deleteOnResolve %s)',
+		async (deleteOnResolve) => {
+			const h = makeHarnessWith(OPEN, deleteOnResolve);
+			const snapshot = firstComment(h.content);
+			h.content = h.content.replace(
+				'-->',
+				'[addressed claude 2026-06-20]: cut the framing\n-->',
+			);
+			const before = h.content;
+
+			const outcome = await h.service.resolveComment(
+				'note.md',
+				snapshot,
+				{ fromApi: true },
+			);
+
+			expect(outcome).toBe('addressed');
+			expect(h.content).toBe(before);
+			expect(firstComment(h.content).resolution).toBeUndefined();
+		},
+	);
+
+	it('still resolves an open comment', async () => {
+		const h = makeHarnessWith(OPEN);
+		const outcome = await h.service.resolveComment(
+			'note.md',
+			firstComment(h.content),
+			{ fromApi: true },
+		);
+		expect(outcome).toBe('written');
+		expect(firstComment(h.content).resolution?.author).toBe('charles');
+	});
+
+	// A resolve still in the queue when the API's reopen arrives: the index
+	// snapshot says open, the file says resolved, and the file wins.
+	it('reopens from a stale open snapshot once the file is resolved', async () => {
+		const h = makeHarnessWith(OPEN);
+		const snapshot = firstComment(h.content);
+		await h.service.resolveComment('note.md', firstComment(h.content));
+		const outcome = await h.service.reopenComment('note.md', snapshot, {
+			fromApi: true,
+		});
+		expect(outcome).toBe('written');
+		expect(firstComment(h.content).resolution).toBeUndefined();
+	});
+
+	it('answers declined from the file when already in that state', async () => {
+		const h = makeHarnessWith(OPEN);
+		const snapshot = firstComment(h.content);
+		await h.service.resolveComment('note.md', firstComment(h.content));
+		const before = h.content;
+		const outcome = await h.service.resolveComment('note.md', snapshot, {
+			fromApi: true,
+		});
+		expect(outcome).toBe('declined');
+		expect(h.content).toBe(before);
+	});
+
+	// The hub's own resolve passes no option and is unchanged.
+	it('without the option an addressed comment still resolves', async () => {
+		const h = makeHarnessWith(
+			OPEN.replace('-->', '[addressed claude 2026-06-20]: done\n-->'),
+		);
+		const outcome = await h.service.resolveComment(
+			'note.md',
+			firstComment(h.content),
+		);
+		expect(outcome).toBe('written');
+	});
+});
+
 // The deleteOnResolve shortcut was the one lifecycle path that re-resolved the
 // marker's OFFSETS without re-checking the STATE the action was aimed at, and it
 // is the destructive one: it removes the marker, its body, and its whole thread.
@@ -920,9 +1002,9 @@ describe('#12: a write aimed at a missing file reports instead of no-oping', () 
 
 	it('resolveComment does not throw when the file is gone', async () => {
 		const service = makeHarnessWithNoFile();
-		await expect(
-			service.resolveComment('gone.md', snapshot),
-		).resolves.toBeUndefined();
+		await expect(service.resolveComment('gone.md', snapshot)).resolves.toBe(
+			'missing',
+		);
 	});
 
 	it('deleteComment does not throw when the file is gone', async () => {
