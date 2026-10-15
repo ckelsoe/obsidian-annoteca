@@ -3,6 +3,7 @@
 // hosts; only the surrounding chrome differs.
 
 import {
+	MarkdownView,
 	Notice,
 	Setting,
 	type Editor,
@@ -598,6 +599,9 @@ export class ComposerForm {
 		}
 
 		const editor = this.request.editor;
+		// The note as it stood before this save, for persisting from reading
+		// view (see finish).
+		const before = editor.getValue();
 
 		if (this.request.editing) {
 			// Re-resolve against the CURRENT document rather than writing the
@@ -648,11 +652,7 @@ export class ComposerForm {
 						editor.offsetToPos(fresh.marker.end),
 					);
 				}
-				this.hooks.close();
-				this.hooks.onSubmitted?.(
-					this.request.filePath,
-					fresh.marker.start,
-				);
+				this.finish(before, fresh.marker.start);
 				return;
 			}
 
@@ -687,8 +687,7 @@ export class ComposerForm {
 				editor.offsetToPos(fresh.marker.start),
 				editor.offsetToPos(fresh.marker.end),
 			);
-			this.hooks.close();
-			this.hooks.onSubmitted?.(this.request.filePath, fresh.marker.start);
+			this.finish(before, fresh.marker.start);
 			return;
 		}
 
@@ -785,6 +784,25 @@ export class ComposerForm {
 			);
 		}
 
+		this.finish(before, markerStart);
+	}
+
+	// Every successful save ends here. In reading view (F-261) the form wrote
+	// into the view's editor, which Obsidian neither saves nor renders while
+	// the note is shown rendered, so the change is written to the file as
+	// well; reading view then re-renders from it.
+	private finish(before: string, markerStart: number): void {
+		const view = this.request.view;
+		if (
+			view instanceof MarkdownView &&
+			view.getMode() === 'preview' &&
+			view.file
+		)
+			void this.plugin.persistReadingViewEdit(
+				view.file,
+				before,
+				this.request.editor.getValue(),
+			);
 		this.hooks.close();
 		this.hooks.onSubmitted?.(this.request.filePath, markerStart);
 	}

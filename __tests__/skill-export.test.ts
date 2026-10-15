@@ -309,9 +309,9 @@ describe('skill v11: agent handling', () => {
 		undefined,
 	);
 
-	it('is schema version 11', () => {
-		expect(SKILL_SCHEMA_VERSION).toBe(11);
-		expect(parseSkillVersion(skill)).toBe(11);
+	it('is at least schema version 11', () => {
+		expect(SKILL_SCHEMA_VERSION).toBeGreaterThanOrEqual(11);
+		expect(parseSkillVersion(skill)).toBe(SKILL_SCHEMA_VERSION);
 	});
 
 	it('gives every category its handling, act when unset', () => {
@@ -356,5 +356,32 @@ describe('skill v11: agent handling', () => {
 		expect(skill).toMatch(/\*\*Reply only\*\*:.*Never edit the passage/);
 		expect(skill).toMatch(/\*\*Skip\*\*: leave the comment entirely alone/);
 		expect(skill).toContain('is **Act on it**');
+	});
+});
+
+describe('skill v12: the vault review queue', () => {
+	const skill = buildSkillMarkdown(CATEGORIES, undefined);
+
+	it('is schema version 12', () => {
+		expect(SKILL_SCHEMA_VERSION).toBe(12);
+	});
+
+	it('builds the queue from annoteca_open, not from a .base file', () => {
+		expect(skill).toContain('## Working a queue of notes across the vault');
+		expect(skill).toContain("rg -l '^annoteca_open: [1-9][0-9]*$'");
+		expect(skill).toMatch(/Do not read a `\.base` file as the list/);
+	});
+
+	it('skips notes whose open comments are all Skip, and never writes the counts', () => {
+		expect(skill).toMatch(
+			/open comments are all in Skip categories has no work/,
+		);
+		expect(skill).toMatch(/Never write `annoteca_open`/);
+	});
+
+	it('falls back to the marker regex only when the summary is off', () => {
+		expect(skill).toMatch(
+			/Only when no note carries `annoteca_open` at all/,
+		);
 	});
 });

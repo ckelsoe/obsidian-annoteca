@@ -7,6 +7,8 @@ import {
 	Plugin,
 	TFile,
 	getAllTags,
+	getFrontMatterInfo,
+	parseYaml,
 	apiVersion,
 	normalizePath,
 	type MarkdownFileInfo,
@@ -28,6 +30,8 @@ import {
 	type CommentEvent,
 } from './comment-events';
 import { EventJournal } from './event-journal';
+import { noteText, spliceRaw, toEditorText } from './note-text';
+import { diffToSplice } from './store';
 import {
 	ReplyAlerts,
 	alertsEnabled,
@@ -50,7 +54,11 @@ import {
 	SKILL_SCHEMA_VERSION,
 	type SkillStatus,
 } from './skill-export';
-import { registerReadingViewIndicator } from './reading-view';
+import {
+	readingSelectionRange,
+	registerReadingSelection,
+	registerReadingViewIndicator,
+} from './reading-view';
 import { AddCommentModal } from './modal';
 import {
 	buildAnnotecaExtension,
@@ -351,6 +359,7 @@ export default class AnnotecaPlugin extends Plugin {
 		this.registerFileEvents();
 		this.registerEditorMenu();
 		registerReadingViewIndicator(this);
+		registerReadingSelection(this);
 
 		this.addRibbonIcon(
 			'message-square',
@@ -372,8 +381,10 @@ export default class AnnotecaPlugin extends Plugin {
 			this.app.workspace.on('window-open', (_leaf, win) => {
 				this.writeIndicatorSize(win.document.body);
 				this.writeAnchorAppearance(win.document.body);
+				this.registerReadingMenu(win.document);
 			}),
 		);
+		this.registerReadingMenu(document);
 
 		this.app.workspace.onLayoutReady(() => {
 			this.refreshActiveFileIndex();
@@ -873,6 +884,20 @@ export default class AnnotecaPlugin extends Plugin {
 			editorCallback: (editor: Editor, view: MarkdownFileInfo) =>
 				this.openModalForSelection(editor, view),
 		});
+		// F-261. The editor commands above only exist while an editor is
+		// active, which reading view is not, so this one checks for a note in
+		// reading view itself.
+		this.addCommand({
+			id: 'add-comment-for-reading-selection',
+			name: 'Add comment for selection in reading view',
+			checkCallback: (checking: boolean) => {
+				const view =
+					this.app.workspace.getActiveViewOfType(MarkdownView);
+				if (!view || view.getMode() !== 'preview') return false;
+				if (!checking) this.commentOnReadingSelection(view);
+				return true;
+			},
+		});
 		this.addCommand({
 			id: 'add-comment-for-sentence',
 			name: 'Add comment for current sentence',
@@ -1350,6 +1375,7 @@ export default class AnnotecaPlugin extends Plugin {
 				idx.comments,
 				opts,
 				() => !this.unloaded,
+				() => this.readFrontmatter(file),
 			)
 				.then((written) => {
 					this.frontmatterFailedPaths.delete(file.path);
@@ -1390,6 +1416,23 @@ export default class AnnotecaPlugin extends Plugin {
 				});
 		}, 800);
 		this.frontmatterTimers.set(path, timer);
+	}
+
+	// The note's frontmatter as the file holds it, for the summary writer to
+	// check before it writes (see applyFrontmatterSummary). Unparseable YAML
+	// reads as empty, which never matches, so the writer goes on to the same
+	// processFrontMatter call that reports it.
+	private async readFrontmatter(
+		file: TFile,
+	): Promise<Record<string, unknown>> {
+		const info = getFrontMatterInfo(await this.app.vault.cachedRead(file));
+		if (!info.exists) return {};
+		try {
+			const parsed: unknown = parseYaml(info.frontmatter);
+			return isRecord(parsed) ? parsed : {};
+		} catch {
+			return {};
+		}
 	}
 
 	private cancelFrontmatterTimer(path: string): void {
@@ -1554,6 +1597,111 @@ export default class AnnotecaPlugin extends Plugin {
 		if (!file) return false;
 		editor.setSelection(editor.offsetToPos(from), editor.offsetToPos(to));
 		return this.openComposer({ editor, view, filePath: file.path });
+	}
+
+	// F-261: right-clicking text selected in a note in reading view offers
+	// "Add comment for selection". Obsidian shows no menu of its own there
+	// (checked with a real right-click), so this adds one rather than adding
+	// to one. The range is worked out at right-click time, while the selection
+	// is certainly still there.
+	private registerReadingMenu(doc: Document): void {
+		this.registerDomEvent(doc, 'contextmenu', (evt) => {
+			// targetNode, not instanceof Node: in a pop-out window the event's
+			// Node is that window's, and instanceof against this one fails.
+			const target = evt.targetNode;
+			if (target === null) return;
+			const selection = doc.getSelection();
+			if (!selection || selection.isCollapsed) return;
+			const view = this.app.workspace
+				.getLeavesOfType('markdown')
+				.map((l) => l.view)
+				.find(
+					(v): v is MarkdownView =>
+						v instanceof MarkdownView &&
+						v.getMode() === 'preview' &&
+						v.containerEl.contains(target),
+				);
+			if (!view) return;
+			const found = readingSelectionRange(view);
+			evt.preventDefault();
+			new Menu()
+				.addItem((item) =>
+					item
+						.setTitle('Annoteca: add comment for selection')
+						.setIcon('message-square-plus')
+						.onClick(() =>
+							this.commentOnReadingSelection(view, found),
+						),
+				)
+				.showAtMouseEvent(evt);
+		});
+	}
+
+	// F-261: the composer for text selected in reading view. The view keeps
+	// its editor while it shows the rendered note, so the selection is set
+	// there and the composer writes through it, and saves it to the file
+	// (Composer.finish); the reader stays in reading view.
+	commentOnReadingSelection(
+		view: MarkdownView,
+		found: ReturnType<typeof readingSelectionRange> = readingSelectionRange(
+			view,
+		),
+	): void {
+		if ('error' in found) {
+			new Notice(found.error);
+			return;
+		}
+		const file = view.file;
+		if (!file) return;
+		// The note changed between the right-click and the menu click.
+		if (toEditorText(view.getViewData()) !== found.text) {
+			new Notice('The note just changed. Select the text again.');
+			return;
+		}
+		// In reading view the editor can lag the file (see
+		// readingSelectionRange), so it is loaded with the note as shown before
+		// the form reads it and writes into it.
+		const { editor } = view;
+		if (editor.getValue() !== found.text) editor.setValue(found.text);
+		editor.setSelection(
+			editor.offsetToPos(found.from),
+			editor.offsetToPos(found.to),
+		);
+		void this.openComposer({ editor, view, filePath: file.path });
+	}
+
+	// Write a change made in a reading-view note's editor to the file (see
+	// Composer.finish). Only when the file still holds what the editor held
+	// before the change; otherwise the note moved on underneath and the
+	// change is refused with a notice rather than written over it. Spliced
+	// through the file's own bytes, so its line endings are kept.
+	async persistReadingViewEdit(
+		file: TFile,
+		before: string,
+		after: string,
+	): Promise<boolean> {
+		const splice = diffToSplice(before, after);
+		if (!splice) return true;
+		let stale = false;
+		try {
+			await this.app.vault.process(file, (raw) => {
+				const current = noteText(raw);
+				if (current.text !== before) {
+					stale = true;
+					return raw;
+				}
+				return spliceRaw(current, [splice]);
+			});
+		} catch (err: unknown) {
+			console.error('Annoteca: saving from reading view failed', err);
+			new Notice('Annoteca could not save that comment to the note.');
+			return false;
+		}
+		if (stale)
+			new Notice(
+				'Annoteca did not save that comment: the note changed while the form was open. Add it again.',
+			);
+		return !stale;
 	}
 
 	private openScratchpadModal(editor: Editor, view: MarkdownFileInfo): void {

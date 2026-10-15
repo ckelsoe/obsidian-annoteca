@@ -28,6 +28,7 @@ import {
 import { DEFAULT_SETTINGS } from '../settings';
 import type { AnnotecaSettings } from '../types';
 import { stubDecorationContext } from './stub-context';
+import { at } from './helpers/checked';
 
 function stubCtx(overrides: Partial<AnnotecaSettings> = {}): DecorationContext {
 	const settings: AnnotecaSettings = { ...DEFAULT_SETTINGS, ...overrides };
@@ -464,7 +465,7 @@ function stateWithExtension(
 
 // Offset of the only marker in DOC, taken from the parser rather than hardcoded
 // so the tests do not silently drift if the fixture changes.
-const MARKER_START = findMarkersInDoc(DOC)[0]!.marker.start;
+const MARKER_START = at(findMarkersInDoc(DOC), 0).marker.start;
 
 // An insertion point INSIDE the marker's body. Aimed at the body text rather
 // than at a byte offset from the marker start, because landing in the category
@@ -496,11 +497,11 @@ describe('pinned reply composer', () => {
 
 		// Still open, now anchored four characters further along...
 		expect(after).toHaveLength(1);
-		expect(after[0]!.pos).toBe(MARKER_START + 4);
+		expect(at(after, 0).pos).toBe(MARKER_START + 4);
 		// ...and the SAME create closure, which is what makes CodeMirror
 		// reposition the existing textarea instead of building a new one. This
 		// is the assertion that fails if the tooltip is ever rebuilt here.
-		expect(createRef(after[0]!)).toBe(createRef(before[0]!));
+		expect(createRef(at(after, 0))).toBe(createRef(at(before, 0)));
 	});
 
 	it('keeps the typed-into DOM even when the marker itself is rewritten', () => {
@@ -518,7 +519,7 @@ describe('pinned reply composer', () => {
 		const after = tooltipsOf(rewritten);
 
 		expect(after).toHaveLength(1);
-		expect(createRef(after[0]!)).toBe(createRef(before[0]!));
+		expect(createRef(at(after, 0))).toBe(createRef(at(before, 0)));
 	});
 
 	it('closes when its marker is deleted outright', () => {
@@ -553,8 +554,8 @@ describe('pinned tap popover', () => {
 		const after = tooltipsOf(edited);
 
 		expect(after).toHaveLength(1);
-		expect(after[0]!.pos).toBe(MARKER_START + 4);
-		expect(createRef(after[0]!)).toBe(createRef(before[0]!));
+		expect(at(after, 0).pos).toBe(MARKER_START + 4);
+		expect(createRef(at(after, 0))).toBe(createRef(at(before, 0)));
 	});
 
 	it('redraws when the comment it is showing changes', () => {
@@ -573,7 +574,7 @@ describe('pinned tap popover', () => {
 		const after = tooltipsOf(rewritten);
 
 		expect(after).toHaveLength(1);
-		expect(createRef(after[0]!)).not.toBe(createRef(before[0]!));
+		expect(createRef(at(after, 0))).not.toBe(createRef(at(before, 0)));
 	});
 
 	it('is superseded by opening the reply composer on the same marker', () => {
@@ -756,7 +757,7 @@ describe('pinned surfaces track the comment, not a copy of it', () => {
 
 		const after = tooltipsOf(edited);
 		expect(after).toHaveLength(1);
-		expect(after[0]!.pos).toBe(MARKER_START + 'typed'.length);
+		expect(at(after, 0).pos).toBe(MARKER_START + 'typed'.length);
 	});
 
 	it('hands the CURRENT comment to a preserved surface, not the open-time one', () => {
@@ -775,8 +776,8 @@ describe('pinned surfaces track the comment, not a copy of it', () => {
 		const open = stateWithExtension().update({
 			effects: setTapPopoverEffect.of(MARKER_START),
 		}).state;
-		expect(tooltipsOf(open)[0]!.end).toBe(
-			findMarkersInDoc(DOC)[0]!.marker.end,
+		expect(at(tooltipsOf(open), 0).end).toBe(
+			at(findMarkersInDoc(DOC), 0).marker.end,
 		);
 
 		const grown = open.update({
@@ -787,9 +788,12 @@ describe('pinned surfaces track the comment, not a copy of it', () => {
 		expect(after).toHaveLength(1);
 		// The marker is longer now. A stale ref would still report the end it
 		// had when the popover opened.
-		const freshEnd = findMarkersInDoc(grown.doc.toString())[0]!.marker.end;
-		expect(freshEnd).toBeGreaterThan(findMarkersInDoc(DOC)[0]!.marker.end);
-		expect(after[0]!.end).toBe(freshEnd);
+		const freshEnd = at(findMarkersInDoc(grown.doc.toString()), 0).marker
+			.end;
+		expect(freshEnd).toBeGreaterThan(
+			at(findMarkersInDoc(DOC), 0).marker.end,
+		);
+		expect(at(after, 0).end).toBe(freshEnd);
 	});
 });
 

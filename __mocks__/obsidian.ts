@@ -22,7 +22,13 @@ export class ItemView {
 }
 export class WorkspaceLeaf {}
 export class TFile {}
-export class MarkdownView {}
+// Editing mode unless a test says otherwise: the comment service only writes
+// through the editor of a view in editing mode.
+export class MarkdownView {
+	getMode(): 'source' | 'preview' {
+		return 'source';
+	}
+}
 // Enough of a Modal to test what a dismissal DOES, which is the hazard: several
 // verbs here await a promise a modal settles, and an exit that answers nothing
 // leaves the write pending for the life of the session.

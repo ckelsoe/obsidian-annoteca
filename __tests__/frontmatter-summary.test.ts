@@ -1,5 +1,8 @@
 import type { Comment } from '../types';
+import { TFile } from 'obsidian';
+import type { App } from 'obsidian';
 import {
+	applyFrontmatterSummary,
 	computeSummary,
 	mergeFileclass,
 	fileclassHasAnnoteca,
@@ -306,5 +309,72 @@ describe('isManagedNote', () => {
 
 	it('leaves a note that never had a comment untouched', () => {
 		expect(isManagedNote(false, { title: 'x' }, 'fileclass')).toBe(false);
+	});
+});
+
+// Found by the Debug log: the summary wrote twice about a second apart. The
+// metadata cache catches up with a write a moment after it lands, so an update
+// scheduled in that moment saw the old values and wrote the same ones again.
+describe('applyFrontmatterSummary against a lagging cache', () => {
+	const opts: FrontmatterSummaryOptions = { ...OPTS, writeClassTag: false };
+	const comments = [mk({ date: '2026-10-01', category: 'tone' })];
+
+	function fakeApp(cached: Record<string, unknown>) {
+		const writes: Record<string, unknown>[] = [];
+		const app = {
+			metadataCache: { getFileCache: () => ({ frontmatter: cached }) },
+			fileManager: {
+				processFrontMatter: (
+					_f: TFile,
+					fn: (front: Record<string, unknown>) => void,
+				) => {
+					const front: Record<string, unknown> = {};
+					fn(front);
+					writes.push(front);
+					return Promise.resolve();
+				},
+			},
+		} as unknown as App;
+		return { app, writes };
+	}
+
+	it('does not write again when the file already holds the summary', async () => {
+		const first = fakeApp({});
+		expect(
+			await applyFrontmatterSummary(
+				first.app,
+				new TFile(),
+				comments,
+				opts,
+			),
+		).toBe(true);
+		const written = first.writes[0] ?? {};
+
+		// The cache still shows the note before that write; the file has it.
+		const second = fakeApp({});
+		const wrote = await applyFrontmatterSummary(
+			second.app,
+			new TFile(),
+			comments,
+			opts,
+			undefined,
+			() => Promise.resolve(written),
+		);
+		expect(wrote).toBe(false);
+		expect(second.writes).toHaveLength(0);
+	});
+
+	it('still writes when the file is out of date too', async () => {
+		const { app, writes } = fakeApp({});
+		const wrote = await applyFrontmatterSummary(
+			app,
+			new TFile(),
+			comments,
+			opts,
+			undefined,
+			() => Promise.resolve({}),
+		);
+		expect(wrote).toBe(true);
+		expect(writes).toHaveLength(1);
 	});
 });

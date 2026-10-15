@@ -14,6 +14,7 @@ import {
 	sanitizeAuthorToken,
 } from '../parser';
 import type { Comment } from '../types';
+import { defined } from './helpers/checked';
 
 describe('parser: single-line markers', () => {
 	it('parses a minimal single-line marker', () => {
@@ -2328,7 +2329,9 @@ describe('parser: findMalformedMarkers sees unclosed openers', () => {
 		].join('\n');
 		const real = parseAll(text)[0];
 		expect(real?.id).toBe('nearms01');
-		expect(findRemovalBlocker(text, [real!.marker])).toBeUndefined();
+		expect(
+			findRemovalBlocker(text, [defined(real).marker]),
+		).toBeUndefined();
 		expect(unclosedOpenerRanges(text)).toEqual([]);
 	});
 

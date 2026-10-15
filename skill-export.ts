@@ -62,7 +62,15 @@ export type SkillExportTarget = 'claude' | 'agent' | 'both';
 // self" the user wrote for themself). An assistant on a v10 skill does not know,
 // so it would edit prose under a reply-only category, or answer the user's own
 // reminders as if they were requests.
-export const SKILL_SCHEMA_VERSION = 11;
+// 12 = the vault-level review queue (first drafted as v7 in PR #51, never
+// merged). The skill only described a single note's markers, so an assistant
+// asked to work every open comment in a vault had no recipe: it scanned
+// directories, re-scanned for markers and the fileclass tag, or read a Bases
+// `.base` file as if it listed the matching notes (a `.base` is a live query,
+// not a stored list). v12 names the frontmatter summary (`annoteca_open` and
+// friends) as the index and the one scan that builds the queue from it, and
+// says a note whose open comments are all Skip has no work in it.
+export const SKILL_SCHEMA_VERSION = 12;
 
 const SKILL_VERSION_RE = /^annoteca-skill-version:\s*(\d+)\s*$/m;
 
@@ -327,6 +335,24 @@ The JSON mirrors the comment model: \`v\` (schema version, currently 1), \`id\` 
 **Edit both sites, and put each change in the right one.** To reply to, address, resolve or edit the body of an eof comment, change its **store entry's JSON**, never the lean marker: append to the \`replies\` array, add an \`addressed\` or \`resolution\` object, or edit \`body\`. Leave the marker lean. Category is the one field the marker owns, so changing it rewrites the marker (\`<!-- annoteca/<new-category>: [id=<id>] -->\`) and the entry's \`category\` together. To create a comment in this mode, insert a lean marker at the start of the passage and add a matching store entry at the end of the file.
 
 The store is **lossless and easier to write than the bracket lines**: JSON already encodes newlines, quotes and brackets, so a multi-line reply, a long anchor, and a body that contains \`-->\` or \`<!--\` all go in as ordinary string values with none of the backslash escaping the inline format needs. (On save the plugin rewrites any \`<\` or \`>\` in the JSON as \`\\u003c\`/\`\\u003e\`, which JSON reads straight back; you do not need to.) Keep the store region as the LAST thing in the file, and never let an entry's JSON hold a raw \`-->\`.
+
+## Working a queue of notes across the vault
+
+Annoteca can keep each note's open-comment count in that note's frontmatter, so a whole vault of review work can be found without opening every file. It is opt-in, so it may be off. When on, a note with open comments carries:
+
+- \`annoteca_open\`: the number of open comments. Addressed comments count as open: they still need the reviewer.
+- \`annoteca_oldest_open\`: the date of the oldest open comment. Optional, may be absent.
+- \`annoteca_categories\`: the categories among the open comments. Optional, may be absent.
+
+These names are fixed. To find every note that needs review, read the frontmatter. Do not read a \`.base\` file as the list: a \`.base\` is a live Obsidian query, not a stored list of notes, so from outside Obsidian there is nothing in it to follow. Build the queue with one frontmatter scan, for example:
+
+\`\`\`
+rg -l '^annoteca_open: [1-9][0-9]*$' --glob '*.md' .
+\`\`\`
+
+That scan is the whole queue: \`annoteca_open\` greater than zero. A note with \`annoteca_open: 0\` is done; skip it, and do not also scan for markers or the optional \`fileclass\` tag to find work. Work oldest first with \`annoteca_oldest_open\`, or narrow by \`annoteca_categories\`, then handle each note's comments with the rules above, including **Agent handling** below: a note whose open comments are all in Skip categories has no work for you. Only when no note carries \`annoteca_open\` at all (the feature is off) fall back to the marker regex at the top of this file, treating any comment with no resolution as open.
+
+Never write \`annoteca_open\` or the other summary fields yourself. Annoteca regenerates them from the comments whenever one changes: change the comments and the counts follow. A hand-written count is overwritten, and editing it instead of the comments corrupts the queue.
 
 ## Categories in this vault
 

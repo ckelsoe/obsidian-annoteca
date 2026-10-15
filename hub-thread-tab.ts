@@ -14,6 +14,7 @@ import { resolveSettingsCategories } from './settings';
 import { nowISO } from './parser';
 import { rekeyScopeAnchor } from './scope';
 import {
+	FOCUS_KEY_ATTR,
 	authorColorFor,
 	authorPickerOptions,
 	formatStamp,
@@ -1146,6 +1147,10 @@ export class ThreadTabRenderer {
 			cls: 'annoteca-reply-input',
 			attr: { placeholder: 'Reply…', rows: '3' },
 		});
+		// Names this box across a rebuild, so the hub can put the cursor back
+		// in the same comment's reply box rather than whichever box now sits at
+		// the same position in a list that may have grown.
+		if (c.id) textarea.setAttribute(FOCUS_KEY_ATTR, `${path}#${c.id}`);
 		// Restore any draft saved for this comment, mirroring the popup composer.
 		if (c.id) {
 			const draft = this.plugin.loadDraft(c.id);

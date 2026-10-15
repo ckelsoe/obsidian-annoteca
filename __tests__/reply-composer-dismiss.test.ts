@@ -32,9 +32,10 @@ import type { AnnotecaSettings } from '../types';
 // of the mock only, so production code keeps typing against obsidian.d.ts.
 import { installObsidianDomHelpers } from '../__mocks__/obsidian';
 import { stubDecorationContext } from './stub-context';
+import { at } from './helpers/checked';
 
 const DOC = 'Prose before. <!-- annoteca/clarify: needs a source --> after.';
-const MARKER_START = findMarkersInDoc(DOC)[0]!.marker.start;
+const MARKER_START = at(findMarkersInDoc(DOC), 0).marker.start;
 
 let settings: AnnotecaSettings;
 
