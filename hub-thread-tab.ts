@@ -1426,6 +1426,20 @@ export class ThreadTabRenderer {
 		this.createActionButton(actions, 'Delete', 'trash', () => {
 			void this.plugin.deleteComment(path, c);
 		});
+		// Anchoring hardening (C): only for a comment that quotes its text,
+		// which is what it is moved back to.
+		if (c.id && c.anchor?.text)
+			this.createActionButton(
+				actions,
+				'Find its text',
+				'locate-fixed',
+				() => this.plugin.reattachComment(path, c),
+				{
+					ariaLabel:
+						'Move this comment back to the text it quotes, if that text has moved',
+					cls: 'annoteca-reattach',
+				},
+			);
 		this.createActionButton(actions, 'Copy ID', 'copy', () => {
 			void this.plugin.copyCommentId(c);
 		});
