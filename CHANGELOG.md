@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.25.0] - 2026-10-15
+
+Comments stay attached: edits around them keep them, comments another tool drops can be restored, and comments are placed so every note renders in reading view.
+
 ### Added
 - **Comments stay attached while you edit.** Typing, pasting or deleting over text that holds a comment keeps the comment: it now covers what you typed in its place. Backspace or Delete next to a comment's icon no longer deletes the comment; the cursor steps over it instead. To remove a comment, use Delete in its menu. Cutting text still takes its comments with it, so pasting moves them.
 - **Comments that disappear can be restored.** If a comment vanishes from a note without being deleted in Annoteca, for example because an AI agent or another tool rewrote the paragraph, Annoteca says so and offers **Restore**. It goes back on the text it quotes when that is still there. Comments that disappeared this session are also listed under **Restore a comment that disappeared**.
