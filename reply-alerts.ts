@@ -43,7 +43,7 @@ const ALERT_AUDIO_EXTENSIONS: readonly string[] = [
 ];
 
 export const SYSTEM_NOTIFICATION_HINT =
-	"Annoteca: sent a system notification. If it did not appear, allow Obsidian in your computer's notification settings (on macOS: System Settings > Notifications > Obsidian, with banners and sound on).";
+	"Annoteca: sent a system notification. If it did not appear, allow Obsidian in your computer's notification settings (on macOS: System Settings > Notifications > Obsidian, with banners and sound on). macOS also hides notifications while the screen is shared or mirrored unless 'Allow notifications when mirroring or sharing the display' is on.";
 
 // Flushes landing within this long of an alert are held and given as one
 // alert when it ends.
@@ -254,8 +254,9 @@ export class ReplyAlerts {
 	// The settings tab's test button: one alert as if someone had replied,
 	// with nothing to open. A system notification the OS accepted can still
 	// be filed away silently (on macOS, until Obsidian is allowed in the
-	// notification settings), and the plugin cannot see that, so the test
-	// says where to look when one was sent.
+	// notification settings, and for every app while the screen is shared),
+	// and the plugin cannot see that, so the test says where to look when one
+	// was sent.
 	test(): void {
 		const sentSystem = this.alert([
 			{ type: 'replied', author: 'someone', path: 'a note' },
