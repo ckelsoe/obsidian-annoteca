@@ -242,6 +242,9 @@ function validCategory(raw: unknown): CategoryDefinition | undefined {
 	// Trimmed so a default of spaces cannot save a comment that looks empty.
 	if (typeof raw.defaultBody === 'string' && raw.defaultBody.trim() !== '')
 		cat.defaultBody = raw.defaultBody.trim();
+	// Only the non-default values are stored; "act" is the absence.
+	const agent = oneOf('reply', 'skip')(raw.agent);
+	if (agent !== undefined) cat.agent = agent;
 	return cat;
 }
 
@@ -1006,7 +1009,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 				items: [
 					{
 						name: 'Alert popup',
-						desc: "Tell you when someone else adds a comment or replies, such as an AI agent answering yours. Your own comments and replies never alert: they are recognized by your author identifier, or by 'user' when the author tag is off. In Obsidian shows a notice you can click to open the comment. System notification shows one from your computer even when Obsidian is in the background; on mobile you get the notice instead. Alerts arrive a few seconds after the note changes, and several close together are grouped into one. Turning alerts on indexes the whole vault once each session, which can take a moment on a large vault. Off by default.",
+						desc: "Tell you when someone else adds a comment or replies, such as an AI agent answering yours. Your own comments and replies never alert: they are recognized by your author identifier, or by 'user' when the author tag is off. In Obsidian shows a notice you can click to open the comment. System notification shows one from your computer even when Obsidian is in the background; on mobile you get the notice instead. If a system notification never appears, allow Obsidian in your computer's notification settings (on macOS: System Settings > Notifications > Obsidian); macOS also hides them while the screen is shared or mirrored. Alerts arrive a few seconds after the note changes, and several close together are grouped into one. Turning alerts on indexes the whole vault once each session, which can take a moment on a large vault. Off by default.",
 						control: {
 							type: 'dropdown',
 							key: 'replyAlertPopup',
@@ -1091,13 +1094,30 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 						name: 'Preview sound',
 						desc: 'Play the chosen sound once.',
 						visible: () => this.soundIsPlayedByAnnoteca(),
-						action: () => this.plugin.replyAlerts.previewSound(),
+						render: (setting: Setting) => {
+							setting.addButton((b) =>
+								b
+									.setButtonText('Play')
+									.onClick(() =>
+										this.plugin.replyAlerts.previewSound(),
+									),
+							);
+						},
 					},
 					{
-						name: 'Send a test alert',
+						name: 'Test alert',
 						desc: 'Show the popup and play the sound exactly as a real alert would.',
 						visible: () => alertsEnabled(this.plugin.settings),
-						action: () => this.plugin.replyAlerts.test(),
+						render: (setting: Setting) => {
+							setting.addButton((b) =>
+								b
+									.setButtonText('Send test alert')
+									.setCta()
+									.onClick(() =>
+										this.plugin.replyAlerts.test(),
+									),
+							);
+						},
 					},
 				],
 			},
@@ -2134,6 +2154,61 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			if (v === '') delete cat.defaultBody;
 			else cat.defaultBody = v;
 			void this.plugin.saveSettings();
+		});
+
+		// Agent handling: how an AI agent treats this category's comments,
+		// as written into the exported skill. The agent only learns a change
+		// from a re-export, so the change says so.
+		const agentWrap = controls.createDiv({
+			cls: 'annoteca-category-control',
+		});
+		agentWrap.createDiv({
+			cls: 'annoteca-category-control-label',
+			text: 'Agent handling',
+		});
+		const agentSelect = agentWrap.createEl('select', {
+			cls: 'dropdown',
+			attr: { 'aria-label': `Agent handling for ${cat.displayName}` },
+		});
+		agentSelect.createEl('option', {
+			value: 'act',
+			text: 'Act on it: may reply and edit the text',
+		});
+		agentSelect.createEl('option', {
+			value: 'reply',
+			text: 'Reply only: answers, never edits',
+		});
+		agentSelect.createEl('option', {
+			value: 'skip',
+			text: 'Skip: leaves it for you',
+		});
+		agentSelect.value = cat.agent ?? 'act';
+		agentSelect.addEventListener('change', () => {
+			const previous = cat.agent;
+			const next = agentSelect.value;
+			if (next === 'reply' || next === 'skip') cat.agent = next;
+			else delete cat.agent;
+			this.plugin.saveSettings().then(
+				() => {
+					new Notice(
+						'Export the AI skill again so your assistant follows this.',
+					);
+				},
+				(err: unknown) => {
+					console.error(
+						'Annoteca: saving agent handling failed',
+						err,
+					);
+					// Back to what is stored, so choosing the value again is
+					// a change and retries the save.
+					if (previous === undefined) delete cat.agent;
+					else cat.agent = previous;
+					agentSelect.value = previous ?? 'act';
+					new Notice(
+						'Annoteca: could not save the agent handling. Try again.',
+					);
+				},
+			);
 		});
 
 		// Actions: either Remove or the protected note.

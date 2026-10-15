@@ -35,8 +35,17 @@ describe('categories: validation', () => {
 });
 
 describe('categories: defaults', () => {
-	it('ships seven default categories', () => {
-		expect(DEFAULT_CATEGORIES).toHaveLength(7);
+	it('ships eight default categories', () => {
+		expect(DEFAULT_CATEGORIES).toHaveLength(8);
+	});
+
+	it('ships Note to self as the one category agents skip', () => {
+		expect(
+			DEFAULT_CATEGORIES.filter((c) => c.agent !== undefined).map((c) => [
+				c.id,
+				c.agent,
+			]),
+		).toEqual([['note-to-self', 'skip']]);
 	});
 
 	it('ships an uncategorized scratchpad default', () => {

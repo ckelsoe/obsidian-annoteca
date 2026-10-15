@@ -298,3 +298,63 @@ describe('skill v8: machine-created comments', () => {
 		expect(skill).toContain('`[author=]`, `[source=]`, `[anchor=]`');
 	});
 });
+
+describe('skill v11: agent handling', () => {
+	const skill = buildSkillMarkdown(
+		[
+			{ id: 'tone', displayName: 'Tone' },
+			{ id: 'clarify', displayName: 'Clarify', agent: 'reply' },
+			{ id: 'note-to-self', displayName: 'Note to self', agent: 'skip' },
+		],
+		undefined,
+	);
+
+	it('is schema version 11', () => {
+		expect(SKILL_SCHEMA_VERSION).toBe(11);
+		expect(parseSkillVersion(skill)).toBe(11);
+	});
+
+	it('gives every category its handling, act when unset', () => {
+		expect(skill).toContain('| Category | Meaning | Agent handling |');
+		expect(skill).toContain('| `tone` | Tone | Act on it |');
+		expect(skill).toContain('| `clarify` | Clarify | Reply only |');
+		expect(skill).toContain('| `note-to-self` | Note to self | Skip |');
+	});
+
+	it('keeps a display name with a pipe or line break in its own cell', () => {
+		const odd = buildSkillMarkdown(
+			[
+				{
+					id: 'private',
+					displayName: 'Private | Act on it\nreally',
+					agent: 'skip',
+				},
+			],
+			undefined,
+		);
+		expect(odd).toContain(
+			'| `private` | Private \\| Act on it really | Skip |',
+		);
+	});
+
+	it('keeps a backslash before a pipe from un-escaping it', () => {
+		const odd = buildSkillMarkdown(
+			[{ id: 'private', displayName: String.raw`A \| B`, agent: 'skip' }],
+			undefined,
+		);
+		expect(odd).toContain(String.raw`| ${'`private`'} | A \\\| B | Skip |`);
+	});
+
+	it('says how to reply to an end-of-file comment under Reply only', () => {
+		expect(skill).toMatch(
+			/\*\*Reply only\*\*:.*store's `replies` array for an end-of-file comment/,
+		);
+	});
+
+	it('says what each handling allows', () => {
+		expect(skill).toContain('### Agent handling');
+		expect(skill).toMatch(/\*\*Reply only\*\*:.*Never edit the passage/);
+		expect(skill).toMatch(/\*\*Skip\*\*: leave the comment entirely alone/);
+		expect(skill).toContain('is **Act on it**');
+	});
+});

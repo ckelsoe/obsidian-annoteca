@@ -6,6 +6,7 @@ import {
 	ALERT_COOLDOWN_MS,
 	AlertCooldown,
 	ReplyAlerts,
+	SYSTEM_NOTIFICATION_HINT,
 	TONES,
 	alertsEnabled,
 	describeAlert,
@@ -375,6 +376,21 @@ describe('ReplyAlerts routing', () => {
 		expect(r.calls).toEqual([
 			'notice:Annoteca: kilo replied in Ch1',
 			'dispose',
+		]);
+	});
+
+	it('test() says where to look after sending a system notification', () => {
+		const r = rig(settings({ replyAlertPopup: 'system' }));
+		r.alerts.test();
+		expect(r.calls).toEqual([
+			'system:someone replied in a note:silent',
+			`notice:${SYSTEM_NOTIFICATION_HINT}`,
+		]);
+		const fallback = rig(settings({ replyAlertPopup: 'system' }), false);
+		fallback.alerts.test();
+		expect(fallback.calls).toEqual([
+			'system:someone replied in a note:silent',
+			'notice:Annoteca: someone replied in a note',
 		]);
 	});
 

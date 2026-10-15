@@ -42,6 +42,9 @@ const ALERT_AUDIO_EXTENSIONS: readonly string[] = [
 	'webm',
 ];
 
+export const SYSTEM_NOTIFICATION_HINT =
+	"Annoteca: sent a system notification. If it did not appear, allow Obsidian in your computer's notification settings (on macOS: System Settings > Notifications > Obsidian, with banners and sound on). macOS also hides notifications while the screen is shared or mirrored unless 'Allow notifications when mirroring or sharing the display' is on.";
+
 // Flushes landing within this long of an alert are held and given as one
 // alert when it ends.
 export const ALERT_COOLDOWN_MS = 30_000;
@@ -249,9 +252,17 @@ export class ReplyAlerts {
 	}
 
 	// The settings tab's test button: one alert as if someone had replied,
-	// with nothing to open.
+	// with nothing to open. A system notification the OS accepted can still
+	// be filed away silently (on macOS, until Obsidian is allowed in the
+	// notification settings, and for every app while the screen is shared),
+	// and the plugin cannot see that, so the test says where to look when one
+	// was sent.
 	test(): void {
-		this.alert([{ type: 'replied', author: 'someone', path: 'a note' }]);
+		const sentSystem = this.alert([
+			{ type: 'replied', author: 'someone', path: 'a note' },
+		]);
+		if (sentSystem)
+			this.outputs.notice(SYSTEM_NOTIFICATION_HINT, undefined);
 	}
 
 	// The user asked to hear it, so every failure is reported.
@@ -267,8 +278,9 @@ export class ReplyAlerts {
 		this.outputs.dispose();
 	}
 
-	private alert(events: readonly CommentEvent[]): void {
-		if (this.disposed) return;
+	// True when a system notification was handed to the OS.
+	private alert(events: readonly CommentEvent[]): boolean {
+		if (this.disposed) return false;
 		const s = this.settings();
 		const text = describeAlert(events, this.noteName);
 		const { target } = text;
@@ -276,10 +288,11 @@ export class ReplyAlerts {
 			target === undefined ? undefined : (): void => this.open(target.id);
 		let notice =
 			s.replyAlertPopup === 'notice' || s.replyAlertPopup === 'both';
+		let shown = false;
 		if (popupIncludesSystem(s.replyAlertPopup)) {
 			// Silent unless the OS sound is the chosen one, so two sounds
 			// never play together.
-			const shown = this.outputs.system(
+			shown = this.outputs.system(
 				text.title,
 				text.body,
 				s.replyAlertSound !== 'system',
@@ -295,6 +308,7 @@ export class ReplyAlerts {
 			this.soundFailureShown = true;
 			this.outputs.notice(`Annoteca: ${why}`, undefined);
 		});
+		return shown;
 	}
 
 	private playSound(s: AlertSettings, onFail: (why: string) => void): void {

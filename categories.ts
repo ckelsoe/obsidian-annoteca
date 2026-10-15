@@ -63,6 +63,14 @@ export const DEFAULT_CATEGORIES: readonly CategoryDefinition[] = [
 		color: 'var(--color-yellow)',
 	},
 	{
+		id: 'note-to-self',
+		displayName: 'Note to self',
+		icon: 'sticky-note',
+		color: 'var(--color-pink)',
+		// A reminder for the user, not a request: agents leave it alone.
+		agent: 'skip',
+	},
+	{
 		id: 'uncategorized',
 		displayName: 'Uncategorized',
 		icon: 'circle',
