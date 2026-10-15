@@ -7,6 +7,7 @@ import {
 	STORE_SCHEMA_VERSION,
 	type StoredComment,
 	withStoreRewrite,
+	storeRegions,
 } from '../store';
 import type { AnchorText, Reply } from '../types';
 
@@ -591,5 +592,37 @@ describe('withStoreRewrite', () => {
 		expect(
 			withStoreRewrite(content, prose, [entry('aaaa1111', 'one')]),
 		).toEqual(prose);
+	});
+});
+
+describe('storeRegions', () => {
+	const entry = (id: string): StoredComment => ({
+		id,
+		category: 'clarify',
+		body: id,
+		replies: [],
+	});
+
+	it('merges the blocks at the end of a note into one region', () => {
+		const content = writeStoreRegion('Prose.\n', [
+			entry('aaaa1111'),
+			entry('bbbb2222'),
+		]);
+		const regions = storeRegions(content);
+		expect(regions).toHaveLength(1);
+		const [r] = regions;
+		expect(r?.count).toBe(2);
+		expect(content.slice(0, r?.start).trimEnd()).toBe('Prose.');
+		expect(content.slice(r?.end).trim()).toBe('');
+	});
+
+	it('keeps a block moved up into the prose as its own region', () => {
+		const atEnd = writeStoreRegion('Alpha.\n', [entry('aaaa1111')]);
+		const content = `${atEnd.trimEnd()}\n\nMoved prose.\n\n${atEnd.slice(atEnd.indexOf('<!--'))}`;
+		expect(storeRegions(content).map((r) => r.count)).toEqual([1, 1]);
+	});
+
+	it('finds nothing in a note without a store', () => {
+		expect(storeRegions('Just prose.')).toEqual([]);
 	});
 });

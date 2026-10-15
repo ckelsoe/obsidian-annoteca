@@ -1600,10 +1600,11 @@ export default class AnnotecaPlugin extends Plugin {
 	}
 
 	// F-261: right-clicking text selected in a note in reading view offers
-	// "Add comment for selection". Obsidian shows no menu of its own there
-	// (checked with a real right-click), so this adds one rather than adding
-	// to one. The range is worked out at right-click time, while the selection
-	// is certainly still there.
+	// "Add comment for selection". Obsidian has no menu there to add to: the
+	// one that appears is the system's own (Look up, Copy), which a plugin
+	// cannot extend, so this shows Obsidian's menu instead and keeps Copy in
+	// it. The range is worked out at right-click time, while the selection is
+	// certainly still there.
 	private registerReadingMenu(doc: Document): void {
 		this.registerDomEvent(doc, 'contextmenu', (evt) => {
 			// targetNode, not instanceof Node: in a pop-out window the event's
@@ -1623,8 +1624,22 @@ export default class AnnotecaPlugin extends Plugin {
 				);
 			if (!view) return;
 			const found = readingSelectionRange(view);
+			const selected = selection.toString();
 			evt.preventDefault();
 			new Menu()
+				.addItem((item) =>
+					item
+						.setTitle('Copy')
+						.setIcon('copy')
+						.onClick(() => {
+							navigator.clipboard
+								.writeText(selected)
+								.catch((err: unknown) => {
+									console.error('Annoteca: copy failed', err);
+									new Notice('Could not copy the selection.');
+								});
+						}),
+				)
 				.addItem((item) =>
 					item
 						.setTitle('Annoteca: add comment for selection')
@@ -1699,7 +1714,7 @@ export default class AnnotecaPlugin extends Plugin {
 		}
 		if (stale)
 			new Notice(
-				'Annoteca did not save that comment: the note changed while the form was open. Add it again.',
+				'Annoteca did not save that comment: the note changed while the form was open. Your text is still in the form; close it, select the passage again, and add the comment.',
 			);
 		return !stale;
 	}

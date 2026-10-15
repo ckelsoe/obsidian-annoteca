@@ -87,12 +87,19 @@ export class StarredTabRenderer {
 				text: truncate(c.body, 160),
 			});
 
-			if (c.date || c.author || c.resolution) {
+			if (c.date || c.author || c.resolution || c.addressed) {
 				const meta = card.createDiv({ cls: 'annoteca-starred-meta' });
 				if (c.resolution)
 					meta.createSpan({
 						cls: 'annoteca-reviewer-state',
 						text: 'resolved',
+					});
+				// Same precedence as the Thread tab: resolved wins. Addressed
+				// means an edit is waiting for accept, revise or reject.
+				else if (c.addressed)
+					meta.createSpan({
+						cls: 'annoteca-reviewer-state annoteca-reviewer-state-addressed',
+						text: 'addressed',
 					});
 				if (c.date) meta.createSpan({ text: formatStamp(c.date) });
 				if (c.author) meta.createSpan({ text: c.author });

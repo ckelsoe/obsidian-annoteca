@@ -11,9 +11,10 @@ import { toEditorText } from './note-text';
 import type { Comment } from './types';
 import { forbiddenRanges } from './comment-service';
 import {
-	countMatches,
+	collapseWhitespace,
 	locateInSource,
 	normalizeSelection,
+	startsBefore,
 } from './reading-selection';
 
 export interface ThreadCounts {
@@ -154,14 +155,15 @@ function sectionFor(node: Node | null): HTMLElement | undefined {
 	return undefined;
 }
 
-// The section's rendered text before `range` starts, without Annoteca's own
-// indicator buttons, which reading view adds and the source does not hold.
-function renderedBefore(section: HTMLElement, range: Range): string {
-	const before = section.ownerDocument.createRange();
-	before.setStart(section, 0);
-	before.setEnd(range.startContainer, range.startOffset);
+// The section's rendered text, up to where `range` starts when one is given,
+// without Annoteca's own indicator buttons, which reading view adds and the
+// source does not hold.
+function renderedText(section: HTMLElement, upTo?: Range): string {
+	const span = section.ownerDocument.createRange();
+	span.selectNodeContents(section);
+	if (upTo) span.setEnd(upTo.startContainer, upTo.startOffset);
 	const holder = section.ownerDocument.win.createDiv();
-	holder.appendChild(before.cloneContents());
+	holder.appendChild(span.cloneContents());
 	for (const b of Array.from(
 		holder.querySelectorAll('.annoteca-rv-indicator'),
 	))
@@ -206,9 +208,12 @@ export function readingSelectionRange(
 	const sectionStart = offsetOfLine(text, info.lineStart);
 	const sectionEnd = offsetOfLine(text, info.lineEnd + 1);
 	const selected = selection.toString();
-	const occurrence = countMatches(
-		normalizeSelection(renderedBefore(section, range)),
+	// Where the selection starts among every place its text starts in the
+	// section, overlapping ones included.
+	const occurrence = startsBefore(
+		collapseWhitespace(renderedText(section)),
 		normalizeSelection(selected),
+		collapseWhitespace(renderedText(section, range)).length,
 	);
 	const found = locateInSource(
 		text.slice(sectionStart, sectionEnd),

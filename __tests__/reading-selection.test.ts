@@ -1,9 +1,10 @@
 // F-261: mapping text selected in reading view back to its source range.
 
 import {
-	countMatches,
+	collapseWhitespace,
 	locateInSource,
 	normalizeSelection,
+	startsBefore,
 	visibleText,
 } from '../reading-selection';
 
@@ -90,6 +91,32 @@ describe('locateInSource', () => {
 		);
 	});
 
+	it('picks an overlapping repeat by its start, not by whole matches', () => {
+		const src = 'banana';
+		const before = 'ban';
+		const n = startsBefore(src, 'ana', before.length);
+		expect(locateInSource(src, 'ana', n)).toEqual({ start: 3, end: 6 });
+	});
+
+	it('skips HTML tags and their attributes', () => {
+		const src = '<span title="cat">cat</span> cat';
+		expect(visibleText(src).text).toBe('cat cat');
+		expect(slice(src, locateInSource(src, 'cat', 0))).toBe('cat');
+		expect(locateInSource(src, 'cat', 0)).toEqual({ start: 18, end: 21 });
+	});
+
+	it('decodes entities and maps them to their whole source span', () => {
+		const src = 'Tom &amp; Jerry and amp';
+		expect(visibleText(src).text).toBe('Tom & Jerry and amp');
+		expect(slice(src, locateInSource(src, 'Tom & Jerry', 0))).toBe(
+			'Tom &amp; Jerry',
+		);
+		// "amp" inside the entity is not visible text, so the only match is
+		// the plain word at the end.
+		expect(slice(src, locateInSource(src, 'amp', 0))).toBe('amp');
+		expect(locateInSource(src, 'amp', 0)?.start).toBe(20);
+	});
+
 	it('returns undefined for text that is not there, or empty', () => {
 		expect(locateInSource('abc', 'xyz', 0)).toBeUndefined();
 		expect(locateInSource('abc', '   ', 0)).toBeUndefined();
@@ -101,9 +128,14 @@ describe('selection helpers', () => {
 		expect(normalizeSelection('  a\n\tb  ')).toBe('a b');
 	});
 
-	it('counts non-overlapping matches before the selection', () => {
-		expect(countMatches('aaaa', 'aa')).toBe(2);
-		expect(countMatches('the cat and the ', 'the cat')).toBe(1);
-		expect(countMatches('x', '')).toBe(0);
+	it('counts every start before the selection, overlapping ones too', () => {
+		// The last "ana" of "banana" starts at 3; one start (1) is before it.
+		expect(startsBefore('banana', 'ana', 3)).toBe(1);
+		expect(startsBefore('the cat and the cat', 'the cat', 12)).toBe(1);
+		expect(startsBefore('x', '', 1)).toBe(0);
+	});
+
+	it('collapses whitespace the same way visibleText does', () => {
+		expect(collapseWhitespace('  a \n b ')).toBe('a b ');
 	});
 });

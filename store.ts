@@ -552,6 +552,23 @@ export interface SpliceRange {
 	insert: string;
 }
 
+// The store as the editor draws it: runs of store blocks with nothing but
+// whitespace between them, each with how many blocks it holds. The usual note
+// has one run at its end; a block moved up into the prose is a run of its own.
+export function storeRegions(
+	content: string,
+): { start: number; end: number; count: number }[] {
+	const out: { start: number; end: number; count: number }[] = [];
+	for (const b of scanStoreEntries(content)) {
+		const last = out[out.length - 1];
+		if (last && content.slice(last.end, b.start).trim() === '') {
+			last.end = b.end;
+			last.count += 1;
+		} else out.push({ start: b.start, end: b.end, count: 1 });
+	}
+	return out;
+}
+
 // Prose splices plus the store rewrite that goes with them, as one list of
 // non-overlapping splices against `content`.
 //

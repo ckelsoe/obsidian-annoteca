@@ -14,6 +14,7 @@
 // and the defect is in the submit path, not the form.
 
 import { noticeLog } from '../__mocks__/obsidian';
+import { MarkdownView } from 'obsidian';
 import type { Editor, EditorPosition, MarkdownFileInfo } from 'obsidian';
 import type AnnotecaPlugin from '../main';
 import { ComposerForm, type ComposerRequest } from '../composer';
@@ -887,5 +888,98 @@ describe('composer: category default text', () => {
 
 		expect(host.content).toBe(existing);
 		expect(noticeLog).toContain('Comment body is empty.');
+	});
+});
+
+// F-261: a comment made in reading view is written into the view's editor and
+// then to the file, because Obsidian does not save that editor while the note
+// is shown rendered. The form closes only once the file has it.
+describe('the composer in reading view', () => {
+	function openInReadingView(save: () => Promise<boolean>) {
+		const host = makeEditor('Some prose here.\n', 'note.md', 'prose');
+		let content = host.content;
+		const editor = Object.assign(host.editor, {
+			getValue: () => host.content,
+			setValue: (v: string) => {
+				host.content = v;
+			},
+			getCursor: () => host.editor.offsetToPos(5),
+		});
+		const view = Object.create(MarkdownView.prototype) as MarkdownView;
+		Object.assign(view, {
+			file: { path: 'note.md' },
+			getMode: () => 'preview',
+			getViewData: () => content,
+		});
+		const saves: string[] = [];
+		const plugin = Object.assign(makePlugin(), {
+			persistReadingViewEdit: (
+				_f: unknown,
+				_b: string,
+				after: string,
+			) => {
+				saves.push(after);
+				return save();
+			},
+		});
+		let closed = false;
+		const form = new ComposerForm(
+			plugin,
+			{ editor, view, filePath: 'note.md' },
+			{
+				close: () => {
+					closed = true;
+				},
+			},
+		) as unknown as ComposerInternals;
+		form.state.selectedCategory = 'clarify';
+		form.state.body = 'a reading-view note';
+		return {
+			host,
+			form,
+			saves,
+			closed: () => closed,
+			setFile: (v: string) => {
+				content = v;
+			},
+		};
+	}
+
+	// A few microtask turns: the save resolves, then its .then runs.
+	const settle = async (): Promise<void> => {
+		for (let i = 0; i < 5; i++) await Promise.resolve();
+	};
+
+	it('closes once the file has the comment', async () => {
+		const h = openInReadingView(() => Promise.resolve(true));
+		void h.form.submit();
+		expect(h.closed()).toBe(false);
+		await settle();
+		expect(h.saves).toHaveLength(1);
+		expect(h.saves[0]).toContain('a reading-view note');
+		expect(h.closed()).toBe(true);
+	});
+
+	it('stays open and puts the editor back when the save is refused', async () => {
+		const h = openInReadingView(() => Promise.resolve(false));
+		h.setFile('Some prose here, edited elsewhere.\n');
+		void h.form.submit();
+		await settle();
+		expect(h.closed()).toBe(false);
+		expect(h.host.content).toBe('Some prose here, edited elsewhere.\n');
+		expect(h.form.state.body).toBe('a reading-view note');
+	});
+
+	it('ignores a second press while the save is in flight', async () => {
+		let release: (ok: boolean) => void = () => undefined;
+		const h = openInReadingView(
+			() => new Promise<boolean>((r) => (release = r)),
+		);
+		void h.form.submit();
+		void h.form.submit();
+		release(true);
+		await settle();
+		expect(h.saves).toHaveLength(1);
+		expect(parseAll(h.host.content)).toHaveLength(1);
 	});
 });

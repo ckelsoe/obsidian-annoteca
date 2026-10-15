@@ -12,6 +12,7 @@ import {
 } from 'obsidian';
 
 import type AnnotecaPlugin from './main';
+import { toEditorText } from './note-text';
 import type { AnchorText, Comment, StorageMode } from './types';
 import {
 	buildAnchorFromSelection,
@@ -86,6 +87,8 @@ interface ComposerState {
 }
 
 export class ComposerForm {
+	// True while a reading-view save is being written to the file.
+	private persisting = false;
 	private readonly plugin: AnnotecaPlugin;
 	private readonly request: ComposerRequest;
 	private readonly hooks: ComposerHooks;
@@ -557,6 +560,9 @@ export class ComposerForm {
 	}
 
 	private submit(): void {
+		// A reading-view save is still being written to the file (see
+		// finish); a second press would insert the comment twice.
+		if (this.persisting) return;
 		const finalBody = this.composeFinalBody();
 		if (finalBody === '') {
 			new Notice('Comment body is empty.');
@@ -791,19 +797,39 @@ export class ComposerForm {
 	// into the view's editor, which Obsidian neither saves nor renders while
 	// the note is shown rendered, so the change is written to the file as
 	// well; reading view then re-renders from it.
+	//
+	// The form closes only once the file has it. If the note changed while the
+	// form was open the write is refused; the editor is put back to match the
+	// file, so nothing half-done lingers there, and the form stays open with
+	// the text the user typed.
 	private finish(before: string, markerStart: number): void {
 		const view = this.request.view;
+		const done = (): void => {
+			this.hooks.close();
+			this.hooks.onSubmitted?.(this.request.filePath, markerStart);
+		};
 		if (
-			view instanceof MarkdownView &&
-			view.getMode() === 'preview' &&
-			view.file
-		)
-			void this.plugin.persistReadingViewEdit(
+			!(view instanceof MarkdownView) ||
+			view.getMode() !== 'preview' ||
+			!view.file
+		) {
+			done();
+			return;
+		}
+		this.persisting = true;
+		void this.plugin
+			.persistReadingViewEdit(
 				view.file,
 				before,
 				this.request.editor.getValue(),
-			);
-		this.hooks.close();
-		this.hooks.onSubmitted?.(this.request.filePath, markerStart);
+			)
+			.then((saved) => {
+				this.persisting = false;
+				if (saved) {
+					done();
+					return;
+				}
+				this.request.editor.setValue(toEditorText(view.getViewData()));
+			});
 	}
 }

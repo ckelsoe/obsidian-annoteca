@@ -2700,3 +2700,10 @@ settings:
 .annoteca-alert-notice {
 	cursor: pointer;
 }
+
+/* The end-of-file comment store, drawn as one quiet line in the editor. */
+.annoteca-store-widget {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	font-style: italic;
+}

@@ -193,6 +193,14 @@ export class VaultUnresolvedView extends IndexBackedListView {
 			text: def.displayName,
 		});
 
+		// Addressed: an edit is waiting for accept, revise or reject, which is
+		// the one open state that needs the reader rather than the writer.
+		if (located.comment.addressed && !located.comment.resolution)
+			row.createSpan({
+				cls: 'annoteca-reviewer-state annoteca-reviewer-state-addressed',
+				text: 'addressed',
+			});
+
 		row.createSpan({ cls: 'annoteca-row-path', text: located.path });
 
 		const body =
@@ -806,8 +814,10 @@ export class AnnotecaCommentView extends AnnotecaBaseView {
 // because the tab always draws the same one comment. A no-op when focus is
 // outside `root`, so a rebuild never pulls focus from elsewhere.
 export function captureFocus(root: HTMLElement): () => void {
+	// instanceOf, not instanceof: in a pop-out window the element belongs to
+	// that window's HTMLElement, and instanceof against this one is false.
 	const active = root.ownerDocument.activeElement;
-	if (!(active instanceof HTMLElement) || !root.contains(active))
+	if (!active?.instanceOf(HTMLElement) || !root.contains(active))
 		return () => undefined;
 	const selection = active.instanceOf(HTMLTextAreaElement)
 		? { start: active.selectionStart, end: active.selectionEnd }
@@ -832,7 +842,7 @@ export function captureFocus(root: HTMLElement): () => void {
 				: cls !== null
 					? root.getElementsByClassName(cls).item(index)
 					: null;
-		if (!(again instanceof HTMLElement)) return;
+		if (!again?.instanceOf(HTMLElement)) return;
 		again.focus();
 		if (selection && again.instanceOf(HTMLTextAreaElement))
 			again.setSelectionRange(selection.start, selection.end);

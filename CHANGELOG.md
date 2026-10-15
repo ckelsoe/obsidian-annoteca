@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Comment from reading view.** Select text in a note in reading view, right-click, and choose **Annoteca: add comment for selection**, or run **Add comment for selection in reading view**. The comment form opens on that passage and you stay in reading view. The right-click menu also offers Copy. Select within one paragraph or block; if Annoteca cannot match the selection to the note's text it says so rather than guessing.
+- The Starred tab and the vault-wide unresolved view now mark comments that are **addressed**, waiting for you to accept, revise or reject an edit.
+- The comment store at the end of a note shows in the editor as one quiet line, "Annoteca: N stored comments", instead of a grey block of data. The underline indicator style still shows it raw, as it does markers.
+- Exported AI skill version 12: how to find every note with open comments across a vault from the `annoteca_open` property, instead of reading a Bases file. Export the skill again after updating.
+
+### Fixed
+- Resolving, replying to or deleting a comment, from the side panel or from another plugin, on a note open in **reading view** reported success but was lost: the change never reached the file and was discarded when the note went back to editing. Those changes are now written to the file.
+- Another plugin adding comments (for example the MindMap Bridge or Plumbline) to a note whose comment store had been moved up into the text, as the Mind map editor does when it moves the last section, was refused. Resolving or deleting comments in such a note was refused too. They now work, and the store moves back to the end of the note.
+- Typing a reply in the side panel no longer loses the cursor when the note changes underneath, for example when an agent replies to another comment.
+- The frontmatter summary no longer writes the same values twice after a comment changes.
+- Two style rules flagged by the marketplace scan (`inset`, `aspect-ratio`) are replaced with widely supported equivalents.
+
 ## [1.23.0] - 2026-10-15
 
 Annoteca can now tell you when someone else, such as an AI agent, comments or replies, and each category can say what an agent may do with its comments, so a note you leave for yourself is not treated as a request.
