@@ -110,12 +110,17 @@ const AGENT_HANDLING_LABEL: Record<AgentHandling, string> = {
 // shift the agent handling into the wrong column, and a line break would end
 // the row, so the reader would be told the wrong rule for that category.
 function tableCell(text: string): string {
-	return text
-		.split(/[\r\n]+/)
-		.map((line) => line.trim())
-		.filter((line) => line !== '')
-		.join(' ')
-		.replace(/\|/g, '\\|');
+	return (
+		text
+			.split(/[\r\n]+/)
+			.map((line) => line.trim())
+			.filter((line) => line !== '')
+			.join(' ')
+			// Backslashes first: a `\|` already in the name would otherwise
+			// become `\\|`, an escaped backslash followed by a bare pipe.
+			.replace(/\\/g, '\\\\')
+			.replace(/\|/g, '\\|')
+	);
 }
 
 function categoryTable(categories: CategoryDefinition[]): string {

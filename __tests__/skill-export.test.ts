@@ -337,6 +337,14 @@ describe('skill v11: agent handling', () => {
 		);
 	});
 
+	it('keeps a backslash before a pipe from un-escaping it', () => {
+		const odd = buildSkillMarkdown(
+			[{ id: 'private', displayName: String.raw`A \| B`, agent: 'skip' }],
+			undefined,
+		);
+		expect(odd).toContain(String.raw`| ${'`private`'} | A \\\| B | Skip |`);
+	});
+
 	it('says how to reply to an end-of-file comment under Reply only', () => {
 		expect(skill).toMatch(
 			/\*\*Reply only\*\*:.*store's `replies` array for an end-of-file comment/,

@@ -2184,6 +2184,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		});
 		agentSelect.value = cat.agent ?? 'act';
 		agentSelect.addEventListener('change', () => {
+			const previous = cat.agent;
 			const next = agentSelect.value;
 			if (next === 'reply' || next === 'skip') cat.agent = next;
 			else delete cat.agent;
@@ -2198,6 +2199,11 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 						'Annoteca: saving agent handling failed',
 						err,
 					);
+					// Back to what is stored, so choosing the value again is
+					// a change and retries the save.
+					if (previous === undefined) delete cat.agent;
+					else cat.agent = previous;
+					agentSelect.value = previous ?? 'act';
 					new Notice(
 						'Annoteca: could not save the agent handling. Try again.',
 					);
