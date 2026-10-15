@@ -153,6 +153,15 @@ describe('guardEdit and the end-of-file store', () => {
 				true,
 			).kind,
 		).toBe('refused');
+		// Deleting just the store's first character would unhinge it.
+		expect(
+			guardEdit(
+				doc,
+				ranges,
+				[{ from: start, to: start + 1, insert: '' }],
+				false,
+			).kind,
+		).toBe('refused');
 		const inBody = doc.indexOf('the body');
 		expect(
 			guardEdit(
@@ -207,6 +216,12 @@ describe('markerGuard in a CodeMirror state', () => {
 		});
 		expect(tr.state.doc.toString()).toBe(`${M} X beta. X words.`);
 		expect(tr.state.selection.ranges).toHaveLength(2);
+		// Both cursors sit after what was typed, so the next key appends.
+		expect(tr.state.selection.ranges.every((r) => r.empty)).toBe(true);
+		const next = tr.state.update(tr.state.replaceSelection('Y'), {
+			annotations: Transaction.userEvent.of('input.type'),
+		});
+		expect(next.state.doc.toString()).toBe(`${M} XY beta. XY words.`);
 	});
 
 	it('leaves a programmatic write alone', () => {

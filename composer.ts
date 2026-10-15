@@ -13,7 +13,7 @@ import {
 
 import type AnnotecaPlugin from './main';
 import {
-	headingTextEnd,
+	headingRangeEnd,
 	layoutMarker,
 	planMarkerInsert,
 } from './marker-placement';
@@ -373,9 +373,10 @@ export class ComposerForm {
 		const content = editor.getValue();
 		const markers = parseAll(content).map((c) => c.marker);
 		const occupied = [...markers, ...scanClosers(content, markers)];
-		const to =
-			(wholeHeading ? headingTextEnd(content, fromOffset) : undefined) ??
-			editor.posToOffset(editor.getCursor('to'));
+		const selectionEnd = editor.posToOffset(editor.getCursor('to'));
+		const to = wholeHeading
+			? headingRangeEnd(content, fromOffset, selectionEnd)
+			: selectionEnd;
 		return planCloser(content, fromOffset, to, occupied);
 	}
 

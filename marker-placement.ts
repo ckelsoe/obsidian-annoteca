@@ -164,6 +164,16 @@ export function planMarkerInsert(
 // undefined. A multi-line marker on a heading goes on its own line above it,
 // so a comment made on part of a heading covers the whole heading: its range
 // would otherwise start at the heading's first word whatever was selected.
+// The later of `end` and the heading end, when `at` is on a heading line: a
+// selection that runs past the heading keeps its own end.
+export function headingRangeEnd(
+	content: string,
+	at: number,
+	end: number,
+): number {
+	return Math.max(end, headingTextEnd(content, at) ?? end);
+}
+
 export function headingTextEnd(
 	content: string,
 	at: number,

@@ -47,7 +47,7 @@ import {
 } from './parser';
 import {
 	gapEnd,
-	headingTextEnd,
+	headingRangeEnd,
 	layoutMarker,
 	markerRemovalSpan,
 	planMarkerInsert,
@@ -899,9 +899,9 @@ export class CommentService {
 			// On a heading a multi-line marker goes above it, so the range
 			// covers the whole heading (see headingTextEnd).
 			const rangeEnd =
-				(mode !== 'eof'
-					? headingTextEnd(content, r.anchor.start)
-					: undefined) ?? r.anchor.end;
+				mode !== 'eof'
+					? headingRangeEnd(content, r.anchor.start, r.anchor.end)
+					: r.anchor.end;
 			const plan = r.closeRange
 				? planCloser(content, r.anchor.start, rangeEnd, occupied)
 				: undefined;
@@ -1111,8 +1111,9 @@ export class CommentService {
 		const markers = parseAll(base).map((c) => c.marker);
 		const eof = parseStore(base).length > 0;
 		const passageEnd = passage
-			? ((!eof ? headingTextEnd(base, passage.start) : undefined) ??
-				passage.end)
+			? !eof
+				? headingRangeEnd(base, passage.start, passage.end)
+				: passage.end
 			: undefined;
 		const plan =
 			passage && passageEnd !== undefined

@@ -26,6 +26,7 @@ import {
 	type StateField,
 } from '@codemirror/state';
 import type { Comment } from './types';
+import { scanStoreEntries } from './store';
 
 export interface GuardRange {
 	readonly start: number;
@@ -48,6 +49,8 @@ export type GuardResult =
 			readonly changes: GuardChange[];
 			// Where the cursor goes, in the document after the changes.
 			readonly cursor: number;
+			// The cursor for each change, when there are several.
+			readonly cursors: number[];
 	  }
 	| {
 			readonly kind: 'refused';
@@ -72,19 +75,9 @@ export function guardEdit(
 		for (const r of ranges) {
 			const whole = r.start >= c.from && r.end <= c.to;
 			if (whole) continue;
-			// The store's JSON can be edited by hand where it shows raw; only
-			// an edit that crosses its boundary would split it.
-			if (r.kind === 'store') {
-				const crosses =
-					(c.from < r.start && c.to > r.start) ||
-					(c.from < r.end && c.to > r.end);
-				if (crosses)
-					return {
-						kind: 'refused',
-						cursor: backward ? r.start : r.end,
-					};
-				continue;
-			}
+			// A store block is guarded like an opener: its `<!--` and `-->`
+			// are protected, and its JSON between them can be edited by hand
+			// where it shows raw.
 			const zones: { a: number; b: number }[] =
 				r.kind === 'closer'
 					? [{ a: r.start, b: r.end }]
@@ -109,6 +102,8 @@ export function guardEdit(
 	let onlyMarkers = true;
 	let delta = 0;
 	let cursor = 0;
+	// One cursor per change, after the text typed for it.
+	const cursors: number[] = [];
 	const out: GuardChange[] = [];
 	for (const c of changes) {
 		const inside = ranges
@@ -119,6 +114,7 @@ export function guardEdit(
 			onlyMarkers = false;
 			delta += c.insert.length - (c.to - c.from);
 			cursor = c.from + delta + (c.to - c.from);
+			cursors.push(cursor);
 			continue;
 		}
 		touched = true;
@@ -157,6 +153,7 @@ export function guardEdit(
 		const newFrom = c.from + delta;
 		delta += insert.length - (c.to - c.from);
 		cursor = newFrom + openers.length + gap.length + c.insert.length;
+		cursors.push(cursor);
 	}
 	if (!touched) return { kind: 'unchanged' };
 	if (onlyMarkers) {
@@ -167,7 +164,7 @@ export function guardEdit(
 			cursor: backward ? (first?.from ?? 0) : (last?.to ?? 0),
 		};
 	}
-	return { kind: 'rewritten', changes: out, cursor };
+	return { kind: 'rewritten', changes: out, cursor, cursors };
 }
 
 export function guardRangesOf(
@@ -222,9 +219,15 @@ export function markerGuard(
 		);
 		if (!near) return tr;
 		const doc = tr.startState.doc.toString();
+		// Each store block on its own, so each one's delimiters are guarded.
+		const blocks = scanStoreEntries(doc).map((b) => ({
+			start: b.start,
+			end: b.end,
+			kind: 'store' as const,
+		}));
 		const result = guardEdit(
 			doc,
-			ranges,
+			[...ranges.filter((r) => r.kind !== 'store'), ...blocks],
 			changes,
 			tr.isUserEvent('delete.backward'),
 		);
@@ -245,9 +248,20 @@ export function markerGuard(
 		const changeSet = ChangeSet.of(result.changes, doc.length);
 		const spec: TransactionSpec = {
 			changes: changeSet,
-			selection: multi
-				? tr.startState.selection.map(changeSet, 1)
-				: EditorSelection.cursor(result.cursor),
+			// Each cursor after the text typed for it, as plain typing leaves
+			// them: mapping the old selections would leave that text selected.
+			selection:
+				multi &&
+				result.cursors.length === tr.startState.selection.ranges.length
+					? EditorSelection.create(
+							result.cursors.map((p) =>
+								EditorSelection.cursor(p),
+							),
+							tr.startState.selection.mainIndex,
+						)
+					: multi
+						? tr.startState.selection.map(changeSet, 1)
+						: EditorSelection.cursor(result.cursor),
 			scrollIntoView: true,
 			...(userEvent !== undefined && { userEvent }),
 		};

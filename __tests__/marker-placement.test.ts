@@ -3,6 +3,7 @@
 
 import {
 	gapEnd,
+	headingRangeEnd,
 	headingTextEnd,
 	markerRemovalSpan,
 	layoutMarker,
@@ -160,6 +161,17 @@ describe('headingTextEnd', () => {
 			doc.indexOf('tail') + 4,
 		);
 		expect(headingTextEnd(doc, doc.indexOf('Body'))).toBeUndefined();
+	});
+});
+
+describe('headingRangeEnd', () => {
+	it('extends a selection inside a heading to its end, keeps one that runs past', () => {
+		const doc = '## Keep target tail\n\nBody text.';
+		const at = doc.indexOf('target');
+		expect(headingRangeEnd(doc, at, at + 6)).toBe(doc.indexOf('tail') + 4);
+		const past = doc.indexOf('Body') + 4;
+		expect(headingRangeEnd(doc, at, past)).toBe(past);
+		expect(headingRangeEnd(doc, doc.indexOf('Body'), past)).toBe(past);
 	});
 });
 
