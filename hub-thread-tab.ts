@@ -1156,12 +1156,15 @@ export class ThreadTabRenderer {
 		// The occurrence count tells apart two comments carrying the same id (a
 		// copy-pasted marker), which would otherwise share a key and send focus
 		// to the first of them.
-		if (c.id) {
-			const base = `${path}#${c.id}`;
-			const n = this.focusKeysSeen.get(base) ?? 0;
-			this.focusKeysSeen.set(base, n + 1);
-			textarea.setAttribute(FOCUS_KEY_ATTR, `${base}#${n}`);
-		}
+		// A comment with no id (a hand-typed marker) is named by its category
+		// and the start of its body instead: its position among the boxes
+		// changes whenever another comment above it opens or closes.
+		const base = c.id
+			? `${path}#${c.id}`
+			: `${path}#~${c.category}:${c.body.slice(0, 80)}`;
+		const n = this.focusKeysSeen.get(base) ?? 0;
+		this.focusKeysSeen.set(base, n + 1);
+		textarea.setAttribute(FOCUS_KEY_ATTR, `${base}#${n}`);
 		// Restore any draft saved for this comment, mirroring the popup composer.
 		if (c.id) {
 			const draft = this.plugin.loadDraft(c.id);
