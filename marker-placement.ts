@@ -152,7 +152,11 @@ export function planMarkerInsert(
 	if (lineStart > 0) {
 		const prevStart = content.lastIndexOf('\n', lineStart - 2) + 1;
 		const prev = content.slice(prevStart, lineStart - 1);
-		if (prev.trim() !== '' && !BREAKS_PARAGRAPH.test(prev)) {
+		if (
+			prev.trim() !== '' &&
+			!BREAKS_PARAGRAPH.test(prev) &&
+			!endsBlockHtml(content, prevStart + prev.trimEnd().length)
+		) {
 			const at = prevStart + prev.trimEnd().length;
 			return { at, before: ' ', after: '' };
 		}
@@ -218,6 +222,18 @@ export function markerRemovalSpan(
 		return { from: start, to: k };
 	}
 	return { from: start, to: end };
+}
+
+// Whether the text ending at `lineEnd` ends with an HTML comment that opened
+// its own block (an earlier marker placed above this paragraph, or alone after
+// a bullet). That line ends a raw HTML block, not a paragraph line, so a marker
+// appended to it would continue the block and show its own lines as text.
+function endsBlockHtml(content: string, lineEnd: number): boolean {
+	if (!content.slice(0, lineEnd).endsWith('-->')) return false;
+	const opener = content.lastIndexOf('<!--', lineEnd - 3);
+	if (opener === -1) return false;
+	const openerLine = content.lastIndexOf('\n', opener - 1) + 1;
+	return blockPrefix(content.slice(openerLine, opener)) !== undefined;
 }
 
 // The text to splice for a marker: `marker` laid out per the plan, with

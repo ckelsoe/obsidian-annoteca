@@ -39,6 +39,30 @@ describe('planMarkerInsert', () => {
 		expect(place('Some text.', 'Some')).toBe(`${M}\nSome text.`);
 	});
 
+	it('does not append to a line that ends an earlier own-line marker', () => {
+		const first = place('Intro.\n\nSome text.', 'Some');
+		const second = place(first, 'Some', M.replace('aaaa1111', 'bbbb2222'));
+		expect(second).toBe(
+			`Intro.\n\n${M}\n${M.replace('aaaa1111', 'bbbb2222')}\nSome text.`,
+		);
+		expect(
+			parseAll(second).every(
+				(c) =>
+					!markerBreaksReadingView(
+						second,
+						c.marker.start,
+						c.marker.end,
+					),
+			),
+		).toBe(true);
+	});
+
+	it('still appends after a paragraph line ending in an inline marker', () => {
+		expect(place(`First ${M}\nsecond line.`, 'second')).toBe(
+			`First ${M} ${M}\nsecond line.`,
+		);
+	});
+
 	it('moves a wrapped-line marker to the end of the line before', () => {
 		expect(place('First line\nsecond line.', 'second')).toBe(
 			`First line ${M}\nsecond line.`,

@@ -1010,7 +1010,7 @@ export class CommentService {
 	async reattachComment(
 		path: string,
 		comment: Comment,
-	): Promise<'moved' | 'here' | 'not-found'> {
+	): Promise<'moved' | 'here' | 'not-found' | 'blocked'> {
 		return this.enqueue(path, async () => {
 			const file = this.plugin.app.vault.getAbstractFileByPath(path);
 			if (!(file instanceof TFile)) return 'not-found';
@@ -1042,6 +1042,16 @@ export class CommentService {
 			// Out of the note, then back in at its text: the marker and any
 			// closer come out, and the same comment goes in at the passage.
 			if (current.id) this.plugin.lossGuard?.expectRemoval(current.id);
+			// Taking a marker out of a note with an unclosed opener above it
+			// can let that opener swallow prose, as for every other verb that
+			// removes one; the reason is shown and nothing is written.
+			if (
+				this.refusesForDamage(content, [
+					current.marker,
+					...(current.closer ? [current.closer] : []),
+				])
+			)
+				return 'blocked';
 			// Only what the marker's placement added goes, never the old
 			// passage's own syntax (a heading's #, a quote's >).
 			const removal = markerRemovalSpan(

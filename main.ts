@@ -3279,6 +3279,8 @@ export default class AnnotecaPlugin extends Plugin {
 	reattachComment(path: string, comment: Comment): void {
 		this.runGuarded('Moving the comment', async () => {
 			const result = await this.comments.reattachComment(path, comment);
+			// Blocked: the service has already said why.
+			if (result === 'blocked') return;
 			new Notice(
 				result === 'moved'
 					? 'Moved the comment to the text it quotes.'
