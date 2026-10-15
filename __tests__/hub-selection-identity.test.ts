@@ -31,6 +31,7 @@ import { installObsidianDomHelpers } from '../__mocks__/obsidian';
 import type AnnotecaPlugin from '../main';
 import type { App } from 'obsidian';
 import type { ScopeState } from '../types';
+import { at, defined } from './helpers/checked';
 
 const A = 'notes/a.md';
 const OTHER = 'Archive/OldNote.md';
@@ -125,7 +126,7 @@ describe('M10: the selection follows the comment, not the offset', () => {
 			fileScope(),
 			A,
 		);
-		const third = index.get(A)!.comments[2]!;
+		const third = at(defined(index.get(A)).comments, 2);
 		renderer.setActiveComment(A, third.marker.start);
 		render();
 		expect(activeBody(container)).toContain('third one');
@@ -137,7 +138,7 @@ describe('M10: the selection follows the comment, not the offset', () => {
 
 		expect(activeBody(container)).toContain('third one');
 		expect(renderer.activeStart).toBe(
-			index.get(A)!.comments[2]!.marker.start,
+			at(defined(index.get(A)).comments, 2).marker.start,
 		);
 	});
 
@@ -147,7 +148,10 @@ describe('M10: the selection follows the comment, not the offset', () => {
 			fileScope(),
 			A,
 		);
-		renderer.setActiveComment(A, index.get(A)!.comments[0]!.marker.start);
+		renderer.setActiveComment(
+			A,
+			at(defined(index.get(A)).comments, 0).marker.start,
+		);
 		render();
 
 		// Open the SECOND card with its chevron, which is not the active one.
@@ -155,7 +159,9 @@ describe('M10: the selection follows the comment, not the offset', () => {
 			'.annoteca-reviewer-chevron',
 		);
 		expect(chevrons.length).toBeGreaterThan(1);
-		chevrons[1]!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+		at([...chevrons], 1).dispatchEvent(
+			new MouseEvent('click', { bubbles: true }),
+		);
 		render();
 		const expandedBefore = expandedCount(container);
 		expect(expandedBefore).toBeGreaterThan(0);
@@ -180,7 +186,10 @@ describe('M10: the selection follows the comment, not the offset', () => {
 			{ shape: { kind: 'vault' }, anchorPath: '', pinned: false },
 			A,
 		);
-		renderer.setActiveComment(A, index.get(A)!.comments[0]!.marker.start);
+		renderer.setActiveComment(
+			A,
+			at(defined(index.get(A)).comments, 0).marker.start,
+		);
 		render();
 		expect(activeBody(container)).toContain('mine');
 
@@ -201,7 +210,10 @@ describe('M10: the selection follows the comment, not the offset', () => {
 			{ shape: { kind: 'vault' }, anchorPath: '', pinned: false },
 			A,
 		);
-		renderer.setActiveComment(A, index.get(A)!.comments[0]!.marker.start);
+		renderer.setActiveComment(
+			A,
+			at(defined(index.get(A)).comments, 0).marker.start,
+		);
 		render();
 
 		// Chevron of the card holding a given body, so this does not depend on
@@ -246,7 +258,7 @@ describe('M10: the selection follows the comment, not the offset', () => {
 			fileScope(),
 			A,
 		);
-		const third = index.get(A)!.comments[2]!;
+		const third = at(defined(index.get(A)).comments, 2);
 		renderer.setActiveComment(A, third.marker.start);
 		render();
 		expect(activeBody(container)).toContain('third one');
@@ -271,17 +283,22 @@ describe('M10: the selection follows the comment, not the offset', () => {
 			fileScope(),
 			A,
 		);
-		renderer.setActiveComment(A, index.get(A)!.comments[0]!.marker.start);
+		renderer.setActiveComment(
+			A,
+			at(defined(index.get(A)).comments, 0).marker.start,
+		);
 		render();
 
-		const secondCard = [
-			...container.querySelectorAll<HTMLElement>(
-				'.annoteca-reviewer-card',
-			),
-		].find((el) => el.textContent?.includes('second plain'))!;
-		secondCard
-			.querySelector<HTMLElement>('.annoteca-reviewer-chevron')!
-			.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+		const secondCard = defined(
+			[
+				...container.querySelectorAll<HTMLElement>(
+					'.annoteca-reviewer-card',
+				),
+			].find((el) => el.textContent?.includes('second plain')),
+		);
+		defined(
+			secondCard.querySelector<HTMLElement>('.annoteca-reviewer-chevron'),
+		).dispatchEvent(new MouseEvent('click', { bubbles: true }));
 		render();
 		const expandedBefore = expandedCount(container);
 		expect(expandedBefore).toBeGreaterThan(0);
@@ -307,7 +324,7 @@ describe('M10: the selection follows the comment, not the offset', () => {
 			fileScope(),
 			A,
 		);
-		const second = index.get(A)!.comments[1]!;
+		const second = at(defined(index.get(A)).comments, 1);
 		renderer.setActiveComment(A, second.marker.start);
 		render();
 		expect(activeBody(container)).toContain('second plain');
@@ -318,7 +335,7 @@ describe('M10: the selection follows the comment, not the offset', () => {
 
 		expect(activeBody(container)).toContain('second plain');
 		expect(renderer.activeStart).toBe(
-			index.get(A)!.comments[1]!.marker.start,
+			at(defined(index.get(A)).comments, 1).marker.start,
 		);
 	});
 
@@ -330,7 +347,7 @@ describe('M10: the selection follows the comment, not the offset', () => {
 			fileScope(),
 			A,
 		);
-		const third = index.get(A)!.comments[2]!;
+		const third = at(defined(index.get(A)).comments, 2);
 		renderer.setActiveComment(A, third.marker.start);
 		render();
 		expect(activeBody(container)).toContain('third one');

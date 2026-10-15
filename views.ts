@@ -4,7 +4,7 @@ import type AnnotecaPlugin from './main';
 import type { LocatedComment, CategoryDefinition } from './types';
 import { getCategoryOrFallback } from './categories';
 import { resolveSettingsCategories } from './settings';
-import { extractIndexTerm } from './view-utils';
+import { FOCUS_KEY_ATTR, extractIndexTerm } from './view-utils';
 import { rekeyScopeAnchor } from './scope';
 import { ThreadTabRenderer } from './hub-thread-tab';
 import { OutlineTabRenderer } from './hub-outline-tab';
@@ -192,6 +192,14 @@ export class VaultUnresolvedView extends IndexBackedListView {
 			cls: `annoteca-row-category annoteca-cat-${def.id}`,
 			text: def.displayName,
 		});
+
+		// Addressed: an edit is waiting for accept, revise or reject, which is
+		// the one open state that needs the reader rather than the writer.
+		if (located.comment.addressed && !located.comment.resolution)
+			row.createSpan({
+				cls: 'annoteca-reviewer-state annoteca-reviewer-state-addressed',
+				text: 'addressed',
+			});
 
 		row.createSpan({ cls: 'annoteca-row-path', text: located.path });
 
@@ -545,6 +553,11 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 		// and post-processors stay live against detached elements for as long as
 		// the user stays on the other tab. Rendering Thread immediately creates a
 		// fresh lifetime, so this is safe on every path.
+		// The panel rebuilds on every index change, which arrives while the
+		// reader is typing a reply (an autosave, an agent's write). Without
+		// this the next keystroke goes nowhere. The draft text survives on its
+		// own (dispose flushes it); this puts the cursor back in it.
+		const restoreFocus = captureFocus(container);
 		this.threadRenderer.dispose();
 		container.empty();
 		container.addClass('annoteca-hub-root');
@@ -586,6 +599,7 @@ export class AnnotecaPanelView extends AnnotecaBaseView {
 				this.threadRenderer.render(content);
 				break;
 		}
+		restoreFocus();
 	}
 
 	private renderTabStrip(container: HTMLElement): void {
@@ -799,19 +813,36 @@ export class AnnotecaCommentView extends AnnotecaBaseView {
 // class and its position among controls with that class, which is stable here
 // because the tab always draws the same one comment. A no-op when focus is
 // outside `root`, so a rebuild never pulls focus from elsewhere.
-function captureFocus(root: HTMLElement): () => void {
+export function captureFocus(root: HTMLElement): () => void {
+	// instanceOf, not instanceof: in a pop-out window the element belongs to
+	// that window's HTMLElement, and instanceof against this one is false.
 	const active = root.ownerDocument.activeElement;
-	if (!(active instanceof HTMLElement) || !root.contains(active))
+	if (!active?.instanceOf(HTMLElement) || !root.contains(active))
 		return () => undefined;
-	const cls = active.classList.item(0);
-	if (cls === null) return () => undefined;
-	const index = Array.from(root.getElementsByClassName(cls)).indexOf(active);
 	const selection = active.instanceOf(HTMLTextAreaElement)
 		? { start: active.selectionStart, end: active.selectionEnd }
 		: undefined;
+	// A control that names itself is found by that name: in the hub's list a
+	// new comment can arrive above it, and its position would then point at
+	// another comment's box. Compared, not put in a selector, so a path with
+	// quotes or brackets needs no escaping.
+	const key = active.getAttribute(FOCUS_KEY_ATTR);
+	const cls = active.classList.item(0);
+	if (key === null && cls === null) return () => undefined;
+	const index =
+		cls === null
+			? -1
+			: Array.from(root.getElementsByClassName(cls)).indexOf(active);
 	return () => {
-		const again = root.getElementsByClassName(cls).item(index);
-		if (!(again instanceof HTMLElement)) return;
+		const again =
+			key !== null
+				? Array.from(root.querySelectorAll(`[${FOCUS_KEY_ATTR}]`)).find(
+						(el) => el.getAttribute(FOCUS_KEY_ATTR) === key,
+					)
+				: cls !== null
+					? root.getElementsByClassName(cls).item(index)
+					: null;
+		if (!again?.instanceOf(HTMLElement)) return;
 		again.focus();
 		if (selection && again.instanceOf(HTMLTextAreaElement))
 			again.setSelectionRange(selection.start, selection.end);

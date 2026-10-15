@@ -14,6 +14,7 @@ import { resolveSettingsCategories } from './settings';
 import { nowISO } from './parser';
 import { rekeyScopeAnchor } from './scope';
 import {
+	FOCUS_KEY_ATTR,
 	authorColorFor,
 	authorPickerOptions,
 	formatStamp,
@@ -93,6 +94,8 @@ export class ThreadTabRenderer {
 	// dispose() flushes them instead, so a refresh cannot swallow text typed
 	// inside the debounce. See renderReplyInput for why those differ.
 	private readonly draftSaveTimers = new Map<string, Set<PendingDraftSave>>();
+	// Reply-box focus keys handed out this render pass, per path and id.
+	private readonly focusKeysSeen = new Map<string, number>();
 
 	// Set by close(). See there.
 	private closed = false;
@@ -253,6 +256,7 @@ export class ThreadTabRenderer {
 
 	render(container: HTMLElement): void {
 		this.markdownLifetime = cycleLifetime(this.markdownLifetime);
+		this.focusKeysSeen.clear();
 		if (this.focus) {
 			this.renderFocused(container, this.focus.path);
 			return;
@@ -1146,6 +1150,21 @@ export class ThreadTabRenderer {
 			cls: 'annoteca-reply-input',
 			attr: { placeholder: 'Reply…', rows: '3' },
 		});
+		// Names this box across a rebuild, so the hub can put the cursor back
+		// in the same comment's reply box rather than whichever box now sits at
+		// the same position in a list that may have grown.
+		// The occurrence count tells apart two comments carrying the same id (a
+		// copy-pasted marker), which would otherwise share a key and send focus
+		// to the first of them.
+		// A comment with no id (a hand-typed marker) is named by its category
+		// and the start of its body instead: its position among the boxes
+		// changes whenever another comment above it opens or closes.
+		const base = c.id
+			? `${path}#${c.id}`
+			: `${path}#~${c.category}:${c.body.slice(0, 80)}`;
+		const n = this.focusKeysSeen.get(base) ?? 0;
+		this.focusKeysSeen.set(base, n + 1);
+		textarea.setAttribute(FOCUS_KEY_ATTR, `${base}#${n}`);
 		// Restore any draft saved for this comment, mirroring the popup composer.
 		if (c.id) {
 			const draft = this.plugin.loadDraft(c.id);

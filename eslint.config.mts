@@ -35,6 +35,10 @@ export default tseslint.config(
 		plugins: { sonarjs },
 		rules: {
 			"@typescript-eslint/require-await": "error",
+			// A `!` only silences the type checker; the value can still be
+			// missing at runtime. Shipped code narrows with a real check, and
+			// tests use the checked at()/defined() helpers in __tests__/helpers.
+			"@typescript-eslint/no-non-null-assertion": "error",
 			// eslint-plugin-sonarjs: a curated BUG-detection allowlist, not the
 			// full recommended preset (whose style/metric rules are noise at
 			// scale). Every rule here flags a genuine logic defect. Two rules are
@@ -84,6 +88,7 @@ export default tseslint.config(
 		"node_modules",
 		"dist",
 		".stryker-tmp",
+		".husky",
 		"main.js",
 		"scripts",
 		"esbuild.config.mjs",

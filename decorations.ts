@@ -41,6 +41,7 @@ import type { Comment } from './types';
 import type { AnnotecaSettings, CategoryDefinition } from './types';
 import { parseAll } from './parser';
 import { parseDocument } from './document';
+import { storeRegions } from './store';
 import {
 	planActiveCommentDecorations,
 	planFlashRange,
@@ -600,6 +601,43 @@ function resolveTier(
 	return def?.tier ?? 'normal';
 }
 
+// Where the end-of-file store sits, recomputed only when the text changes, so
+// moving the cursor does not rescan the note.
+const storeRegionsField = StateField.define<
+	{ start: number; end: number; count: number }[]
+>({
+	create: (state) => storeRegions(state.doc.toString()),
+	update: (value, tr) =>
+		tr.docChanged ? storeRegions(tr.state.doc.toString()) : value,
+});
+
+// Stands in for the store's JSON wherever marker icons stand in for markers,
+// so the end of a note reads as a quiet line instead of a grey block of data.
+class StoreWidget extends WidgetType {
+	constructor(private readonly count: number) {
+		super();
+	}
+
+	override eq(other: WidgetType): boolean {
+		return other instanceof StoreWidget && other.count === this.count;
+	}
+
+	override toDOM(view: EditorView): HTMLElement {
+		const el = view.dom.ownerDocument.win.createSpan({
+			cls: 'annoteca-store-widget',
+		});
+		el.textContent =
+			this.count === 1
+				? 'Annoteca: 1 stored comment'
+				: `Annoteca: ${this.count} stored comments`;
+		el.setAttribute(
+			'aria-label',
+			'Comment details stored at the end of this note. Shown in full in source mode with the underline indicator style.',
+		);
+		return el;
+	}
+}
+
 function decorationsCompute(
 	ctx: DecorationContext,
 	field: StateField<Comment[]>,
@@ -607,6 +645,7 @@ function decorationsCompute(
 ): Extension {
 	const deps = [
 		field,
+		storeRegionsField,
 		flashField,
 		hideAllField,
 		showBodiesField,
@@ -728,6 +767,17 @@ function decorationsCompute(
 				}
 			}
 		}
+		// The end-of-file store, drawn the same way the markers are: replaced
+		// wherever icons are drawn, raw where the underline style shows raw
+		// marker text.
+		if (showIcon)
+			for (const r of state.field(storeRegionsField))
+				decorations.push(
+					Decoration.replace({
+						widget: new StoreWidget(r.count),
+						inclusive: false,
+					}).range(r.start, r.end),
+				);
 		return Decoration.set(decorations, true);
 	});
 }
@@ -2294,6 +2344,7 @@ export function buildMarkerDecorations(ctx: DecorationContext): {
 	return {
 		extension: [
 			field,
+			storeRegionsField,
 			hideAllField,
 			showBodiesField,
 			settingsEpochField,

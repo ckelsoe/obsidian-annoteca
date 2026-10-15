@@ -27,6 +27,7 @@ import { serialize } from '../parser';
 import { noteText } from '../note-text';
 import { DEFAULT_SETTINGS } from '../settings';
 import type { Comment } from '../types';
+import { at, defined } from './helpers/checked';
 
 // Private surface reached for here, declared standalone rather than
 // intersected with AnnotecaPlugin: an intersection that re-declares a private
@@ -382,7 +383,7 @@ describe('editCommentFromReviewer derives the path from the view', () => {
 	const comment = (): Comment => {
 		const parsed = new CommentIndex();
 		parsed.rebuild('notes/a.md', NOTE);
-		return parsed.get('notes/a.md')!.comments[0]!;
+		return at(defined(parsed.get('notes/a.md')).comments, 0);
 	};
 
 	it('opens the composer against the loaded view, not a deferred one', async () => {

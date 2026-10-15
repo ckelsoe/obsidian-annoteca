@@ -34,12 +34,13 @@ import { DEFAULT_SETTINGS } from '../settings';
 import type { AnnotecaSettings } from '../types';
 import { installObsidianDomHelpers } from '../__mocks__/obsidian';
 import { stubDecorationContext } from './stub-context';
+import { at } from './helpers/checked';
 
 // Id-less on purpose: it is the shape the importer emits and the one with no
 // identity beyond position.
 const IDLESS_DOC =
 	'Prose before. <!-- annoteca/clarify: needs a source --> after.';
-const IDLESS_MARKER = findMarkersInDoc(IDLESS_DOC)[0]!;
+const IDLESS_MARKER = at(findMarkersInDoc(IDLESS_DOC), 0);
 const IDLESS_START = IDLESS_MARKER.marker.start;
 // The key the composer builds for a comment with no id: keyed on the comment's
 // own text, so it survives the marker moving and cannot be picked up by a
@@ -201,8 +202,8 @@ describe('M9: the composer survives a change straddling the marker start', () =>
 		// different body. So containment alone would have matched it.
 		const now = findMarkersInDoc(view.state.doc.toString());
 		expect(now).toHaveLength(1);
-		expect(now[0]!.marker.start).toBe(IDLESS_START);
-		expect(now[0]!.body).toBe('rewritten by another pane');
+		expect(at(now, 0).marker.start).toBe(IDLESS_START);
+		expect(at(now, 0).body).toBe('rewritten by another pane');
 
 		expect(tooltipCount(view)).toBe(0);
 	});
@@ -213,7 +214,7 @@ describe('M9: the composer survives a change straddling the marker start', () =>
 		const view = openView(IDLESS_DOC, ctx);
 		await openComposer(view, IDLESS_START);
 
-		const marker = findMarkersInDoc(IDLESS_DOC)[0]!;
+		const marker = at(findMarkersInDoc(IDLESS_DOC), 0);
 		view.dispatch({
 			changes: {
 				from: marker.marker.start,
@@ -271,7 +272,7 @@ describe('M9: an id-less comment gets a draft', () => {
 		await new Promise((r) => window.setTimeout(r, 400));
 
 		// The marker moved, and the draft is still under the one key.
-		const moved = findMarkersInDoc(view.state.doc.toString())[0]!;
+		const moved = at(findMarkersInDoc(view.state.doc.toString()), 0);
 		expect(moved.marker.start).not.toBe(IDLESS_START);
 		expect([...drafts.entries()]).toEqual([
 			[IDLESS_DRAFT_KEY, 'unsent reply'],
@@ -289,7 +290,7 @@ describe('M9: an id-less comment gets a draft', () => {
 
 		const textarea = await openComposer(
 			view,
-			findMarkersInDoc(other)[0]!.marker.start,
+			at(findMarkersInDoc(other), 0).marker.start,
 		);
 
 		expect(textarea.value).toBe('');

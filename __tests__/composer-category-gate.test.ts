@@ -25,6 +25,7 @@ import { ComposerForm, type ComposerRequest } from '../composer';
 import { parseAll, serialize } from '../parser';
 import { DEFAULT_SETTINGS } from '../settings';
 import type { AnnotecaSettings, Comment } from '../types';
+import { at } from './helpers/checked';
 
 beforeEach(() => {
 	noticeLog.length = 0;
@@ -109,7 +110,7 @@ const WITHOUT_TONE = DEFAULT_SETTINGS.categories.filter((c) => c.id !== 'tone');
 const noteWith = (category: string, body: string) =>
 	`Prose. ${serialize({ id: 'aaaaaaaa', category, body })} tail.`;
 
-const commentIn = (text: string): Comment => parseAll(text)[0]!;
+const commentIn = (text: string): Comment => at(parseAll(text), 0);
 
 describe('m8: editing a comment whose category is no longer offered', () => {
 	it('saves, keeping the original category, when the category was removed', async () => {

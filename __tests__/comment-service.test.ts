@@ -1253,7 +1253,10 @@ function makeRacingHarness(initial: string) {
 
 // Editor-path twin of the harness above: the file is open in a markdown leaf, so
 // the service reads and writes through the editor rather than the vault.
-function makeEditorHarness(initial: string) {
+function makeEditorHarness(
+	initial: string,
+	mode: 'source' | 'preview' = 'source',
+) {
 	let content = initial;
 	let afterNextGetValue: (() => void) | undefined;
 	// Both write paths land in the same `content`, so a test that only reads it
@@ -1276,7 +1279,11 @@ function makeEditorHarness(initial: string) {
 		},
 	};
 	const view = Object.create(MarkdownView.prototype) as MarkdownView;
-	Object.assign(view, { file: { path: 'note.md' }, editor });
+	Object.assign(view, {
+		file: { path: 'note.md' },
+		editor,
+		getMode: () => mode,
+	});
 	const plugin = {
 		settings: {
 			enableAuthorTag: true,
@@ -1374,6 +1381,30 @@ describe('applySplices refuses a write computed against stale content', () => {
 		expect(retry).toBeDefined();
 		if (!retry) return;
 		await h.service.resolveComment('note.md', retry);
+		expect(h.content).toContain('[resolved charles');
+	});
+});
+
+// Seen in the running app: a resolve from the hub on a note open in reading
+// view went into that view's editor, which Obsidian neither saves nor renders
+// there, and was discarded when the note went back to editing.
+describe('a note open in reading view is written through the vault', () => {
+	it('resolves through vault.process, not the hidden editor', async () => {
+		const h = makeEditorHarness(TWO_COMMENTS, 'preview');
+		const target = parseAll(h.content)[0];
+		expect(target).toBeDefined();
+		if (!target) return;
+		await h.service.resolveComment('note.md', target);
+		expect(h.processCalls).toBe(1);
+		expect(h.content).toContain('[resolved charles');
+	});
+
+	it('still writes through the editor in editing mode', async () => {
+		const h = makeEditorHarness(TWO_COMMENTS);
+		const target = parseAll(h.content)[0];
+		if (!target) throw new Error('no comment');
+		await h.service.resolveComment('note.md', target);
+		expect(h.processCalls).toBe(0);
 		expect(h.content).toContain('[resolved charles');
 	});
 });

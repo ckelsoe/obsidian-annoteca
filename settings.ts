@@ -1449,6 +1449,16 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			case 'enableAuthorTag':
 				repaint = true;
 				break;
+			case 'frontmatterSummary':
+				// The exported skill tells an assistant whether to trust the
+				// summary as its queue, so it is only right after an export.
+				new Notice(
+					'Export the AI skill again so your assistant knows the summary is ' +
+						(this.plugin.settings.frontmatterSummary
+							? 'on.'
+							: 'off.'),
+				);
+				break;
 			case 'eventJournal':
 				if (this.plugin.settings.eventJournal)
 					this.plugin.onEventJournalEnabled();

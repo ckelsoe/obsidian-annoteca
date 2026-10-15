@@ -62,7 +62,15 @@ export type SkillExportTarget = 'claude' | 'agent' | 'both';
 // self" the user wrote for themself). An assistant on a v10 skill does not know,
 // so it would edit prose under a reply-only category, or answer the user's own
 // reminders as if they were requests.
-export const SKILL_SCHEMA_VERSION = 11;
+// 12 = the vault-level review queue (first drafted as v7 in PR #51, never
+// merged). The skill only described a single note's markers, so an assistant
+// asked to work every open comment in a vault had no recipe: it scanned
+// directories, re-scanned for markers and the fileclass tag, or read a Bases
+// `.base` file as if it listed the matching notes (a `.base` is a live query,
+// not a stored list). v12 names the frontmatter summary (`annoteca_open` and
+// friends) as the index and the one scan that builds the queue from it, and
+// says a note whose open comments are all Skip has no work in it.
+export const SKILL_SCHEMA_VERSION = 12;
 
 const SKILL_VERSION_RE = /^annoteca-skill-version:\s*(\d+)\s*$/m;
 
@@ -153,9 +161,59 @@ function inlineCode(text: string): string {
 	return `${delimiter}${pad}${text}${pad}${delimiter}`;
 }
 
+// How to find every note with open comments. The frontmatter summary is a
+// fast index, but not proof on its own: notes it has not reached yet (it fills
+// in as comments change) have no `annoteca_open`, and when it is turned off the
+// fields it wrote stay behind with old counts. So with the summary on, the
+// queue is the notes it counts plus the notes with markers it has not reached;
+// with it off, the markers are the only truth.
+function queueSection(summaryOn: boolean): string {
+	const markerScan = "rg -l '<!--\\s*annoteca/' --glob '*.md' .";
+	const intro = `## Working a queue of notes across the vault
+
+To find every note that needs review, read the files. Do not read a \`.base\` file as the list: a \`.base\` is a live Obsidian query, not a stored list of notes, so from outside Obsidian there is nothing in it to follow.`;
+	const after = `Then handle each note's comments with the rules above, including **Agent handling** below: a note whose open comments are all in Skip categories has no work for you.
+
+Never write \`annoteca_open\` or the other summary fields yourself. Annoteca regenerates them from the comments whenever one changes: change the comments and the counts follow. A hand-written count is overwritten, and editing it instead of the comments corrupts the queue.`;
+	if (!summaryOn)
+		return `${intro}
+
+In this vault the frontmatter summary was **off** when these instructions were exported. Find work by scanning for markers:
+
+\`\`\`
+${markerScan}
+\`\`\`
+
+Every note listed has at least one comment; one with no resolution is open. Ignore any \`annoteca_open\` properties you come across: they are left over from when the summary was on and their counts are out of date.
+
+${after}`;
+	return `${intro}
+
+In this vault the frontmatter summary was **on** when these instructions were exported. A note with open comments carries:
+
+- \`annoteca_open\`: the number of open comments. Addressed comments count as open: they still need the reviewer.
+- \`annoteca_oldest_open\`: the date of the oldest open comment. Optional, may be absent.
+- \`annoteca_categories\`: the categories among the open comments. Optional, may be absent.
+
+These names are fixed. The summary fills in as comments change, so a note nobody has touched since it was turned on may not carry it yet. The queue is both of these:
+
+\`\`\`
+rg -l '^annoteca_open: [1-9][0-9]*$' --glob '*.md' .
+rg -l0 '<!--\\s*annoteca/' --glob '*.md' . | xargs -0 rg --files-without-match '^annoteca_open:'
+\`\`\`
+
+The first lists the notes the summary counts as open. The second lists notes that have comments but no summary yet; check those for open comments the slow way. A note with \`annoteca_open: 0\` is done; skip it. Work oldest first with \`annoteca_oldest_open\`, or narrow by \`annoteca_categories\`. If the person tells you the summary has since been turned off, use the marker scan alone and ignore the counts.
+
+${after}`;
+}
+
 export function buildSkillMarkdown(
 	categories: CategoryDefinition[],
 	authorTag: string | undefined,
+	// Whether the frontmatter summary was on when this was exported. Off by
+	// default: an assistant told the summary is off scans markers, which is
+	// slower but never misses a note.
+	summaryOn = false,
 ): string {
 	// Read, not repaired. `normalizeSettings` is the single ingress for
 	// data.json and already runs the tag through the token grammar, so the
@@ -327,6 +385,8 @@ The JSON mirrors the comment model: \`v\` (schema version, currently 1), \`id\` 
 **Edit both sites, and put each change in the right one.** To reply to, address, resolve or edit the body of an eof comment, change its **store entry's JSON**, never the lean marker: append to the \`replies\` array, add an \`addressed\` or \`resolution\` object, or edit \`body\`. Leave the marker lean. Category is the one field the marker owns, so changing it rewrites the marker (\`<!-- annoteca/<new-category>: [id=<id>] -->\`) and the entry's \`category\` together. To create a comment in this mode, insert a lean marker at the start of the passage and add a matching store entry at the end of the file.
 
 The store is **lossless and easier to write than the bracket lines**: JSON already encodes newlines, quotes and brackets, so a multi-line reply, a long anchor, and a body that contains \`-->\` or \`<!--\` all go in as ordinary string values with none of the backslash escaping the inline format needs. (On save the plugin rewrites any \`<\` or \`>\` in the JSON as \`\\u003c\`/\`\\u003e\`, which JSON reads straight back; you do not need to.) Keep the store region as the LAST thing in the file, and never let an entry's JSON hold a raw \`-->\`.
+
+${queueSection(summaryOn)}
 
 ## Categories in this vault
 

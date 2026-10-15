@@ -13,6 +13,7 @@ import {
 	isValidCategoryName,
 } from '../categories';
 import type { AnnotecaSettings } from '../types';
+import { at } from './helpers/checked';
 
 // data.json is user-editable and also arrives over sync and out of a restored
 // backup, so nothing in it is guaranteed to be the type it was written as.
@@ -41,7 +42,7 @@ describe('normalizeSettings: the shipped defaults are a fixed point', () => {
 		// mutated set, in this process and in the test suite.
 		const s = normalizeSettings({});
 		expect(s.categories).not.toBe(DEFAULT_SETTINGS.categories);
-		s.categories[0]!.displayName = 'mutated';
+		at(s.categories, 0).displayName = 'mutated';
 		s.categories.push({ id: 'extra', displayName: 'Extra' });
 		expect(DEFAULT_SETTINGS.categories).toHaveLength(defaultIds.length);
 		expect(DEFAULT_SETTINGS.categories[0]?.displayName).not.toBe('mutated');

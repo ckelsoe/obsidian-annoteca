@@ -6,6 +6,8 @@ import {
 	writeStoreRegion,
 	STORE_SCHEMA_VERSION,
 	type StoredComment,
+	withStoreRewrite,
+	storeRegions,
 } from '../store';
 import type { AnchorText, Reply } from '../types';
 
@@ -501,5 +503,126 @@ describe('store: writeStoreRegion preserves undecodable blocks', () => {
 		const out = writeStoreRegion(content, [good]);
 		expect(parseStore(out).map((e) => e.comment.id)).toEqual(['good0001']);
 		expect(out).not.toContain('drop0001');
+	});
+});
+
+describe('withStoreRewrite', () => {
+	const entry = (id: string, body: string): StoredComment => ({
+		id,
+		category: 'clarify',
+		body,
+		replies: [],
+	});
+	const apply = (
+		content: string,
+		splices: { from: number; to: number; insert: string }[],
+	): string =>
+		[...splices]
+			.map((sp, i) => ({ sp, i }))
+			.sort((a, b) => b.sp.from - a.sp.from || b.i - a.i)
+			.reduce(
+				(out, { sp }) =>
+					out.slice(0, sp.from) + sp.insert + out.slice(sp.to),
+				content,
+			);
+
+	it('keeps the prose and store edits separate when the store is at the end', () => {
+		const content = writeStoreRegion('Alpha.\n\nBeta.\n', [
+			entry('aaaa1111', 'one'),
+		]);
+		const at = content.indexOf('Beta');
+		const out = withStoreRewrite(
+			content,
+			[{ from: at, to: at, insert: 'X ' }],
+			[entry('aaaa1111', 'one'), entry('bbbb2222', 'two')],
+		);
+		expect(out).toHaveLength(2);
+		const result = apply(content, out);
+		expect(result).toContain('X Beta.');
+		expect(parseStore(result).map((e) => e.comment.id)).toEqual([
+			'aaaa1111',
+			'bbbb2222',
+		]);
+	});
+
+	it('composes into one edit when a store block sits above the prose it edits', () => {
+		const atEnd = writeStoreRegion('Alpha.\n', [entry('aaaa1111', 'one')]);
+		// The store moved up, with a section after it.
+		const content = `${atEnd.trimEnd()}\n\n## Moved\n\nBeta.\n`;
+		const at = content.indexOf('Beta');
+		const out = withStoreRewrite(
+			content,
+			[{ from: at, to: at, insert: 'X ' }],
+			[entry('aaaa1111', 'one'), entry('bbbb2222', 'two')],
+		);
+		expect(out).toHaveLength(1);
+		const result = apply(content, out);
+		// The marker lands on its passage, and the store is rebuilt at the end
+		// with both entries, after the moved section.
+		expect(result).toContain('## Moved\n\nX Beta.');
+		expect(result.indexOf('X Beta.')).toBeLessThan(
+			result.indexOf('<!-- annoteca:store'),
+		);
+		expect(parseStore(result).map((e) => e.comment.id)).toEqual([
+			'aaaa1111',
+			'bbbb2222',
+		]);
+	});
+
+	it('keeps same-offset prose splices in list order when composing', () => {
+		const atEnd = writeStoreRegion('Alpha.\n', [entry('aaaa1111', 'one')]);
+		const content = `${atEnd.trimEnd()}\n\nBeta.\n`;
+		const at = content.indexOf('Beta');
+		const out = withStoreRewrite(
+			content,
+			[
+				{ from: at, to: at, insert: '[1]' },
+				{ from: at, to: at, insert: '[2]' },
+			],
+			[entry('aaaa1111', 'one')],
+		);
+		expect(apply(content, out)).toContain('[1][2]Beta.');
+	});
+
+	it('returns the prose alone when the store does not change', () => {
+		const content = writeStoreRegion('Alpha.\n', [
+			entry('aaaa1111', 'one'),
+		]);
+		const prose = [{ from: 0, to: 0, insert: 'X ' }];
+		expect(
+			withStoreRewrite(content, prose, [entry('aaaa1111', 'one')]),
+		).toEqual(prose);
+	});
+});
+
+describe('storeRegions', () => {
+	const entry = (id: string): StoredComment => ({
+		id,
+		category: 'clarify',
+		body: id,
+		replies: [],
+	});
+
+	it('merges the blocks at the end of a note into one region', () => {
+		const content = writeStoreRegion('Prose.\n', [
+			entry('aaaa1111'),
+			entry('bbbb2222'),
+		]);
+		const regions = storeRegions(content);
+		expect(regions).toHaveLength(1);
+		const [r] = regions;
+		expect(r?.count).toBe(2);
+		expect(content.slice(0, r?.start).trimEnd()).toBe('Prose.');
+		expect(content.slice(r?.end).trim()).toBe('');
+	});
+
+	it('keeps a block moved up into the prose as its own region', () => {
+		const atEnd = writeStoreRegion('Alpha.\n', [entry('aaaa1111')]);
+		const content = `${atEnd.trimEnd()}\n\nMoved prose.\n\n${atEnd.slice(atEnd.indexOf('<!--'))}`;
+		expect(storeRegions(content).map((r) => r.count)).toEqual([1, 1]);
+	});
+
+	it('finds nothing in a note without a store', () => {
+		expect(storeRegions('Just prose.')).toEqual([]);
 	});
 });

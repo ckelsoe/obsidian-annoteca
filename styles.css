@@ -1719,7 +1719,9 @@ settings:
 
 .annoteca-color-native {
 	position: absolute;
-	inset: 0;
+	/* top/left rather than inset: the marketplace scan flags inset. */
+	top: 0;
+	left: 0;
 	width: 100%;
 	height: 100%;
 	padding: 0;
@@ -1815,7 +1817,10 @@ settings:
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	aspect-ratio: 1 / 1;
+	/* A fixed height rather than aspect-ratio, which the marketplace scan
+	   flags. Columns are at least 40px wide, so a cell is square at its
+	   narrowest and slightly wide on a roomy grid. */
+	height: 40px;
 	padding: 0;
 	background: none;
 	border: 1px solid transparent;
@@ -2694,4 +2699,11 @@ settings:
 /* A reply-alert notice opens the comment when clicked. */
 .annoteca-alert-notice {
 	cursor: pointer;
+}
+
+/* The end-of-file comment store, drawn as one quiet line in the editor. */
+.annoteca-store-widget {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	font-style: italic;
 }

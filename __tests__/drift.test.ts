@@ -1,5 +1,6 @@
 import { captureSnapshot, detectDrift } from '../drift';
 import { parseAll } from '../parser';
+import { at } from './helpers/checked';
 
 describe('drift: captureSnapshot', () => {
 	it('captures normalized surrounding text', () => {
@@ -64,8 +65,8 @@ describe('drift: CRLF baselines from the raw-text basis', () => {
 	const lines = Array.from({ length: 12 }, (_, i) => `Line ${i} words.`);
 	const lf = `${lines.join('\n')}\nX<!-- annoteca/tone: t\n[id=drift001]\n-->\n${lines.join('\n')}\n`;
 	const raw = lf.replace(/\n/g, '\r\n');
-	const rawComment = parseAll(raw)[0]!;
-	const editorComment = parseAll(lf)[0]!;
+	const rawComment = at(parseAll(raw), 0);
+	const editorComment = at(parseAll(lf), 0);
 	const legacyBaseline = { drift001: captureSnapshot(raw, rawComment) };
 
 	it('the two bases really do capture different windows here', () => {

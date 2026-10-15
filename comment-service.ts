@@ -58,6 +58,7 @@ import {
 	scanStoreEntries,
 	writeStoreRegion,
 	diffToSplice,
+	withStoreRewrite,
 	type SpliceRange,
 	type StoredComment,
 } from './store';
@@ -938,21 +939,17 @@ export class CommentService {
 			});
 		}
 		splices.unshift(...closerSplices);
-		if (stored.length > 0) {
-			// Appended to whatever the note already stores, not replacing it. The
-			// existing entries come from parseStore rather than being assumed
-			// empty, because a note in eof mode already has comments in it.
-			const merged = [
-				...parseStore(content).map((e) => e.comment),
-				...stored,
-			];
-			const storeSplice = diffToSplice(
-				content,
-				writeStoreRegion(content, merged),
-			);
-			if (storeSplice) splices.push(storeSplice);
-		}
-		const wrote = await this.applySplices(path, file, splices, note);
+		// Appended to whatever the note already stores, not replacing it. The
+		// existing entries come from parseStore rather than being assumed
+		// empty, because a note in eof mode already has comments in it.
+		const toWrite =
+			stored.length > 0
+				? withStoreRewrite(content, splices, [
+						...parseStore(content).map((e) => e.comment),
+						...stored,
+					])
+				: splices;
+		const wrote = await this.applySplices(path, file, toWrite, note);
 		// Honoured, not assumed. applySplices refuses on a stale read, and a
 		// caller told it created comments that are not in the file would record
 		// them as promoted and never retry.
@@ -1071,15 +1068,12 @@ export class CommentService {
 		const remaining = allEntries
 			.filter((e) => !resolvedIds.has(e.comment.id))
 			.map((e) => e.comment);
-		if (remaining.length !== allEntries.length) {
-			const storeSplice = diffToSplice(
-				content,
-				writeStoreRegion(content, remaining),
-			);
-			if (storeSplice) splices.push(storeSplice);
-		}
+		const toWrite =
+			remaining.length !== allEntries.length
+				? withStoreRewrite(content, splices, remaining)
+				: splices;
 
-		const wrote = await this.applySplices(path, file, splices, note);
+		const wrote = await this.applySplices(path, file, toWrite, note);
 		// null, matching the file-is-gone case: the service has already said
 		// what happened, and a count here would claim a deletion that did not
 		// happen.
@@ -1305,11 +1299,22 @@ export class CommentService {
 
 	// ---- internals -----------------------------------------------------
 
+	// The view whose editor holds this note's live text, if any. Only a view in
+	// editing mode counts. A view in reading view keeps an editor too, but
+	// Obsidian neither saves nor renders what is written into it there: a
+	// resolve from the hub on a note open in reading view reported success,
+	// never reached the disk, and was discarded when the note went back to
+	// editing (seen in the running app). Such a note is written through the
+	// vault, and reading view re-renders from the file.
 	private getOpenMarkdownView(path: string): MarkdownView | undefined {
 		const leaves = this.plugin.app.workspace.getLeavesOfType('markdown');
 		for (const leaf of leaves) {
 			const view = leaf.view;
-			if (view instanceof MarkdownView && view.file?.path === path)
+			if (
+				view instanceof MarkdownView &&
+				view.file?.path === path &&
+				view.getMode() === 'source'
+			)
 				return view;
 		}
 		return undefined;
@@ -1486,9 +1491,10 @@ export class CommentService {
 	// so the composer shares them; this service only orchestrates them.
 
 	// The splices that remove one comment: its marker from the prose, plus — in eof
-	// mode — its store entry dropped from the region. Two disjoint edits (the
-	// marker sits in the prose, the store region after it), both computed against
-	// the same original content so applySplices applies them back to front.
+	// mode — its store entry dropped from the region. Two disjoint edits when the
+	// store region sits after the prose, both computed against the same original
+	// content so applySplices applies them back to front; one combined edit when
+	// a store block has been moved up into the note (see withStoreRewrite).
 	private buildRemovalSplices(
 		content: string,
 		current: Comment,
@@ -1508,11 +1514,7 @@ export class CommentService {
 		const remaining = eof.allEntries
 			.filter((e) => e !== eof.entry)
 			.map((e) => e.comment);
-		const storeSplice = diffToSplice(
-			content,
-			writeStoreRegion(content, remaining),
-		);
-		return storeSplice ? [...prose, storeSplice] : prose;
+		return withStoreRewrite(content, prose, remaining);
 	}
 
 	private buildDeleteSplice(

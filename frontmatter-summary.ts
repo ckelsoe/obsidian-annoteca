@@ -187,12 +187,20 @@ export function classTagFor(opts: FrontmatterSummaryOptions): {
 // Write the summary into the note's frontmatter, only when something changed.
 // Preserves every other frontmatter key via processFrontMatter. A no-op when the
 // note is not managed or already matches. Resolves to whether it wrote.
+//
+// `readActual`, when given, returns the frontmatter as the file holds it now.
+// The metadata cache catches up with a write a moment after it lands, so a
+// second update scheduled in that moment saw the old values in the cache and
+// wrote the same summary again. A cache that says "out of date" is confirmed
+// against the file before anything is written; a cache that says "up to date"
+// is trusted, since a lagging cache only ever holds older values.
 export async function applyFrontmatterSummary(
 	app: App,
 	file: TFile,
 	comments: readonly Comment[],
 	opts: FrontmatterSummaryOptions,
 	shouldContinue?: () => boolean,
+	readActual?: () => Promise<Record<string, unknown>>,
 ): Promise<boolean> {
 	const { property, writeClassTag } = classTagFor(opts);
 	const cache = app.metadataCache.getFileCache(file);
@@ -202,6 +210,11 @@ export async function applyFrontmatterSummary(
 
 	const desired = computeSummary(comments, opts);
 	if (frontmatterMatches(fm, desired, property, writeClassTag)) return false;
+	if (readActual) {
+		const actual = await readActual();
+		if (frontmatterMatches(actual, desired, property, writeClassTag))
+			return false;
+	}
 
 	// Bail if the caller (the plugin) has been unloaded since this write was
 	// scheduled; do not mutate a note after teardown.

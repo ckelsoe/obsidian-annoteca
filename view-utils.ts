@@ -399,3 +399,7 @@ export function resolveMarkerClickAction(
 export function replyCountLabel(count: number): string {
 	return `${count} repl${count === 1 ? 'y' : 'ies'}`;
 }
+
+// Set on a control the hub rebuilds, naming it by what it belongs to (a reply
+// box: `<path>#<comment id>`), so focus can follow it to its new element.
+export const FOCUS_KEY_ATTR = 'data-annoteca-focus-key';

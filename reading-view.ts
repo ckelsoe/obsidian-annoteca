@@ -4,10 +4,18 @@
 // via getSectionInfo and renders a small indicator: a note-level banner, a
 // per-section badge, or both, per the readingViewIndicator setting.
 
+import type { MarkdownPostProcessorContext, MarkdownView } from 'obsidian';
 import type AnnotecaPlugin from './main';
 import { parseDocument } from './document';
 import { toEditorText } from './note-text';
 import type { Comment } from './types';
+import { forbiddenRanges } from './comment-service';
+import {
+	collapseWhitespace,
+	locateInSource,
+	normalizeSelection,
+	startsBefore,
+} from './reading-selection';
 
 export interface ThreadCounts {
 	open: number;
@@ -123,4 +131,104 @@ export function registerReadingViewIndicator(plugin: AnnotecaPlugin): void {
 			});
 		}
 	});
+}
+
+// F-261: comment on text selected in reading view. Each rendered section's
+// post-processor context is kept here, keyed by the section's element, so a
+// selection can be traced to the source lines that section came from. A
+// WeakMap, so a section Obsidian throws away takes its context with it.
+const sectionContexts = new WeakMap<
+	HTMLElement,
+	MarkdownPostProcessorContext
+>();
+
+export function registerReadingSelection(plugin: AnnotecaPlugin): void {
+	plugin.registerMarkdownPostProcessor((el, ctx) => {
+		sectionContexts.set(el, ctx);
+	});
+}
+
+function sectionFor(node: Node | null): HTMLElement | undefined {
+	for (let n: Node | null = node; n !== null; n = n.parentNode) {
+		if (n.instanceOf(HTMLElement) && sectionContexts.has(n)) return n;
+	}
+	return undefined;
+}
+
+// The section's rendered text, up to where `range` starts when one is given,
+// without Annoteca's own indicator buttons, which reading view adds and the
+// source does not hold.
+function renderedText(section: HTMLElement, upTo?: Range): string {
+	const span = section.ownerDocument.createRange();
+	span.selectNodeContents(section);
+	if (upTo) span.setEnd(upTo.startContainer, upTo.startOffset);
+	const holder = section.ownerDocument.win.createDiv();
+	holder.appendChild(span.cloneContents());
+	for (const b of Array.from(
+		holder.querySelectorAll('.annoteca-rv-indicator'),
+	))
+		b.remove();
+	return holder.textContent ?? '';
+}
+
+// The editor-text range a reading-view selection covers, or why there is none.
+// Scoped to one rendered section, as getSectionInfo is; repeated text is told
+// apart by its order in the section (see reading-selection.ts).
+//
+// Offsets are into the note as reading view shows it, `view.getViewData()`.
+// Not the view's editor: in reading view Obsidian stops keeping that in step
+// with the file (seen: a frontmatter write reached the file and the rendered
+// note but not the hidden editor). `text` is returned so the caller can load
+// it into the editor before using the offsets there.
+export function readingSelectionRange(
+	view: MarkdownView,
+): { from: number; to: number; text: string } | { error: string } {
+	const doc = view.containerEl.ownerDocument;
+	const selection = doc.getSelection();
+	if (!selection || selection.isCollapsed || selection.rangeCount === 0)
+		return { error: 'Select the text to comment on first.' };
+	const range = selection.getRangeAt(0);
+	if (!view.containerEl.contains(range.commonAncestorContainer))
+		return { error: 'Select the text to comment on first.' };
+	const section = sectionFor(range.startContainer);
+	if (!section || section !== sectionFor(range.endContainer))
+		return {
+			error: 'Select text within one paragraph or block, then try again.',
+		};
+	const info = sectionContexts.get(section)?.getSectionInfo(section);
+	if (!info)
+		return {
+			error: 'Annoteca cannot tell where this text is in the note. Comment on it from editing view.',
+		};
+	const text = toEditorText(view.getViewData());
+	// The section's source as the renderer saw it. When the note changed
+	// since, offsets into it would land on the wrong words.
+	if (toEditorText(info.text) !== text)
+		return { error: 'The note just changed. Select the text again.' };
+	const sectionStart = offsetOfLine(text, info.lineStart);
+	const sectionEnd = offsetOfLine(text, info.lineEnd + 1);
+	const selected = selection.toString();
+	// Where the selection starts among every place its text starts in the
+	// section, overlapping ones included.
+	const occurrence = startsBefore(
+		collapseWhitespace(renderedText(section)),
+		normalizeSelection(selected),
+		collapseWhitespace(renderedText(section, range)).length,
+	);
+	const found = locateInSource(
+		text.slice(sectionStart, sectionEnd),
+		selected,
+		occurrence,
+	);
+	if (!found)
+		return {
+			error: 'Annoteca could not match that text to the note. Select plain text within one paragraph, or comment from editing view.',
+		};
+	const from = sectionStart + found.start;
+	const to = sectionStart + found.end;
+	if (forbiddenRanges(text).some((f) => f.start < to && f.end > from))
+		return {
+			error: "That text includes another comment's marker or the note properties. Select text beside it.",
+		};
+	return { from, to, text };
 }

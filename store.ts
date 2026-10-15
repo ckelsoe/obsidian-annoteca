@@ -552,6 +552,73 @@ export interface SpliceRange {
 	insert: string;
 }
 
+// The store as the editor draws it: runs of store blocks with nothing but
+// whitespace between them, each with how many blocks it holds. The usual note
+// has one run at its end; a block moved up into the prose is a run of its own.
+export function storeRegions(
+	content: string,
+): { start: number; end: number; count: number }[] {
+	const out: { start: number; end: number; count: number }[] = [];
+	for (const b of scanStoreEntries(content)) {
+		const last = out[out.length - 1];
+		if (last && content.slice(last.end, b.start).trim() === '') {
+			last.end = b.end;
+			last.count += 1;
+		} else out.push({ start: b.start, end: b.end, count: 1 });
+	}
+	return out;
+}
+
+// Prose splices plus the store rewrite that goes with them, as one list of
+// non-overlapping splices against `content`.
+//
+// The rewrite always rebuilds the store region at the end of the note. When the
+// store blocks are already there, its splice starts after the prose and the two
+// are applied side by side. When a block has been moved up into the note (the
+// Mind map editor carries it along when it moves the last section), the rewrite
+// starts at that block and reaches past prose splices below it, and applying
+// the two together would refuse the write. Then the prose splices are applied
+// first and the store rebuilt over the result, which is the order the composer
+// already uses, and the whole change goes out as one splice.
+export function withStoreRewrite(
+	content: string,
+	prose: readonly SpliceRange[],
+	entries: readonly StoredComment[],
+): SpliceRange[] {
+	const store = diffToSplice(content, writeStoreRegion(content, entries));
+	if (store === undefined) return [...prose];
+	const all = [...prose, store];
+	if (!hasOverlap(all) || hasOverlap(prose)) return all;
+	const combined = diffToSplice(
+		content,
+		writeStoreRegion(applyToText(content, prose), entries),
+	);
+	return combined === undefined ? [] : [combined];
+}
+
+function hasOverlap(splices: readonly SpliceRange[]): boolean {
+	const sorted = [...splices].sort((a, b) => a.from - b.from);
+	for (let i = 1; i < sorted.length; i++) {
+		const prev = sorted[i - 1];
+		const cur = sorted[i];
+		if (prev !== undefined && cur !== undefined && prev.to > cur.from)
+			return true;
+	}
+	return false;
+}
+
+// Back to front, so an earlier splice's offsets are not shifted by a later one.
+// Splices at the same offset keep their list order.
+function applyToText(content: string, splices: readonly SpliceRange[]): string {
+	const ordered = splices
+		.map((s, i) => ({ s, i }))
+		.sort((a, b) => b.s.from - a.s.from || b.i - a.i);
+	let out = content;
+	for (const { s } of ordered)
+		out = out.slice(0, s.from) + s.insert + out.slice(s.to);
+	return out;
+}
+
 // The single splice that turns `before` into `after`: shared prefix and suffix
 // trimmed to the smallest changed run. Every store write touches one contiguous
 // region that sits after all prose (a mutated entry, a dropped one, or a new one
