@@ -823,6 +823,13 @@ export class ComposerForm {
 				before,
 				this.request.editor.getValue(),
 			)
+			// A throw is handled as a refusal: the form stays usable and the
+			// editor goes back to the file, rather than staying locked.
+			.catch((err: unknown) => {
+				console.error('Annoteca: saving from reading view failed', err);
+				new Notice('Annoteca could not save that comment to the note.');
+				return false;
+			})
 			.then((saved) => {
 				this.persisting = false;
 				if (saved) {

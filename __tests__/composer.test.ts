@@ -970,6 +970,24 @@ describe('the composer in reading view', () => {
 		expect(h.form.state.body).toBe('a reading-view note');
 	});
 
+	it('stays usable when the save throws', async () => {
+		let calls = 0;
+		const h = openInReadingView(() => {
+			calls += 1;
+			return calls === 1
+				? Promise.reject(new Error('disk full'))
+				: Promise.resolve(true);
+		});
+		void h.form.submit();
+		await settle();
+		expect(h.closed()).toBe(false);
+		expect(parseAll(h.host.content)).toHaveLength(0);
+		void h.form.submit();
+		await settle();
+		expect(calls).toBe(2);
+		expect(h.closed()).toBe(true);
+	});
+
 	it('ignores a second press while the save is in flight', async () => {
 		let release: (ok: boolean) => void = () => undefined;
 		const h = openInReadingView(

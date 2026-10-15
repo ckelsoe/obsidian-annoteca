@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Comment from reading view.** Select text in a note in reading view, right-click, and choose **Annoteca: add comment for selection**, or run **Add comment for selection in reading view**. The comment form opens on that passage and you stay in reading view. The right-click menu also offers Copy. Select within one paragraph or block; if Annoteca cannot match the selection to the note's text it says so rather than guessing.
 - The Starred tab and the vault-wide unresolved view now mark comments that are **addressed**, waiting for you to accept, revise or reject an edit.
 - The comment store at the end of a note shows in the editor as one quiet line, "Annoteca: N stored comments", instead of a grey block of data. The underline indicator style still shows it raw, as it does markers.
-- Exported AI skill version 12: how to find every note with open comments across a vault from the `annoteca_open` property, instead of reading a Bases file. Export the skill again after updating.
+- Exported AI skill version 12: how to find every note with open comments across a vault, instead of reading a Bases file. With the frontmatter summary on, from the `annoteca_open` property plus any commented notes it has not reached yet; with it off, by scanning for comments. Export the skill again after updating, and after turning the summary on or off (Annoteca reminds you).
 
 ### Fixed
 - Resolving, replying to or deleting a comment, from the side panel or from another plugin, on a note open in **reading view** reported success but was lost: the change never reached the file and was discarded when the note went back to editing. Those changes are now written to the file.

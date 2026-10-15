@@ -2950,6 +2950,7 @@ export default class AnnotecaPlugin extends Plugin {
 				this.settings.enableAuthorTag
 					? this.settings.authorTag
 					: undefined,
+				this.settings.frontmatterSummary,
 			);
 			const adapter = this.app.vault.adapter;
 			const paths = skillTargetPaths(this.settings.skillExportTarget);

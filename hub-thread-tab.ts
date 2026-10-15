@@ -94,6 +94,8 @@ export class ThreadTabRenderer {
 	// dispose() flushes them instead, so a refresh cannot swallow text typed
 	// inside the debounce. See renderReplyInput for why those differ.
 	private readonly draftSaveTimers = new Map<string, Set<PendingDraftSave>>();
+	// Reply-box focus keys handed out this render pass, per path and id.
+	private readonly focusKeysSeen = new Map<string, number>();
 
 	// Set by close(). See there.
 	private closed = false;
@@ -254,6 +256,7 @@ export class ThreadTabRenderer {
 
 	render(container: HTMLElement): void {
 		this.markdownLifetime = cycleLifetime(this.markdownLifetime);
+		this.focusKeysSeen.clear();
 		if (this.focus) {
 			this.renderFocused(container, this.focus.path);
 			return;
@@ -1150,7 +1153,15 @@ export class ThreadTabRenderer {
 		// Names this box across a rebuild, so the hub can put the cursor back
 		// in the same comment's reply box rather than whichever box now sits at
 		// the same position in a list that may have grown.
-		if (c.id) textarea.setAttribute(FOCUS_KEY_ATTR, `${path}#${c.id}`);
+		// The occurrence count tells apart two comments carrying the same id (a
+		// copy-pasted marker), which would otherwise share a key and send focus
+		// to the first of them.
+		if (c.id) {
+			const base = `${path}#${c.id}`;
+			const n = this.focusKeysSeen.get(base) ?? 0;
+			this.focusKeysSeen.set(base, n + 1);
+			textarea.setAttribute(FOCUS_KEY_ATTR, `${base}#${n}`);
+		}
 		// Restore any draft saved for this comment, mirroring the popup composer.
 		if (c.id) {
 			const draft = this.plugin.loadDraft(c.id);

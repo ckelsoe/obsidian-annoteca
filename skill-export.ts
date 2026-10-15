@@ -161,9 +161,59 @@ function inlineCode(text: string): string {
 	return `${delimiter}${pad}${text}${pad}${delimiter}`;
 }
 
+// How to find every note with open comments. The frontmatter summary is a
+// fast index, but not proof on its own: notes it has not reached yet (it fills
+// in as comments change) have no `annoteca_open`, and when it is turned off the
+// fields it wrote stay behind with old counts. So with the summary on, the
+// queue is the notes it counts plus the notes with markers it has not reached;
+// with it off, the markers are the only truth.
+function queueSection(summaryOn: boolean): string {
+	const markerScan = "rg -l '<!--\\s*annoteca/' --glob '*.md' .";
+	const intro = `## Working a queue of notes across the vault
+
+To find every note that needs review, read the files. Do not read a \`.base\` file as the list: a \`.base\` is a live Obsidian query, not a stored list of notes, so from outside Obsidian there is nothing in it to follow.`;
+	const after = `Then handle each note's comments with the rules above, including **Agent handling** below: a note whose open comments are all in Skip categories has no work for you.
+
+Never write \`annoteca_open\` or the other summary fields yourself. Annoteca regenerates them from the comments whenever one changes: change the comments and the counts follow. A hand-written count is overwritten, and editing it instead of the comments corrupts the queue.`;
+	if (!summaryOn)
+		return `${intro}
+
+In this vault the frontmatter summary was **off** when these instructions were exported. Find work by scanning for markers:
+
+\`\`\`
+${markerScan}
+\`\`\`
+
+Every note listed has at least one comment; one with no resolution is open. Ignore any \`annoteca_open\` properties you come across: they are left over from when the summary was on and their counts are out of date.
+
+${after}`;
+	return `${intro}
+
+In this vault the frontmatter summary was **on** when these instructions were exported. A note with open comments carries:
+
+- \`annoteca_open\`: the number of open comments. Addressed comments count as open: they still need the reviewer.
+- \`annoteca_oldest_open\`: the date of the oldest open comment. Optional, may be absent.
+- \`annoteca_categories\`: the categories among the open comments. Optional, may be absent.
+
+These names are fixed. The summary fills in as comments change, so a note nobody has touched since it was turned on may not carry it yet. The queue is both of these:
+
+\`\`\`
+rg -l '^annoteca_open: [1-9][0-9]*$' --glob '*.md' .
+rg -l0 '<!--\\s*annoteca/' --glob '*.md' . | xargs -0 rg --files-without-match '^annoteca_open:'
+\`\`\`
+
+The first lists the notes the summary counts as open. The second lists notes that have comments but no summary yet; check those for open comments the slow way. A note with \`annoteca_open: 0\` is done; skip it. Work oldest first with \`annoteca_oldest_open\`, or narrow by \`annoteca_categories\`. If the person tells you the summary has since been turned off, use the marker scan alone and ignore the counts.
+
+${after}`;
+}
+
 export function buildSkillMarkdown(
 	categories: CategoryDefinition[],
 	authorTag: string | undefined,
+	// Whether the frontmatter summary was on when this was exported. Off by
+	// default: an assistant told the summary is off scans markers, which is
+	// slower but never misses a note.
+	summaryOn = false,
 ): string {
 	// Read, not repaired. `normalizeSettings` is the single ingress for
 	// data.json and already runs the tag through the token grammar, so the
@@ -336,23 +386,7 @@ The JSON mirrors the comment model: \`v\` (schema version, currently 1), \`id\` 
 
 The store is **lossless and easier to write than the bracket lines**: JSON already encodes newlines, quotes and brackets, so a multi-line reply, a long anchor, and a body that contains \`-->\` or \`<!--\` all go in as ordinary string values with none of the backslash escaping the inline format needs. (On save the plugin rewrites any \`<\` or \`>\` in the JSON as \`\\u003c\`/\`\\u003e\`, which JSON reads straight back; you do not need to.) Keep the store region as the LAST thing in the file, and never let an entry's JSON hold a raw \`-->\`.
 
-## Working a queue of notes across the vault
-
-Annoteca can keep each note's open-comment count in that note's frontmatter, so a whole vault of review work can be found without opening every file. It is opt-in, so it may be off. When on, a note with open comments carries:
-
-- \`annoteca_open\`: the number of open comments. Addressed comments count as open: they still need the reviewer.
-- \`annoteca_oldest_open\`: the date of the oldest open comment. Optional, may be absent.
-- \`annoteca_categories\`: the categories among the open comments. Optional, may be absent.
-
-These names are fixed. To find every note that needs review, read the frontmatter. Do not read a \`.base\` file as the list: a \`.base\` is a live Obsidian query, not a stored list of notes, so from outside Obsidian there is nothing in it to follow. Build the queue with one frontmatter scan, for example:
-
-\`\`\`
-rg -l '^annoteca_open: [1-9][0-9]*$' --glob '*.md' .
-\`\`\`
-
-That scan is the whole queue: \`annoteca_open\` greater than zero. A note with \`annoteca_open: 0\` is done; skip it, and do not also scan for markers or the optional \`fileclass\` tag to find work. Work oldest first with \`annoteca_oldest_open\`, or narrow by \`annoteca_categories\`, then handle each note's comments with the rules above, including **Agent handling** below: a note whose open comments are all in Skip categories has no work for you. Only when no note carries \`annoteca_open\` at all (the feature is off) fall back to the marker regex at the top of this file, treating any comment with no resolution as open.
-
-Never write \`annoteca_open\` or the other summary fields yourself. Annoteca regenerates them from the comments whenever one changes: change the comments and the counts follow. A hand-written count is overwritten, and editing it instead of the comments corrupts the queue.
+${queueSection(summaryOn)}
 
 ## Categories in this vault
 

@@ -360,28 +360,44 @@ describe('skill v11: agent handling', () => {
 });
 
 describe('skill v12: the vault review queue', () => {
-	const skill = buildSkillMarkdown(CATEGORIES, undefined);
+	const off = buildSkillMarkdown(CATEGORIES, undefined);
+	const on = buildSkillMarkdown(CATEGORIES, undefined, true);
 
 	it('is schema version 12', () => {
 		expect(SKILL_SCHEMA_VERSION).toBe(12);
 	});
 
-	it('builds the queue from annoteca_open, not from a .base file', () => {
-		expect(skill).toContain('## Working a queue of notes across the vault');
-		expect(skill).toContain("rg -l '^annoteca_open: [1-9][0-9]*$'");
-		expect(skill).toMatch(/Do not read a `\.base` file as the list/);
+	it('never treats a .base file as the list', () => {
+		for (const skill of [off, on]) {
+			expect(skill).toContain(
+				'## Working a queue of notes across the vault',
+			);
+			expect(skill).toMatch(/Do not read a `\.base` file as the list/);
+		}
+	});
+
+	it('with the summary off, scans markers and ignores leftover counts', () => {
+		expect(off).toContain('frontmatter summary was **off**');
+		expect(off).toContain("rg -l '<!--\\s*annoteca/' --glob '*.md' .");
+		expect(off).toMatch(/Ignore any `annoteca_open` properties/);
+		expect(off).not.toContain("rg -l '^annoteca_open:");
+	});
+
+	it('with the summary on, adds notes the summary has not reached yet', () => {
+		expect(on).toContain('frontmatter summary was **on**');
+		expect(on).toContain("rg -l '^annoteca_open: [1-9][0-9]*$'");
+		// NUL-separated, so a path with spaces survives the pipe.
+		expect(on).toContain(
+			"rg -l0 '<!--\\s*annoteca/' --glob '*.md' . | xargs -0 rg --files-without-match '^annoteca_open:'",
+		);
 	});
 
 	it('skips notes whose open comments are all Skip, and never writes the counts', () => {
-		expect(skill).toMatch(
-			/open comments are all in Skip categories has no work/,
-		);
-		expect(skill).toMatch(/Never write `annoteca_open`/);
-	});
-
-	it('falls back to the marker regex only when the summary is off', () => {
-		expect(skill).toMatch(
-			/Only when no note carries `annoteca_open` at all/,
-		);
+		for (const skill of [off, on]) {
+			expect(skill).toMatch(
+				/open comments are all in Skip categories has no work/,
+			);
+			expect(skill).toMatch(/Never write `annoteca_open`/);
+		}
 	});
 });
