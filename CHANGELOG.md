@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.23.0] - 2026-10-15
+
+Annoteca can now tell you when someone else, such as an AI agent, comments or replies, and each category can say what an agent may do with its comments, so a note you leave for yourself is not treated as a request.
+
 ### Added
 - **Reply alerts**, a new settings group, off by default. Annoteca can tell you when someone other than you adds a comment or replies, such as an AI agent answering your comments. **Alert popup**: an Obsidian notice you can click to open the comment, a system notification that shows even when Obsidian is in the background (desktop only; mobile gets the notice instead), or both. **Alert sound**: the system notification sound, an audio file from your vault (WAV, MP3, OGG, M4A, FLAC or WebM) with a volume slider, or a built-in tone (chime, ping or soft pop). A Play button previews the sound, and Send test alert runs a real alert with your settings; when it sends a system notification it also tells you where to allow Obsidian if none appears (macOS files notifications silently until Obsidian is allowed in System Settings > Notifications, and hides them for every app while the screen is shared or mirrored). Alerts arrive a few seconds after the note changes, and replies that land close together are grouped into one alert and one sound. Your own comments and replies are recognized by your author identifier, or by `user` when the author tag is off, and never alert; a comment with no author tag never alerts either. Turning alerts on indexes the whole vault once each session, as the event journal does.
 - **Agent handling** for each category, in the category editor: **Act on it** (the default, today's behavior), **Reply only** (an AI agent may answer in the thread but never edits the text), or **Skip** (the agent leaves the comment alone). The choice is written into the exported AI skill, which is now version 11, so export it again after updating and after any change; Annoteca reminds you when you change one.
