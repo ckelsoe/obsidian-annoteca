@@ -242,6 +242,9 @@ function validCategory(raw: unknown): CategoryDefinition | undefined {
 	// Trimmed so a default of spaces cannot save a comment that looks empty.
 	if (typeof raw.defaultBody === 'string' && raw.defaultBody.trim() !== '')
 		cat.defaultBody = raw.defaultBody.trim();
+	// Only the non-default values are stored; "act" is the absence.
+	const agent = oneOf('reply', 'skip')(raw.agent);
+	if (agent !== undefined) cat.agent = agent;
 	return cat;
 }
 
@@ -2134,6 +2137,55 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			if (v === '') delete cat.defaultBody;
 			else cat.defaultBody = v;
 			void this.plugin.saveSettings();
+		});
+
+		// Agent handling: how an AI agent treats this category's comments,
+		// as written into the exported skill. The agent only learns a change
+		// from a re-export, so the change says so.
+		const agentWrap = controls.createDiv({
+			cls: 'annoteca-category-control',
+		});
+		agentWrap.createDiv({
+			cls: 'annoteca-category-control-label',
+			text: 'Agent handling',
+		});
+		const agentSelect = agentWrap.createEl('select', {
+			cls: 'dropdown',
+			attr: { 'aria-label': `Agent handling for ${cat.displayName}` },
+		});
+		agentSelect.createEl('option', {
+			value: 'act',
+			text: 'Act on it: may reply and edit the text',
+		});
+		agentSelect.createEl('option', {
+			value: 'reply',
+			text: 'Reply only: answers, never edits',
+		});
+		agentSelect.createEl('option', {
+			value: 'skip',
+			text: 'Skip: leaves it for you',
+		});
+		agentSelect.value = cat.agent ?? 'act';
+		agentSelect.addEventListener('change', () => {
+			const next = agentSelect.value;
+			if (next === 'reply' || next === 'skip') cat.agent = next;
+			else delete cat.agent;
+			this.plugin.saveSettings().then(
+				() => {
+					new Notice(
+						'Export the AI skill again so your assistant follows this.',
+					);
+				},
+				(err: unknown) => {
+					console.error(
+						'Annoteca: saving agent handling failed',
+						err,
+					);
+					new Notice(
+						'Annoteca: could not save the agent handling. Try again.',
+					);
+				},
+			);
 		});
 
 		// Actions: either Remove or the protected note.

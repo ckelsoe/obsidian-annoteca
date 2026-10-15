@@ -4,7 +4,7 @@
 // narrative contract lives in the (private) data-format spec; this file is the
 // distilled, assistant-facing version that ships into a user's vault.
 
-import type { CategoryDefinition } from './types';
+import type { AgentHandling, CategoryDefinition } from './types';
 
 export type SkillExportTarget = 'claude' | 'agent' | 'both';
 
@@ -57,7 +57,12 @@ export type SkillExportTarget = 'claude' | 'agent' | 'both';
 // reported instead of the comment quietly becoming start-only. An assistant on
 // a v9 skill creates ranges without the line, and strips it as an unknown field
 // when it rewrites the marker, so the report never fires for its comments.
-export const SKILL_SCHEMA_VERSION = 10;
+// 11 = agent handling per category. A category can now say an assistant
+// should only reply to its comments, or leave them alone entirely (a "Note to
+// self" the user wrote for themself). An assistant on a v10 skill does not know,
+// so it would edit prose under a reply-only category, or answer the user's own
+// reminders as if they were requests.
+export const SKILL_SCHEMA_VERSION = 11;
 
 const SKILL_VERSION_RE = /^annoteca-skill-version:\s*(\d+)\s*$/m;
 
@@ -95,11 +100,36 @@ export function skillTargetPaths(target: SkillExportTarget): string[] {
 	return [SKILL_FILE_BY_TARGET[target]];
 }
 
+const AGENT_HANDLING_LABEL: Record<AgentHandling, string> = {
+	act: 'Act on it',
+	reply: 'Reply only',
+	skip: 'Skip',
+};
+
+// A display name is free text. A `|` in one would end its cell early and
+// shift the agent handling into the wrong column, and a line break would end
+// the row, so the reader would be told the wrong rule for that category.
+function tableCell(text: string): string {
+	return text
+		.split(/[\r\n]+/)
+		.map((line) => line.trim())
+		.filter((line) => line !== '')
+		.join(' ')
+		.replace(/\|/g, '\\|');
+}
+
 function categoryTable(categories: CategoryDefinition[]): string {
 	// Single backticks are safe here: a category id is `[a-z][a-z0-9-]*`, so
 	// it cannot hold a backtick. The reviewer tag can, hence inlineCode below.
-	const rows = categories.map((c) => `| \`${c.id}\` | ${c.displayName} |`);
-	return ['| Category | Meaning |', '| --- | --- |', ...rows].join('\n');
+	const rows = categories.map(
+		(c) =>
+			`| \`${c.id}\` | ${tableCell(c.displayName)} | ${AGENT_HANDLING_LABEL[c.agent ?? 'act']} |`,
+	);
+	return [
+		'| Category | Meaning | Agent handling |',
+		'| --- | --- | --- |',
+		...rows,
+	].join('\n');
 }
 
 // A code span whose delimiter is longer than any backtick run inside the text,
@@ -298,5 +328,15 @@ The store is **lossless and easier to write than the bracket lines**: JSON alrea
 Treat the category as a typed hint about the kind of feedback.
 
 ${categoryTable(categories)}
+
+### Agent handling
+
+The reviewer sets, per category, what you may do with its comments. Check the category's **Agent handling** in the table above before touching a comment, and follow it even when the comment's text seems to ask for more.
+
+- **Act on it**: everything in "What to do" above. Reply, and address the comment by editing the prose where that is what it asks for.
+- **Reply only**: answer in the thread, nothing else: a \`[reply ...]\` line for an inline comment, or a new entry in the store's \`replies\` array for an end-of-file comment. Never edit the passage, and never mark the comment addressed. If the comment seems to want a change, describe the change in your reply and let the reviewer make it.
+- **Skip**: leave the comment entirely alone. Do not reply to it, address it, resolve it, or edit the passage it is on. These are notes the reviewer wrote for themself, such as a reminder to rework a section, and they are not addressed to you. Do not count them as work outstanding.
+
+A category that is not in the table (a comment filed under one that has since been removed) is **Act on it**, unless the reviewer tells you otherwise.
 `;
 }

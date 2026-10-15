@@ -129,7 +129,14 @@ export interface CategoryDefinition {
 	// left empty, and shown as the body placeholder. Undefined: an empty body
 	// is refused, as before.
 	defaultBody?: string;
+	// How an AI agent treats comments in this category, written into the
+	// exported skill. Undefined === "act": the agent may work the comment,
+	// including editing the prose. "reply": answer in the thread, never edit.
+	// "skip": leave the comment alone, for notes the user writes to themself.
+	agent?: AgentHandling;
 }
+
+export type AgentHandling = 'act' | 'reply' | 'skip';
 
 // Per-author / per-collaborator styling (F-274/F-275). `tag` is the author
 // token written to [author=...] / [reply <tag> ...] lines; `color` tints that

@@ -192,6 +192,25 @@ describe('normalizeSettings: structural keys', () => {
 		]);
 	});
 
+	it('keeps a category agent handling, storing act as absent', () => {
+		const s = normalizeSettings({
+			categories: [
+				{ id: 'cut', displayName: 'Cut', agent: 'reply' },
+				{ id: 'tone', displayName: 'Tone', agent: 'skip' },
+				{ id: 'expand', displayName: 'Expand', agent: 'act' },
+				{ id: 'clarify', displayName: 'Clarify', agent: 'ignore' },
+				{ id: 'tighten', displayName: 'Tighten', agent: 3 },
+			],
+		});
+		expect(s.categories.map((c) => c.agent)).toEqual([
+			'reply',
+			'skip',
+			undefined,
+			undefined,
+			undefined,
+		]);
+	});
+
 	it('keeps only string ids in starredComments', () => {
 		// main.ts does `starredComments.includes(comment.id)` and the Starred tab
 		// walks it in reverse; a number in there is a card that can never draw.
