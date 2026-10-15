@@ -1,6 +1,7 @@
 // Pure helpers used by the hub panel views. No Obsidian dependency so
 // they can be unit-tested without mocking the runtime API.
 
+import { gapEnd } from './marker-placement';
 import type { AuthorStyle, Comment } from './types';
 
 // Per-author color lookup (F-275). Returns the configured color for an author
@@ -145,13 +146,13 @@ export function resolveAnchorRangeInWindows(
 				to: markerStart - 1,
 			};
 		}
-		if (fwd.startsWith(anchorText)) {
-			return { from: markerEnd, to: markerEnd + anchorText.length };
-		}
-		if (fwd.startsWith(' ' + anchorText)) {
+		// Forward: past the gap a begin-placed marker leaves (one space, or a
+		// line break and the next line's prefix when it sits on its own line).
+		const gap = gapEnd((p) => fwd.charAt(p), 0);
+		if (fwd.startsWith(anchorText, gap)) {
 			return {
-				from: markerEnd + 1,
-				to: markerEnd + 1 + anchorText.length,
+				from: markerEnd + gap,
+				to: markerEnd + gap + anchorText.length,
 			};
 		}
 		return null;
@@ -179,8 +180,8 @@ export function resolveAnchorRangeInWindows(
 
 	// Forward.
 	let headStart: number | null = null;
-	if (fwd.startsWith(head)) headStart = markerEnd;
-	else if (fwd.startsWith(' ' + head)) headStart = markerEnd + 1;
+	const gap = gapEnd((p) => fwd.charAt(p), 0);
+	if (fwd.startsWith(head, gap)) headStart = markerEnd + gap;
 	if (headStart !== null) {
 		const afterHeadLocal = headStart - markerEnd + head.length;
 		const tailHaystack = fwd.slice(afterHeadLocal);
@@ -280,7 +281,7 @@ export function rangeSpan(
 	charAt: (pos: number) => string,
 ): { from: number; to: number } | null {
 	if (!m.closer) return null;
-	const from = charAt(m.marker.end) === ' ' ? m.marker.end + 1 : m.marker.end;
+	const from = gapEnd(charAt, m.marker.end);
 	const to = m.closer.start;
 	return to > from ? { from, to } : null;
 }
@@ -320,8 +321,7 @@ export function planFlashRange(
 ): { from: number; to: number } | null {
 	if (hideAll) return null;
 	if (m.addressed) {
-		const proseStart =
-			charAt(m.marker.end) === ' ' ? m.marker.end + 1 : m.marker.end;
+		const proseStart = gapEnd(charAt, m.marker.end);
 		const lineEnd = m.closer ? m.closer.start : lineEndAt(proseStart);
 		if (lineEnd > proseStart) return { from: proseStart, to: lineEnd };
 	}

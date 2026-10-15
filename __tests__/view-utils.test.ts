@@ -126,11 +126,19 @@ describe('view-utils: planFlashRange (#82)', () => {
 	});
 
 	it('addressed with nothing after the marker falls back to the anchor', () => {
+		// A blank line after the marker: the passage is not there.
+		expect(
+			plan(comment(true), `${pad}\n\nnext`, { from: 0, to: 5 }),
+		).toEqual({
+			from: 0,
+			to: 5,
+		});
+	});
+
+	it('addressed with the marker on its own line flashes the next line', () => {
+		// The placement for a paragraph start: marker, line break, passage.
 		expect(plan(comment(true), `${pad}\nnext`, { from: 0, to: 5 })).toEqual(
-			{
-				from: 0,
-				to: 5,
-			},
+			{ from: 21, to: 25 },
 		);
 	});
 

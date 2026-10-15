@@ -45,6 +45,7 @@ import {
 	serializeCloser,
 	type MalformedMarker,
 } from './parser';
+import { gapEnd, layoutMarker, planMarkerInsert } from './marker-placement';
 import {
 	coerceStorageMode,
 	parseDocument,
@@ -659,10 +660,9 @@ export class CommentService {
 		if (this.refusesForDamage(content, [current.marker])) return;
 
 		const { start: markerStart, end: markerEnd } = current.marker;
-		// Skip the single begin-placement space between the marker and the new
-		// prose, if present.
-		const proseStart =
-			content.charAt(markerEnd) === ' ' ? markerEnd + 1 : markerEnd;
+		// Skip the gap a begin-placed marker leaves before the new prose: one
+		// space, or a line break and prefix when it sits on its own line.
+		const proseStart = gapEnd((p) => content.charAt(p), markerEnd);
 		// A range comment (#84) says exactly where the edited prose ends, so
 		// Reject restores that span and nothing else, across as many lines as
 		// it covers. Without a closer it is the old rule: to the end of the
@@ -920,11 +920,18 @@ export class CommentService {
 				});
 			}
 			// Beginning-placement, the same as the composer: the marker goes at
-			// the START of the passage it concerns so the prose follows it.
+			// the START of the passage it concerns so the prose follows it,
+			// moved off the start of a block where that would stop the note
+			// rendering (see marker-placement.ts).
+			const place = planMarkerInsert(
+				content,
+				r.anchor.start,
+				text.includes('\n'),
+			);
 			splices.push({
-				from: r.anchor.start,
-				to: r.anchor.start,
-				insert: `${text} `,
+				from: place.at,
+				to: place.at,
+				insert: layoutMarker(place, text, ' '),
 			});
 			if (closeAt !== undefined)
 				closerSplices.push({

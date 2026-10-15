@@ -12,6 +12,7 @@ import {
 } from 'obsidian';
 
 import type AnnotecaPlugin from './main';
+import { layoutMarker, planMarkerInsert } from './marker-placement';
 import { toEditorText } from './note-text';
 import type { AnchorText, Comment, StorageMode } from './types';
 import {
@@ -742,6 +743,16 @@ export class ComposerForm {
 					range: comment.range,
 				});
 
+		// Where the marker goes: at the passage, moved off the start of a block
+		// where that would stop the note rendering (see marker-placement.ts).
+		const place = planMarkerInsert(
+			editor.getValue(),
+			selection.length > 0
+				? fromOffset
+				: editor.posToOffset(editor.getCursor()),
+			text.includes('\n'),
+		);
+		const placeAt = editor.offsetToPos(place.at);
 		let markerStart: number;
 		if (selection.length > 0) {
 			// F-273: beginning-placement. Insert the marker at the START of the
@@ -756,7 +767,7 @@ export class ComposerForm {
 			if (plan.kind === 'range' && id !== undefined) {
 				editor.transaction({
 					changes: [
-						{ from, text: `${text} ` },
+						{ from: placeAt, text: layoutMarker(place, text, ' ') },
 						{
 							from: editor.offsetToPos(plan.at),
 							text: serializeCloser(id),
@@ -765,14 +776,12 @@ export class ComposerForm {
 				});
 			} else {
 				if (plan.kind === 'refused') new Notice(plan.reason);
-				editor.replaceRange(`${text} `, from);
+				editor.replaceRange(layoutMarker(place, text, ' '), placeAt);
 			}
-			markerStart = fromOffset;
 		} else {
-			const cursor = editor.getCursor();
-			markerStart = editor.posToOffset(cursor);
-			editor.replaceRange(text, cursor);
+			editor.replaceRange(layoutMarker(place, text, ''), placeAt);
 		}
+		markerStart = place.at + place.before.length;
 
 		// eof mode: the marker just inserted is lean; write the entry that backs it
 		// to the store region at EOF. Computed against the buffer AFTER the marker

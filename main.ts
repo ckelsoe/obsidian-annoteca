@@ -31,6 +31,7 @@ import {
 } from './comment-events';
 import { EventJournal } from './event-journal';
 import { noteText, spliceRaw, toEditorText } from './note-text';
+import { repairMarkerPlacement } from './marker-placement';
 import { diffToSplice } from './store';
 import {
 	ReplyAlerts,
@@ -1271,6 +1272,46 @@ export default class AnnotecaPlugin extends Plugin {
 			id: 'import-all-comments',
 			name: 'Convert every comment to the canonical format',
 			callback: () => this.confirmAndConvert('all'),
+		});
+		// Markers placed before 1.25.0 could open a paragraph, list item,
+		// quote or heading, which stops that line rendering in reading view
+		// and exports. These move them to where new markers now go.
+		this.addCommand({
+			id: 'fix-reading-view-markers-in-note',
+			name: 'Fix comments that break reading view in this note',
+			checkCallback: (checking: boolean) => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file || file.extension !== 'md') return false;
+				if (!checking)
+					this.runGuarded('Comment repair', () =>
+						this.repairNoteMarkers(file),
+					);
+				return true;
+			},
+		});
+		this.addCommand({
+			id: 'fix-reading-view-markers-in-vault',
+			name: 'Fix comments that break reading view in all notes',
+			callback: () => {
+				new ConfirmBackupModal(
+					this.app,
+					'Fix comments that break reading view',
+					'Move every comment marker that stops its line rendering in reading view (one that starts a paragraph, list item, quote or heading) to a position that renders. Comments and text are unchanged; only where each marker sits on its line moves.',
+					() => {
+						this.runGuarded('Comment repair', async () => {
+							const { totalConverted, filesTouched } =
+								await this.convertVaultFiles(
+									repairMarkerPlacement,
+								);
+							new Notice(
+								totalConverted === 0
+									? 'No comments needed fixing.'
+									: `Fixed ${totalConverted} comment(s) in ${filesTouched} note(s).`,
+							);
+						});
+					},
+				).open();
+			},
 		});
 		this.addCommand({
 			id: 'convert-note-to-eof-storage',
@@ -3147,6 +3188,19 @@ export default class AnnotecaPlugin extends Plugin {
 			`Converted ${converted} comment(s) to ${
 				toEof ? 'end-of-file' : 'inline'
 			} storage.`,
+		);
+	}
+
+	private async repairNoteMarkers(file: TFile): Promise<void> {
+		const fixed = await this.comments.convertFileComments(
+			file.path,
+			file,
+			repairMarkerPlacement,
+		);
+		new Notice(
+			fixed === 0
+				? 'No comments in this note break reading view.'
+				: `Fixed ${fixed} comment(s) in this note.`,
 		);
 	}
 
