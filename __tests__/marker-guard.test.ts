@@ -1,6 +1,14 @@
 // Anchoring hardening, part A: edits around a marker keep the comment.
 
-import { guardEdit, guardRangesOf } from '../marker-guard';
+import {
+	EditorSelection,
+	EditorState,
+	StateField,
+	Transaction,
+} from '@codemirror/state';
+import { guardEdit, guardRangesOf, markerGuard } from '../marker-guard';
+import { storeRegions, writeStoreRegion } from '../store';
+import type { Comment } from '../types';
 import { parseDocument } from '../document';
 
 const M = '<!-- annoteca/tone: x\n[id=aaaa1111]\n-->';
@@ -106,5 +114,107 @@ describe('guardEdit', () => {
 				false,
 			).kind,
 		).toBe('unchanged');
+	});
+});
+
+describe('guardEdit and the end-of-file store', () => {
+	it('keeps the store when everything is selected and typed over', () => {
+		const lean = '<!-- annoteca/tone: [id=aaaa1111] -->';
+		const doc = writeStoreRegion(`Prose ${lean} here.\n`, [
+			{ id: 'aaaa1111', category: 'tone', body: 'the body', replies: [] },
+		]);
+		const ranges = guardRangesOf(
+			parseDocument(doc).comments,
+			storeRegions(doc),
+		);
+		const r = guardEdit(
+			doc,
+			ranges,
+			[{ from: 0, to: doc.length, insert: 'X' }],
+			false,
+		);
+		if (r.kind !== 'rewritten') throw new Error(r.kind);
+		const out = apply(doc, r.changes);
+		expect(parseDocument(out).comments[0]?.body).toBe('the body');
+		expect(out.startsWith(`${lean} X\n\n<!-- annoteca:store`)).toBe(true);
+	});
+
+	it('refuses an edit that cuts into the store, allows one inside it', () => {
+		const doc = writeStoreRegion('Prose.\n', [
+			{ id: 'aaaa1111', category: 'tone', body: 'the body', replies: [] },
+		]);
+		const ranges = guardRangesOf([], storeRegions(doc));
+		const start = doc.indexOf('<!-- annoteca:store');
+		expect(
+			guardEdit(
+				doc,
+				ranges,
+				[{ from: 2, to: start + 5, insert: '' }],
+				true,
+			).kind,
+		).toBe('refused');
+		const inBody = doc.indexOf('the body');
+		expect(
+			guardEdit(
+				doc,
+				ranges,
+				[{ from: inBody, to: inBody + 3, insert: 'a' }],
+				false,
+			).kind,
+		).toBe('unchanged');
+	});
+});
+
+describe('markerGuard in a CodeMirror state', () => {
+	function stateFor(doc: string, selection: EditorSelection) {
+		const comments = StateField.define<Comment[]>({
+			create: (st) => parseDocument(st.doc.toString()).comments,
+			update: (v, tr) =>
+				tr.docChanged
+					? parseDocument(tr.state.doc.toString()).comments
+					: v,
+		});
+		const stores = StateField.define<{ start: number; end: number }[]>({
+			create: (st) => storeRegions(st.doc.toString()),
+			update: (v) => v,
+		});
+		return EditorState.create({
+			doc,
+			selection,
+			extensions: [
+				EditorState.allowMultipleSelections.of(true),
+				comments,
+				stores,
+				markerGuard(comments, stores, () => undefined),
+			],
+		});
+	}
+
+	it('keeps every cursor when one of several edits covers a marker', () => {
+		const doc = `Alpha ${M} beta. Other words.`;
+		const a = doc.indexOf('Alpha');
+		const b = doc.indexOf(' beta');
+		const o = doc.indexOf('Other');
+		const state = stateFor(
+			doc,
+			EditorSelection.create([
+				EditorSelection.range(a, b),
+				EditorSelection.range(o, o + 5),
+			]),
+		);
+		const tr = state.update(state.replaceSelection('X'), {
+			annotations: Transaction.userEvent.of('input.type'),
+		});
+		expect(tr.state.doc.toString()).toBe(`${M} X beta. X words.`);
+		expect(tr.state.selection.ranges).toHaveLength(2);
+	});
+
+	it('leaves a programmatic write alone', () => {
+		const doc = `Alpha ${M} beta.`;
+		const state = stateFor(doc, EditorSelection.single(0));
+		const tr = state.update({
+			changes: { from: 0, to: doc.length, insert: '' },
+		});
+		expect(tr.state.doc.toString()).toBe('');
 	});
 });

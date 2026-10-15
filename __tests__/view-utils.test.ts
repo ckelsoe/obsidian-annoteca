@@ -126,13 +126,17 @@ describe('view-utils: planFlashRange (#82)', () => {
 	});
 
 	it('addressed with nothing after the marker falls back to the anchor', () => {
-		// A blank line after the marker: the passage is not there.
-		expect(
-			plan(comment(true), `${pad}\n\nnext`, { from: 0, to: 5 }),
-		).toEqual({
+		expect(plan(comment(true), pad, { from: 0, to: 5 })).toEqual({
 			from: 0,
 			to: 5,
 		});
+	});
+
+	it('addressed with a blank line after its own-line marker still finds its text', () => {
+		// The Obsidian Linter puts a blank line after a marker on its own line.
+		expect(
+			plan(comment(true), `${pad}\n\nnext`, { from: 0, to: 5 }),
+		).toEqual({ from: 22, to: 26 });
 	});
 
 	it('addressed with the marker on its own line flashes the next line', () => {

@@ -12,7 +12,11 @@ import {
 } from 'obsidian';
 
 import type AnnotecaPlugin from './main';
-import { layoutMarker, planMarkerInsert } from './marker-placement';
+import {
+	headingTextEnd,
+	layoutMarker,
+	planMarkerInsert,
+} from './marker-placement';
 import { toEditorText } from './note-text';
 import type { AnchorText, Comment, StorageMode } from './types';
 import {
@@ -359,16 +363,20 @@ export class ComposerForm {
 	// Where the new comment's closer goes, judged against the note as it is
 	// before the marker is inserted. Every existing marker and closer is
 	// passed so the closer cannot land inside one.
-	private closerPlan(editor: Editor, fromOffset: number): CloserPlan {
+	// `wholeHeading`: the marker is multi-line, so on a heading it goes above
+	// the heading and the comment covers the whole heading (headingTextEnd).
+	private closerPlan(
+		editor: Editor,
+		fromOffset: number,
+		wholeHeading: boolean,
+	): CloserPlan {
 		const content = editor.getValue();
 		const markers = parseAll(content).map((c) => c.marker);
 		const occupied = [...markers, ...scanClosers(content, markers)];
-		return planCloser(
-			content,
-			fromOffset,
-			editor.posToOffset(editor.getCursor('to')),
-			occupied,
-		);
+		const to =
+			(wholeHeading ? headingTextEnd(content, fromOffset) : undefined) ??
+			editor.posToOffset(editor.getCursor('to'));
+		return planCloser(content, fromOffset, to, occupied);
 	}
 
 	private buildCommentForCreate(
@@ -721,7 +729,7 @@ export class ComposerForm {
 		const fromOffset = editor.posToOffset(from);
 		const plan =
 			selection.length > 0 && id !== undefined
-				? this.closerPlan(editor, fromOffset)
+				? this.closerPlan(editor, fromOffset, mode !== 'eof')
 				: ({ kind: 'none' } as const);
 		const comment: Comment =
 			plan.kind === 'range' ? { ...created, range: 'closed' } : created;

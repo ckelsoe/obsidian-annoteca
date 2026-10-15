@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Comments stay attached while you edit.** Typing, pasting or deleting over text that holds a comment keeps the comment: it now covers what you typed in its place. Backspace or Delete next to a comment's icon no longer deletes the comment; the cursor steps over it instead. To remove a comment, use Delete in its menu. Cutting text still takes its comments with it, so pasting moves them.
+- **Comments that disappear can be restored.** If a comment vanishes from a note without being deleted in Annoteca, for example because an AI agent or another tool rewrote the paragraph, Annoteca says so and offers **Restore**. It goes back on the text it quotes when that is still there. Comments that disappeared this session are also listed under **Restore a comment that disappeared**.
+- **Find its text**, in the side panel, and **Move comment here back to its text** move a comment back to the passage it quotes, when its marker has drifted away from it.
+- **Fix comments that break reading view**, for this note or all notes.
+
+### Fixed
+- A comment on the first words of a paragraph, list item or quote, or on a heading, made that line render as raw text in reading view and exports, and a second comment on the same line could show its details as visible text. New comments are now placed so the note renders normally: on their own line above a paragraph or heading, at the end of the previous line inside a paragraph, or after the list bullet or quote marker. Use **Fix comments that break reading view** to repair existing ones.
+
 ## [1.24.0] - 2026-10-15
 
 Comment straight from reading view, and changes made to a note open in reading view are no longer lost.

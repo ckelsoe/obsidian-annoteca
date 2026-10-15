@@ -3,6 +3,8 @@
 
 import {
 	gapEnd,
+	headingTextEnd,
+	markerRemovalSpan,
 	layoutMarker,
 	markerBreaksReadingView,
 	planMarkerInsert,
@@ -92,8 +94,9 @@ describe('gapEnd', () => {
 		expect(at('X\n## Head', 1)).toBe(5);
 	});
 
-	it('stops at a blank line', () => {
-		expect(at('X\n\ntext', 1)).toBe(2);
+	it('skips blank lines a formatter put after a marker on its own line', () => {
+		expect(at('X\n\ntext', 1)).toBe(3);
+		expect(at('X\n\n  \n> text', 1)).toBe(8);
 	});
 });
 
@@ -147,5 +150,33 @@ describe('repairMarkerPlacement', () => {
 			updated: doc,
 			converted: 0,
 		});
+	});
+});
+
+describe('headingTextEnd', () => {
+	it('gives the end of the heading text on a heading line, else undefined', () => {
+		const doc = 'Intro.\n## Keep target tail  \nBody.';
+		expect(headingTextEnd(doc, doc.indexOf('target'))).toBe(
+			doc.indexOf('tail') + 4,
+		);
+		expect(headingTextEnd(doc, doc.indexOf('Body'))).toBeUndefined();
+	});
+});
+
+describe('markerRemovalSpan', () => {
+	const remove = (doc: string): string => {
+		const [c] = parseAll(doc);
+		if (!c) throw new Error('no marker');
+		const r = markerRemovalSpan(doc, c.marker.start, c.marker.end);
+		return doc.slice(0, r.from) + doc.slice(r.to);
+	};
+
+	it('takes out only what each placement added', () => {
+		expect(remove(`Some ${M} text.`)).toBe('Some text.');
+		expect(remove(`${M}\nSome text.`)).toBe('Some text.');
+		expect(remove(`${M}\n## Heading`)).toBe('## Heading');
+		expect(remove(`- ${M}\n  two`)).toBe('- two');
+		expect(remove(`> ${M}\n> quoted`)).toBe('> quoted');
+		expect(remove(`First line ${M}\nsecond.`)).toBe('First line\nsecond.');
 	});
 });

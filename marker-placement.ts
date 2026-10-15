@@ -30,6 +30,11 @@ import type { ImportResult } from './imports';
 // markers or heading markers. Returns the offset where the passage starts.
 // Every reader of "the text after this marker" goes through this, so a marker
 // placed on its own line still finds its passage.
+//
+// Blank lines after a marker that stands alone on its line are skipped too:
+// a formatter that puts blank lines around block HTML (the Obsidian Linter
+// does, checked 2026-10-15) separates such a marker from its paragraph
+// without changing what it is about.
 export function gapEnd(charAt: (pos: number) => string, pos: number): number {
 	if (charAt(pos) === ' ') return pos + 1;
 	if (charAt(pos) !== '\n') return pos;
@@ -38,6 +43,10 @@ export function gapEnd(charAt: (pos: number) => string, pos: number): number {
 		while (charAt(p) === ' ' || charAt(p) === '\t') p += 1;
 	};
 	skipSpaces();
+	while (charAt(p) === '\n') {
+		p += 1;
+		skipSpaces();
+	}
 	while (charAt(p) === '>') {
 		p += 1;
 		skipSpaces();
@@ -149,6 +158,56 @@ export function planMarkerInsert(
 		}
 	}
 	return { at: start, before: '', after: `\n${lead}` };
+}
+
+// The end of the heading text when `at` is on a heading line, else
+// undefined. A multi-line marker on a heading goes on its own line above it,
+// so a comment made on part of a heading covers the whole heading: its range
+// would otherwise start at the heading's first word whatever was selected.
+export function headingTextEnd(
+	content: string,
+	at: number,
+): number | undefined {
+	const lineStart = content.lastIndexOf('\n', at - 1) + 1;
+	const lineEndIdx = content.indexOf('\n', at);
+	const lineEnd = lineEndIdx === -1 ? content.length : lineEndIdx;
+	const line = content.slice(lineStart, lineEnd);
+	if (!HEADING_LINE.test(line)) return undefined;
+	return lineStart + line.trimEnd().length;
+}
+
+// What to take out of `content` to remove the marker at [start, end), and only
+// what its placement added: the one space after an inline marker, the space
+// before one appended to the previous line, or the line break and the
+// continuation prefix after one on its own line. Never the passage's own
+// syntax (a heading's `#`, a quote's `>` that was there before).
+export function markerRemovalSpan(
+	content: string,
+	start: number,
+	end: number,
+): { from: number; to: number } {
+	const next = content.charAt(end);
+	if (next === ' ') return { from: start, to: end + 1 };
+	if (next === '\n') {
+		const lineStart = content.lastIndexOf('\n', start - 1) + 1;
+		const lead = content.slice(lineStart, start);
+		if (lead.trim() !== '' && !blockPrefix(lead))
+			return content.charAt(start - 1) === ' '
+				? { from: start - 1, to: end }
+				: { from: start, to: end };
+		// On its own line (after a bullet or `>` at most): the line break goes,
+		// and the next line's continuation prefix, which only repeats `lead`.
+		let k = end + 1;
+		while (
+			k - (end + 1) < lead.length &&
+			(content.charAt(k) === ' ' ||
+				content.charAt(k) === '\t' ||
+				content.charAt(k) === '>')
+		)
+			k += 1;
+		return { from: start, to: k };
+	}
+	return { from: start, to: end };
 }
 
 // The text to splice for a marker: `marker` laid out per the plan, with

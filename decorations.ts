@@ -2365,7 +2365,7 @@ export function buildMarkerDecorations(ctx: DecorationContext): {
 			flashField,
 			flashCommentDecorations(field, flashField),
 			decorationsCompute(ctx, field, flashField),
-			markerGuard(field, noticeMarkerDeleteRefused),
+			markerGuard(field, storeRegionsField, noticeMarkerDeleteRefused),
 		],
 		markerField: field,
 		activeField,

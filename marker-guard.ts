@@ -30,7 +30,9 @@ import type { Comment } from './types';
 export interface GuardRange {
 	readonly start: number;
 	readonly end: number;
-	readonly kind: 'opener' | 'closer';
+	// The end-of-file comment store holds the bodies and threads of lean
+	// markers: deleting it with the text around it would empty them.
+	readonly kind: 'opener' | 'closer' | 'store';
 }
 
 export interface GuardChange {
@@ -70,6 +72,19 @@ export function guardEdit(
 		for (const r of ranges) {
 			const whole = r.start >= c.from && r.end <= c.to;
 			if (whole) continue;
+			// The store's JSON can be edited by hand where it shows raw; only
+			// an edit that crosses its boundary would split it.
+			if (r.kind === 'store') {
+				const crosses =
+					(c.from < r.start && c.to > r.start) ||
+					(c.from < r.end && c.to > r.end);
+				if (crosses)
+					return {
+						kind: 'refused',
+						cursor: backward ? r.start : r.end,
+					};
+				continue;
+			}
 			const zones: { a: number; b: number }[] =
 				r.kind === 'closer'
 					? [{ a: r.start, b: r.end }]
@@ -124,9 +139,20 @@ export function guardEdit(
 			.filter((r) => r.kind === 'closer')
 			.map((r) => doc.slice(r.start, r.end))
 			.join('');
+		const stores = inside
+			.filter((r) => r.kind === 'store')
+			.map((r) => doc.slice(r.start, r.end))
+			.join('\n\n');
 		// The one space an inline opener is followed by, when text follows.
 		const gap = openers !== '' && c.insert !== '' ? ' ' : '';
-		const insert = `${openers}${gap}${c.insert}${closers}`;
+		const body = `${openers}${gap}${c.insert}${closers}`;
+		// The store stays the last thing, a blank line after the prose.
+		const insert =
+			stores === ''
+				? body
+				: body === ''
+					? stores
+					: `${body}\n\n${stores}`;
 		out.push({ from: c.from, to: c.to, insert });
 		const newFrom = c.from + delta;
 		delta += insert.length - (c.to - c.from);
@@ -144,8 +170,15 @@ export function guardEdit(
 	return { kind: 'rewritten', changes: out, cursor };
 }
 
-export function guardRangesOf(comments: readonly Comment[]): GuardRange[] {
-	const out: GuardRange[] = [];
+export function guardRangesOf(
+	comments: readonly Comment[],
+	stores: readonly { start: number; end: number }[] = [],
+): GuardRange[] {
+	const out: GuardRange[] = stores.map((r) => ({
+		start: r.start,
+		end: r.end,
+		kind: 'store' as const,
+	}));
 	for (const c of comments) {
 		out.push({ start: c.marker.start, end: c.marker.end, kind: 'opener' });
 		if (c.closer)
@@ -168,16 +201,26 @@ function isGuardedEdit(tr: Transaction): boolean {
 
 export function markerGuard(
 	field: StateField<Comment[]>,
+	storeField: StateField<readonly { start: number; end: number }[]>,
 	onRefused: () => void,
 ): Extension {
 	return EditorState.transactionFilter.of((tr) => {
 		if (!tr.docChanged || !isGuardedEdit(tr)) return tr;
-		const ranges = guardRangesOf(tr.startState.field(field));
+		const ranges = guardRangesOf(
+			tr.startState.field(field),
+			tr.startState.field(storeField),
+		);
 		if (ranges.length === 0) return tr;
 		const changes: GuardChange[] = [];
 		tr.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
 			changes.push({ from: fromA, to: toA, insert: inserted.toString() });
 		});
+		// Ordinary typing touches no marker: settle that without building the
+		// whole document as a string on every keystroke.
+		const near = changes.some((c) =>
+			ranges.some((r) => c.from <= r.end && c.to >= r.start),
+		);
+		if (!near) return tr;
 		const doc = tr.startState.doc.toString();
 		const result = guardEdit(
 			doc,
@@ -187,17 +230,24 @@ export function markerGuard(
 		);
 		if (result.kind === 'unchanged') return tr;
 		const userEvent = tr.annotation(Transaction.userEvent);
+		// Several cursors keep their places; one moves as the result says.
+		const multi = tr.startState.selection.ranges.length > 1;
 		if (result.kind === 'refused') {
 			onRefused();
 			const spec: TransactionSpec = {
-				selection: EditorSelection.cursor(result.cursor),
+				selection: multi
+					? tr.startState.selection
+					: EditorSelection.cursor(result.cursor),
 				scrollIntoView: true,
 			};
 			return spec;
 		}
+		const changeSet = ChangeSet.of(result.changes, doc.length);
 		const spec: TransactionSpec = {
-			changes: ChangeSet.of(result.changes, doc.length),
-			selection: EditorSelection.cursor(result.cursor),
+			changes: changeSet,
+			selection: multi
+				? tr.startState.selection.map(changeSet, 1)
+				: EditorSelection.cursor(result.cursor),
 			scrollIntoView: true,
 			...(userEvent !== undefined && { userEvent }),
 		};

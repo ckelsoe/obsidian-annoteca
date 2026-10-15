@@ -45,7 +45,13 @@ import {
 	serializeCloser,
 	type MalformedMarker,
 } from './parser';
-import { gapEnd, layoutMarker, planMarkerInsert } from './marker-placement';
+import {
+	gapEnd,
+	headingTextEnd,
+	layoutMarker,
+	markerRemovalSpan,
+	planMarkerInsert,
+} from './marker-placement';
 import { findPassage } from './reattach';
 import {
 	coerceStorageMode,
@@ -890,8 +896,14 @@ export class CommentService {
 			// the same rules as the composer's, so it never lands where HTML
 			// shows. Anything but a clean range quietly stays start-only, and
 			// `closed` on the result says so.
+			// On a heading a multi-line marker goes above it, so the range
+			// covers the whole heading (see headingTextEnd).
+			const rangeEnd =
+				(mode !== 'eof'
+					? headingTextEnd(content, r.anchor.start)
+					: undefined) ?? r.anchor.end;
 			const plan = r.closeRange
-				? planCloser(content, r.anchor.start, r.anchor.end, occupied)
+				? planCloser(content, r.anchor.start, rangeEnd, occupied)
 				: undefined;
 			const closeAt = plan?.kind === 'range' ? plan.at : undefined;
 			const comment = {
@@ -1007,7 +1019,14 @@ export class CommentService {
 			const lookup = this.freshComment(content, comment);
 			if (lookup.kind !== 'found' || !lookup.comment.id)
 				return 'not-found';
-			const current = lookup.comment;
+			// The merged comment: an end-of-file comment's marker alone holds no
+			// quote, body or thread; its store entry does.
+			const current =
+				parseDocument(content).comments.find(
+					(c) =>
+						c.id === lookup.comment.id &&
+						c.marker.start === lookup.comment.marker.start,
+				) ?? lookup.comment;
 			const passage = findPassage(
 				content,
 				current.anchor?.text,
@@ -1023,8 +1042,15 @@ export class CommentService {
 			// Out of the note, then back in at its text: the marker and any
 			// closer come out, and the same comment goes in at the passage.
 			if (current.id) this.plugin.lossGuard?.expectRemoval(current.id);
+			// Only what the marker's placement added goes, never the old
+			// passage's own syntax (a heading's #, a quote's >).
+			const removal = markerRemovalSpan(
+				content,
+				current.marker.start,
+				current.marker.end,
+			);
 			const removed = [
-				{ from: current.marker.start, to: after, insert: '' },
+				{ from: removal.from, to: removal.to, insert: '' },
 				...(current.closer
 					? [
 							{
@@ -1083,18 +1109,23 @@ export class CommentService {
 		const id = comment.id;
 		if (!id) return false;
 		const markers = parseAll(base).map((c) => c.marker);
-		const plan = passage
-			? planCloser(base, passage.start, passage.end, [
-					...markers,
-					...scanClosers(base, markers),
-				])
+		const eof = parseStore(base).length > 0;
+		const passageEnd = passage
+			? ((!eof ? headingTextEnd(base, passage.start) : undefined) ??
+				passage.end)
 			: undefined;
+		const plan =
+			passage && passageEnd !== undefined
+				? planCloser(base, passage.start, passageEnd, [
+						...markers,
+						...scanClosers(base, markers),
+					])
+				: undefined;
 		const closeAt = plan?.kind === 'range' ? plan.at : undefined;
 		const restored: Comment = {
 			...comment,
 			range: closeAt !== undefined ? 'closed' : undefined,
 		};
-		const eof = parseStore(base).length > 0;
 		const text = eof
 			? serializeLeanMarker(restored.category, id)
 			: serialize(restored);
@@ -1112,7 +1143,11 @@ export class CommentService {
 		let updated = base;
 		const all = eof
 			? withStoreRewrite(base, prose, [
-					...parseStore(base).map((e) => e.comment),
+					// Replaced, not added: an entry left behind when only the
+					// marker was dropped, or moved by a reattach, is this one.
+					...parseStore(base)
+						.map((e) => e.comment)
+						.filter((c) => c.id !== id),
 					toStored(id, restored),
 				])
 			: prose;
