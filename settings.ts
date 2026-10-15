@@ -41,6 +41,11 @@ import {
 import { isNamespacePrefix } from './diagnostics';
 import { supportsDragAndDrop } from './platform';
 import { isReservedProperty } from './frontmatter-summary';
+import {
+	alertsEnabled,
+	isAlertAudioFile,
+	popupIncludesSystem,
+} from './reply-alerts';
 
 // Community discussion for this plugin. This must stay a never-expiring
 // discord.gg invite. A discord.com/channels/... deep link only resolves for
@@ -88,6 +93,11 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 	debugMode: false,
 	debugLogTarget: 'console',
 	eventJournal: false,
+	replyAlertPopup: 'off',
+	replyAlertSound: 'none',
+	replyAlertSoundFile: '',
+	replyAlertTone: 'chime',
+	replyAlertVolume: 70,
 	// Seeded rather than empty. Plumbline is a sibling this project ships and
 	// its directives are a known non-conflict, so a user who installs both
 	// should not have to dismiss a diagnostic to learn that.
@@ -525,6 +535,16 @@ const SETTING_VALIDATORS: {
 	debugMode: bool,
 	debugLogTarget: oneOf('console', 'vault'),
 	eventJournal: bool,
+	replyAlertPopup: oneOf('off', 'notice', 'system', 'both'),
+	replyAlertSound: oneOf('none', 'system', 'file', 'tone'),
+	replyAlertSoundFile: str,
+	replyAlertTone: oneOf('chime', 'ping', 'pop'),
+	replyAlertVolume: (raw: unknown) => {
+		const n = num(raw);
+		return n !== undefined && n >= 0 && n <= 100
+			? Math.round(n)
+			: undefined;
+	},
 	conflictNamespaceAllowlist: validNamespaceAllowlist,
 	promotionBudget: validPromotionBudget,
 	settingsBackupPath: str,
@@ -982,6 +1002,107 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			},
 			{
 				type: 'group',
+				heading: 'Reply alerts',
+				items: [
+					{
+						name: 'Alert popup',
+						desc: "Tell you when someone else adds a comment or replies, such as an AI agent answering yours. Your own comments and replies never alert: they are recognized by your author identifier, or by 'user' when the author tag is off. In Obsidian shows a notice you can click to open the comment. System notification shows one from your computer even when Obsidian is in the background; on mobile you get the notice instead. Alerts arrive a few seconds after the note changes, and several close together are grouped into one. Turning alerts on indexes the whole vault once each session, which can take a moment on a large vault. Off by default.",
+						control: {
+							type: 'dropdown',
+							key: 'replyAlertPopup',
+							options: {
+								off: 'Off',
+								notice: 'In Obsidian',
+								system: 'System notification',
+								both: 'Both',
+							},
+						},
+					},
+					{
+						name: 'Alert sound',
+						desc: 'One sound per alert. System notification sound is the sound your computer plays for Obsidian notifications, chosen in its notification settings; it needs the system popup and is desktop only.',
+						control: {
+							type: 'dropdown',
+							key: 'replyAlertSound',
+							options: {
+								none: 'None',
+								system: 'System notification sound',
+								file: 'Sound file from this vault',
+								tone: 'Built-in tone',
+							},
+						},
+					},
+					{
+						name: 'System sound needs the system popup',
+						desc: 'The system sound is played by the system notification, so nothing plays with the current popup. Set Alert popup to System notification or Both, or choose another sound.',
+						visible: () =>
+							this.plugin.settings.replyAlertSound === 'system' &&
+							!popupIncludesSystem(
+								this.plugin.settings.replyAlertPopup,
+							),
+					},
+					{
+						name: 'Sound file',
+						desc: 'An audio file in this vault: WAV, MP3, OGG, M4A, FLAC or WebM. AIFF files do not play in Obsidian.',
+						visible: () =>
+							this.plugin.settings.replyAlertSound === 'file',
+						control: {
+							type: 'file',
+							key: 'replyAlertSoundFile',
+							placeholder: 'Sounds/reply.mp3',
+							filter: isAlertAudioFile,
+							validate: (value: unknown) => {
+								const v =
+									typeof value === 'string' ? value : '';
+								if (v === '') return undefined;
+								const file = this.app.vault.getFileByPath(v);
+								return file !== null && isAlertAudioFile(file)
+									? undefined
+									: 'Choose an audio file from the list.';
+							},
+						},
+					},
+					{
+						name: 'Tone',
+						visible: () =>
+							this.plugin.settings.replyAlertSound === 'tone',
+						control: {
+							type: 'dropdown',
+							key: 'replyAlertTone',
+							options: {
+								chime: 'Chime',
+								ping: 'Ping',
+								pop: 'Soft pop',
+							},
+						},
+					},
+					{
+						name: 'Volume',
+						visible: () => this.soundIsPlayedByAnnoteca(),
+						control: {
+							type: 'slider',
+							key: 'replyAlertVolume',
+							min: 0,
+							max: 100,
+							step: 5,
+						},
+					},
+					{
+						name: 'Preview sound',
+						desc: 'Play the chosen sound once.',
+						visible: () => this.soundIsPlayedByAnnoteca(),
+						action: () => this.plugin.replyAlerts.previewSound(),
+					},
+					{
+						name: 'Send a test alert',
+						desc: 'Show the popup and play the sound exactly as a real alert would.',
+						visible: () => alertsEnabled(this.plugin.settings),
+						action: () => this.plugin.replyAlerts.test(),
+					},
+				],
+			},
+			{
+				type: 'group',
 				heading: 'AI integration',
 				items: [
 					{
@@ -1100,6 +1221,11 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 				],
 			},
 		];
+	}
+
+	private soundIsPlayedByAnnoteca(): boolean {
+		const sound = this.plugin.settings.replyAlertSound;
+		return sound === 'file' || sound === 'tone';
 	}
 
 	// Re-render after a data change. Obsidian owns the declarative tree, so
@@ -1306,6 +1432,12 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			case 'eventJournal':
 				if (this.plugin.settings.eventJournal)
 					this.plugin.onEventJournalEnabled();
+				break;
+			case 'replyAlertPopup':
+			case 'replyAlertSound':
+				// Alerts need the vault indexed, like the journal.
+				this.plugin.onReplyAlertsChanged();
+				repaint = true;
 				break;
 		}
 

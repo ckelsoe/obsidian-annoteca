@@ -2690,3 +2690,8 @@ settings:
 	font-size: var(--font-ui-smaller);
 	cursor: pointer;
 }
+
+/* A reply-alert notice opens the comment when clicked. */
+.annoteca-alert-notice {
+	cursor: pointer;
+}

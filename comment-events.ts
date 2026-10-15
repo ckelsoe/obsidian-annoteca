@@ -1,5 +1,5 @@
 // Per-comment change events (#95): what happened to which comment, for the
-// API's onCommentEvent and the optional event journal.
+// API's onCommentEvent, the optional event journal and reply alerts.
 //
 // The index does not diff. `rebuild` replaces a note's whole comment list, so
 // these events come from comparing a settled snapshot per note against the
