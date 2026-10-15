@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.24.0] - 2026-10-15
+
+Comment straight from reading view, and changes made to a note open in reading view are no longer lost.
+
 ### Added
 - **Comment from reading view.** Select text in a note in reading view, right-click, and choose **Annoteca: add comment for selection**, or run **Add comment for selection in reading view**. The comment form opens on that passage and you stay in reading view. The right-click menu also offers Copy. Select within one paragraph or block; if Annoteca cannot match the selection to the note's text it says so rather than guessing.
 - The Starred tab and the vault-wide unresolved view now mark comments that are **addressed**, waiting for you to accept, revise or reject an edit.
