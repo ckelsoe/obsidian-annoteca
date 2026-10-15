@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Reply alerts**, a new settings group, off by default. Annoteca can tell you when someone other than you adds a comment or replies, such as an AI agent answering your comments. **Alert popup**: an Obsidian notice you can click to open the comment, a system notification that shows even when Obsidian is in the background (desktop only; mobile gets the notice instead), or both. **Alert sound**: the system notification sound, an audio file from your vault (WAV, MP3, OGG, M4A, FLAC or WebM) with a volume slider, or a built-in tone (chime, ping or soft pop). Preview sound and Send a test alert buttons try it out. Alerts arrive a few seconds after the note changes, and replies that land close together are grouped into one alert and one sound. Your own comments and replies are recognized by your author identifier, or by `user` when the author tag is off, and never alert; a comment with no author tag never alerts either. Turning alerts on indexes the whole vault once each session, as the event journal does.
+
 ## [1.22.0] - 2026-10-12
 
 Other plugins can now offer Resolve and Reopen on a comment, so the Annoteca MindMap Bridge can resolve comments from a mind map.

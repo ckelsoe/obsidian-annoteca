@@ -28,6 +28,11 @@ import {
 	type CommentEvent,
 } from './comment-events';
 import { EventJournal } from './event-journal';
+import {
+	ReplyAlerts,
+	alertsEnabled,
+	browserAlertOutputs,
+} from './reply-alerts';
 import { MarkerDamageReporter } from './diagnostics';
 import { createApi, type AnnotecaApi } from './api';
 import {
@@ -66,7 +71,7 @@ import {
 	hasUniqueId,
 	type ScrollAction,
 } from './view-utils';
-import { isMobile } from './platform';
+import { canRequireNode, isMobile } from './platform';
 import { EditorView } from '@codemirror/view';
 
 // Top margin (px) left above the marker when anchoring it near the top of the
@@ -167,8 +172,8 @@ export default class AnnotecaPlugin extends Plugin {
 		}
 	>();
 	private vaultScanned = false;
-	// Per-comment events (#95) for the API's onCommentEvent and the event
-	// journal. Flushed once a burst of index changes settles, never sooner
+	// Per-comment events (#95) for the API's onCommentEvent, the event
+	// journal and reply alerts. Flushed once a burst of index changes settles, never sooner
 	// than 2.5 s after the last one and never later than 10 s after the
 	// first, so a note being edited continuously still reports.
 	readonly commentEvents = new CommentEventTracker();
@@ -178,6 +183,8 @@ export default class AnnotecaPlugin extends Plugin {
 		10_000,
 	);
 	journal!: EventJournal;
+	private commentEventScan: Promise<void> | undefined;
+	replyAlerts!: ReplyAlerts;
 	private readonly markerDamage = new MarkerDamageReporter();
 	// #39: per-path debounce timers for the frontmatter-summary writer.
 	private readonly frontmatterTimers = new Map<string, number>();
@@ -206,6 +213,31 @@ export default class AnnotecaPlugin extends Plugin {
 			this.app,
 			pluginDir,
 			() => this.settings.eventJournal,
+		);
+		this.replyAlerts = new ReplyAlerts(
+			() => this.settings,
+			(path) => this.app.vault.getFileByPath(path)?.basename ?? path,
+			(id) => {
+				this.api.reveal(id).then(
+					(found) => {
+						if (!found)
+							new Notice('That comment is no longer there.');
+					},
+					(err: unknown) => {
+						console.error(
+							'Annoteca: opening the alert failed',
+							err,
+						);
+						new Notice('Annoteca: could not open the comment.');
+					},
+				);
+			},
+			browserAlertOutputs(
+				this.app,
+				// Obsidian's desktop app shows an HTML Notification as an OS
+				// one. The mobile apps have no such thing.
+				() => canRequireNode() && 'Notification' in window,
+			),
 		);
 		this.commentIndex.observer = {
 			changed: (path, comments) => {
@@ -348,7 +380,8 @@ export default class AnnotecaPlugin extends Plugin {
 			this.ensureRightSidebarTab();
 			void this.checkSkillStaleness();
 			this.logDebugStart();
-			if (this.settings.eventJournal) this.startCommentEvents();
+			if (this.settings.eventJournal || alertsEnabled(this.settings))
+				this.startCommentEvents();
 		});
 	}
 
@@ -366,6 +399,7 @@ export default class AnnotecaPlugin extends Plugin {
 	private deliverCommentEvents(events: readonly CommentEvent[]): void {
 		if (events.length === 0) return;
 		this.journal.write(events);
+		this.replyAlerts.push(events);
 		for (const e of events) this.events.trigger('comment-event', e);
 	}
 
@@ -386,16 +420,31 @@ export default class AnnotecaPlugin extends Plugin {
 		this.startCommentEvents();
 	}
 
+	// Settings: an alert setting changed. Alerts need the vault indexed, the
+	// same as the journal; already indexed, this does nothing.
+	onReplyAlertsChanged(): void {
+		if (alertsEnabled(this.settings)) this.startCommentEvents();
+	}
+
 	// Events need the vault scan to arm. Fire and forget, but never an
 	// unhandled rejection: a failed scan is logged, and the next caller of
 	// scanVaultIfNeeded tries again because the latch was never set.
+	//
+	// Single-flight: scanVaultIfNeeded only latches once it finishes, so a
+	// second caller mid-scan (the journal toggled, then an alert setting)
+	// would read the whole vault again alongside the first.
 	private startCommentEvents(): void {
-		this.scanVaultIfNeeded().catch((err: unknown) => {
-			console.error(
-				'Annoteca: vault scan for comment events failed',
-				err,
-			);
-		});
+		if (this.commentEventScan !== undefined) return;
+		this.commentEventScan = this.scanVaultIfNeeded()
+			.catch((err: unknown) => {
+				console.error(
+					'Annoteca: vault scan for comment events failed',
+					err,
+				);
+			})
+			.finally(() => {
+				this.commentEventScan = undefined;
+			});
 	}
 
 	private async copyDebugLog(): Promise<void> {
@@ -536,6 +585,8 @@ export default class AnnotecaPlugin extends Plugin {
 		// extensions automatically. The only custom resource is the
 		// frontmatter-summary debounce timers.
 		this.unloaded = true;
+		// Before the final flush, so unloading never pops an alert.
+		this.replyAlerts.dispose();
 		// Whatever has settled so far still reaches the journal.
 		this.commentEventFlush.cancel();
 		this.flushCommentEvents();

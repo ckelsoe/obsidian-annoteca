@@ -274,6 +274,18 @@ export interface AnnotecaSettings {
 	// for tools outside Obsidian. Off by default. See event-journal.ts.
 	eventJournal: boolean;
 
+	// Reply alerts: a popup and a sound when someone other than the user
+	// comments or replies. Off by default. See reply-alerts.ts.
+	replyAlertPopup: 'off' | 'notice' | 'system' | 'both';
+	// Exactly one sound source. `system` is the OS notification's own sound,
+	// so it plays only with a system popup.
+	replyAlertSound: 'none' | 'system' | 'file' | 'tone';
+	// Vault path of the sound file, for `file`.
+	replyAlertSoundFile: string;
+	replyAlertTone: 'chime' | 'ping' | 'pop';
+	// 0 to 100, for `file` and `tone`.
+	replyAlertVolume: number;
+
 	settingsBackupPath: string | undefined;
 
 	// Namespaces the marker-conflict scan treats as known and does not report
