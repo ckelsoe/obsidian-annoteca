@@ -1,9 +1,10 @@
-import { App, Modal, Setting } from 'obsidian';
+import { App, FuzzySuggestModal, Modal, Setting } from 'obsidian';
 
 import type { Comment } from './types';
 import { getCategoryOrFallback } from './categories';
 import { resolveSettingsCategories } from './settings';
 import type { AnnotecaSettings } from './types';
+import type { LostComment } from './loss-guard';
 
 // Confirmation prompt for single-comment delete. Wired into the plugin's
 // pass-through so every entry point (Thread tab action, editor right-click
@@ -279,5 +280,32 @@ export class ConfirmPromotionModal extends Modal {
 			this.decided = true;
 			this.onDecision(false);
 		}
+	}
+}
+
+// Anchoring hardening (B): pick a comment that disappeared, to put it back.
+export class LostCommentModal extends FuzzySuggestModal<LostComment> {
+	constructor(
+		app: App,
+		private readonly items: readonly LostComment[],
+		private readonly onPick: (item: LostComment) => void,
+	) {
+		super(app);
+		this.setPlaceholder('Pick a comment to restore');
+	}
+
+	getItems(): LostComment[] {
+		return [...this.items];
+	}
+
+	getItemText(item: LostComment): string {
+		const note =
+			item.path.split('/').pop()?.replace(/\.md$/, '') ?? item.path;
+		const body = item.comment.body.replace(/\s+/g, ' ').slice(0, 60);
+		return `${item.comment.category}: ${body} (${note})`;
+	}
+
+	onChooseItem(item: LostComment): void {
+		this.onPick(item);
 	}
 }

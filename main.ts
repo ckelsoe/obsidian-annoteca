@@ -31,6 +31,9 @@ import {
 } from './comment-events';
 import { EventJournal } from './event-journal';
 import { noteText, spliceRaw, toEditorText } from './note-text';
+import { repairMarkerPlacement } from './marker-placement';
+import { LossGuard, type LostComment } from './loss-guard';
+import { LostCommentModal } from './confirm-modal';
 import { diffToSplice } from './store';
 import {
 	ReplyAlerts,
@@ -191,6 +194,8 @@ export default class AnnotecaPlugin extends Plugin {
 		10_000,
 	);
 	journal!: EventJournal;
+	// Anchoring hardening (B): comments that vanished without being deleted.
+	lossGuard!: LossGuard;
 	private commentEventScan: Promise<void> | undefined;
 	replyAlerts!: ReplyAlerts;
 	private readonly markerDamage = new MarkerDamageReporter();
@@ -247,18 +252,26 @@ export default class AnnotecaPlugin extends Plugin {
 				() => canRequireNode() && 'Notification' in window,
 			),
 		);
+		this.lossGuard = new LossGuard({
+			exists: (path) => this.app.vault.getFileByPath(path) !== null,
+			located: (id) => this.commentIndex.locateById(id) !== undefined,
+			report: (batch) => this.reportLostComments(batch),
+		});
 		this.commentIndex.observer = {
 			changed: (path, comments) => {
 				this.commentEvents.changed(path, comments);
 				this.scheduleCommentEvents();
+				this.lossGuard.changed(path, comments);
 			},
 			removed: (path) => {
 				this.commentEvents.removed(path);
 				this.scheduleCommentEvents();
+				this.lossGuard.removed(path);
 			},
 			renamed: (oldPath, newPath) => {
 				this.commentEvents.renamed(oldPath, newPath);
 				this.scheduleCommentEvents();
+				this.lossGuard.renamed(oldPath, newPath);
 			},
 		};
 		this.registerEvent(
@@ -596,6 +609,7 @@ export default class AnnotecaPlugin extends Plugin {
 		// extensions automatically. The only custom resource is the
 		// frontmatter-summary debounce timers.
 		this.unloaded = true;
+		this.lossGuard.dispose();
 		// Before the final flush, so unloading never pops an alert.
 		this.replyAlerts.dispose();
 		// Whatever has settled so far still reaches the journal.
@@ -917,6 +931,28 @@ export default class AnnotecaPlugin extends Plugin {
 				this.withCommentAtCursor(editor, view, (_path, c) =>
 					this.openEditModal(editor, view, c),
 				);
+			},
+		});
+		this.addCommand({
+			id: 'reattach-comment-at-cursor',
+			name: 'Move comment here back to its text',
+			editorCallback: (editor: Editor, view: MarkdownFileInfo) => {
+				this.withCommentAtCursor(editor, view, (path, c) => {
+					this.reattachComment(path, c);
+				});
+			},
+		});
+		this.addCommand({
+			id: 'restore-lost-comment',
+			name: 'Restore a comment that disappeared',
+			callback: () => {
+				if (this.lossGuard.lost.length === 0) {
+					new Notice('No comments have disappeared this session.');
+					return;
+				}
+				new LostCommentModal(this.app, this.lossGuard.lost, (l) => {
+					void this.restoreLost([l]);
+				}).open();
 			},
 		});
 		this.addCommand({
@@ -1271,6 +1307,46 @@ export default class AnnotecaPlugin extends Plugin {
 			id: 'import-all-comments',
 			name: 'Convert every comment to the canonical format',
 			callback: () => this.confirmAndConvert('all'),
+		});
+		// Markers placed before 1.25.0 could open a paragraph, list item,
+		// quote or heading, which stops that line rendering in reading view
+		// and exports. These move them to where new markers now go.
+		this.addCommand({
+			id: 'fix-reading-view-markers-in-note',
+			name: 'Fix comments that break reading view in this note',
+			checkCallback: (checking: boolean) => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file || file.extension !== 'md') return false;
+				if (!checking)
+					this.runGuarded('Comment repair', () =>
+						this.repairNoteMarkers(file),
+					);
+				return true;
+			},
+		});
+		this.addCommand({
+			id: 'fix-reading-view-markers-in-vault',
+			name: 'Fix comments that break reading view in all notes',
+			callback: () => {
+				new ConfirmBackupModal(
+					this.app,
+					'Fix comments that break reading view',
+					'Move every comment marker that stops its line rendering in reading view (one that starts a paragraph, list item, quote or heading) to a position that renders. Comments and text are unchanged; only where each marker sits on its line moves.',
+					() => {
+						this.runGuarded('Comment repair', async () => {
+							const { totalConverted, filesTouched } =
+								await this.convertVaultFiles(
+									repairMarkerPlacement,
+								);
+							new Notice(
+								totalConverted === 0
+									? 'No comments needed fixing.'
+									: `Fixed ${totalConverted} comment(s) in ${filesTouched} note(s).`,
+							);
+						});
+					},
+				).open();
+			},
 		});
 		this.addCommand({
 			id: 'convert-note-to-eof-storage',
@@ -3147,6 +3223,84 @@ export default class AnnotecaPlugin extends Plugin {
 			`Converted ${converted} comment(s) to ${
 				toEof ? 'end-of-file' : 'inline'
 			} storage.`,
+		);
+	}
+
+	// Anchoring hardening (B): say a comment vanished, with a way back. One
+	// notice per batch, however many it holds.
+	private reportLostComments(batch: readonly LostComment[]): void {
+		const notes = new Set(batch.map((l) => l.path));
+		const where =
+			notes.size === 1
+				? (this.app.vault.getFileByPath(batch[0]?.path ?? '')
+						?.basename ?? 'a note')
+				: `${notes.size} notes`;
+		const what =
+			batch.length === 1
+				? 'A comment disappeared'
+				: `${batch.length} comments disappeared`;
+		const notice = new Notice(
+			createFragment((f) => {
+				f.appendText(
+					`Annoteca: ${what} from ${where} without being deleted, probably rewritten by another tool. `,
+				);
+				const button = f.createEl('button', { text: 'Restore' });
+				button.addEventListener('click', () => {
+					notice.hide();
+					void this.restoreLost(batch);
+				});
+			}),
+			20_000,
+		);
+	}
+
+	async restoreLost(batch: readonly LostComment[]): Promise<void> {
+		let restored = 0;
+		for (const l of batch) {
+			try {
+				if (
+					await this.comments.restoreComment(l.path, l.comment, l.at)
+				) {
+					restored += 1;
+					this.lossGuard.forget(l.id);
+				}
+			} catch (err: unknown) {
+				console.error('Annoteca: restoring a comment failed', err);
+			}
+		}
+		new Notice(
+			restored === batch.length
+				? `Restored ${restored} comment(s).`
+				: `Restored ${restored} of ${batch.length} comment(s). The rest are still listed under "Restore a comment that disappeared".`,
+		);
+	}
+
+	// Anchoring hardening (C): move a comment to the text its quote names.
+	reattachComment(path: string, comment: Comment): void {
+		this.runGuarded('Moving the comment', async () => {
+			const result = await this.comments.reattachComment(path, comment);
+			// Blocked: the service has already said why.
+			if (result === 'blocked') return;
+			new Notice(
+				result === 'moved'
+					? 'Moved the comment to the text it quotes.'
+					: result === 'here'
+						? 'The comment is already on the text it quotes.'
+						: 'The text this comment quotes is not in the note any more.',
+			);
+		});
+	}
+
+	private async repairNoteMarkers(file: TFile): Promise<void> {
+		const fixed = await this.comments.convertFileComments(
+			file.path,
+			file,
+			repairMarkerPlacement,
+		);
+		new Notice(
+			fixed === 0
+				? 'No comments in this note break reading view.'
+				: `Fixed ${fixed} comment(s) in this note.`,
 		);
 	}
 

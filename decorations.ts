@@ -42,6 +42,7 @@ import type { AnnotecaSettings, CategoryDefinition } from './types';
 import { parseAll } from './parser';
 import { parseDocument } from './document';
 import { storeRegions } from './store';
+import { markerGuard } from './marker-guard';
 import {
 	planActiveCommentDecorations,
 	planFlashRange,
@@ -2333,6 +2334,17 @@ function buildSelectionPopupDom(ctx: DecorationContext): { dom: HTMLElement } {
 // which is the only way to catch a visibility change that fails to repaint.
 // Returns the fields as well, since the DOM half attaches to the same
 // instances.
+// Said once a session, the first time Backspace or Delete on a marker icon is
+// refused (see marker-guard.ts), so the refusal does not read as a stuck key.
+let markerDeleteNoticeShown = false;
+function noticeMarkerDeleteRefused(): void {
+	if (markerDeleteNoticeShown) return;
+	markerDeleteNoticeShown = true;
+	new Notice(
+		'Annoteca keeps comments when you delete around them. To remove one, use the delete option in its menu.',
+	);
+}
+
 export function buildMarkerDecorations(ctx: DecorationContext): {
 	extension: Extension;
 	markerField: StateField<Comment[]>;
@@ -2353,6 +2365,7 @@ export function buildMarkerDecorations(ctx: DecorationContext): {
 			flashField,
 			flashCommentDecorations(field, flashField),
 			decorationsCompute(ctx, field, flashField),
+			markerGuard(field, storeRegionsField, noticeMarkerDeleteRefused),
 		],
 		markerField: field,
 		activeField,

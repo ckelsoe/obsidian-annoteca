@@ -46,6 +46,14 @@ import {
 	type MalformedMarker,
 } from './parser';
 import {
+	gapEnd,
+	headingRangeEnd,
+	layoutMarker,
+	markerRemovalSpan,
+	planMarkerInsert,
+} from './marker-placement';
+import { findPassage } from './reattach';
+import {
 	coerceStorageMode,
 	parseDocument,
 	resolveEofTarget,
@@ -59,6 +67,7 @@ import {
 	writeStoreRegion,
 	diffToSplice,
 	withStoreRewrite,
+	toStored,
 	type SpliceRange,
 	type StoredComment,
 } from './store';
@@ -659,10 +668,9 @@ export class CommentService {
 		if (this.refusesForDamage(content, [current.marker])) return;
 
 		const { start: markerStart, end: markerEnd } = current.marker;
-		// Skip the single begin-placement space between the marker and the new
-		// prose, if present.
-		const proseStart =
-			content.charAt(markerEnd) === ' ' ? markerEnd + 1 : markerEnd;
+		// Skip the gap a begin-placed marker leaves before the new prose: one
+		// space, or a line break and prefix when it sits on its own line.
+		const proseStart = gapEnd((p) => content.charAt(p), markerEnd);
 		// A range comment (#84) says exactly where the edited prose ends, so
 		// Reject restores that span and nothing else, across as many lines as
 		// it covers. Without a closer it is the old rule: to the end of the
@@ -888,8 +896,14 @@ export class CommentService {
 			// the same rules as the composer's, so it never lands where HTML
 			// shows. Anything but a clean range quietly stays start-only, and
 			// `closed` on the result says so.
+			// On a heading a multi-line marker goes above it, so the range
+			// covers the whole heading (see headingTextEnd).
+			const rangeEnd =
+				mode !== 'eof'
+					? headingRangeEnd(content, r.anchor.start, r.anchor.end)
+					: r.anchor.end;
 			const plan = r.closeRange
-				? planCloser(content, r.anchor.start, r.anchor.end, occupied)
+				? planCloser(content, r.anchor.start, rangeEnd, occupied)
 				: undefined;
 			const closeAt = plan?.kind === 'range' ? plan.at : undefined;
 			const comment = {
@@ -920,11 +934,18 @@ export class CommentService {
 				});
 			}
 			// Beginning-placement, the same as the composer: the marker goes at
-			// the START of the passage it concerns so the prose follows it.
+			// the START of the passage it concerns so the prose follows it,
+			// moved off the start of a block where that would stop the note
+			// rendering (see marker-placement.ts).
+			const place = planMarkerInsert(
+				content,
+				r.anchor.start,
+				text.includes('\n'),
+			);
 			splices.push({
-				from: r.anchor.start,
-				to: r.anchor.start,
-				insert: `${text} `,
+				from: place.at,
+				to: place.at,
+				insert: layoutMarker(place, text, ' '),
 			});
 			if (closeAt !== undefined)
 				closerSplices.push({
@@ -960,6 +981,195 @@ export class CommentService {
 	// batch. generateId is random, so a collision inside one promote call is
 	// unlikely and not impossible, and two markers sharing an id is the join-key
 	// corruption the store's whole design avoids.
+	// Anchoring hardening (B): put back a comment that disappeared from a note
+	// without Annoteca removing it (an outside writer dropped its marker, a cut
+	// that was never pasted). It goes to the text its anchor quotes when that
+	// is still in the note, else to the start of the line it was on, laid out
+	// so the note still renders. Resolves to whether it was written.
+	async restoreComment(
+		path: string,
+		comment: Comment,
+		near: number,
+	): Promise<boolean> {
+		return this.enqueue(path, async () => {
+			const file = this.plugin.app.vault.getAbstractFileByPath(path);
+			if (!(file instanceof TFile) || !comment.id) return false;
+			const note = await this.readNoteText(file, path);
+			const content = note.text;
+			// Already back (a paste, an undo): nothing to do.
+			if (parseAll(content).some((c) => c.id === comment.id)) return true;
+			const passage = findPassage(content, comment.anchor?.text, near);
+			const at = passage?.start ?? this.restorePoint(content, near);
+			return this.writeMarkerAt(file, path, note, comment, at, passage);
+		});
+	}
+
+	// Anchoring hardening (C): move a comment to the text its anchor quotes,
+	// nearest where it is now. 'moved', 'here' when it already sits on that
+	// text, or 'not-found'.
+	async reattachComment(
+		path: string,
+		comment: Comment,
+	): Promise<'moved' | 'here' | 'not-found' | 'blocked'> {
+		return this.enqueue(path, async () => {
+			const file = this.plugin.app.vault.getAbstractFileByPath(path);
+			if (!(file instanceof TFile)) return 'not-found';
+			const note = await this.readNoteText(file, path);
+			const content = note.text;
+			const lookup = this.freshComment(content, comment);
+			if (lookup.kind !== 'found' || !lookup.comment.id)
+				return 'not-found';
+			// The merged comment: an end-of-file comment's marker alone holds no
+			// quote, body or thread; its store entry does.
+			const current =
+				parseDocument(content).comments.find(
+					(c) =>
+						c.id === lookup.comment.id &&
+						c.marker.start === lookup.comment.marker.start,
+				) ?? lookup.comment;
+			const passage = findPassage(
+				content,
+				current.anchor?.text,
+				current.marker.start,
+			);
+			if (!passage) return 'not-found';
+			const after = gapEnd((p) => content.charAt(p), current.marker.end);
+			if (
+				passage.start === after &&
+				(current.closer?.start ?? -1) === passage.end
+			)
+				return 'here';
+			// Out of the note, then back in at its text: the marker and any
+			// closer come out, and the same comment goes in at the passage.
+			if (current.id) this.plugin.lossGuard?.expectRemoval(current.id);
+			// Taking a marker out of a note with an unclosed opener above it
+			// can let that opener swallow prose, as for every other verb that
+			// removes one; the reason is shown and nothing is written.
+			if (
+				this.refusesForDamage(content, [
+					current.marker,
+					...(current.closer ? [current.closer] : []),
+				])
+			)
+				return 'blocked';
+			// Only what the marker's placement added goes, never the old
+			// passage's own syntax (a heading's #, a quote's >).
+			const removal = markerRemovalSpan(
+				content,
+				current.marker.start,
+				current.marker.end,
+			);
+			const removed = [
+				{ from: removal.from, to: removal.to, insert: '' },
+				...(current.closer
+					? [
+							{
+								from: current.closer.start,
+								to: current.closer.end,
+								insert: '',
+							},
+						]
+					: []),
+			].sort((a, b) => b.from - a.from);
+			let stripped = content;
+			for (const r of removed)
+				stripped = stripped.slice(0, r.from) + stripped.slice(r.to);
+			const shift = (pos: number): number =>
+				removed.reduce(
+					(p, r) => (r.to <= pos ? p - (r.to - r.from) : p),
+					pos,
+				);
+			const moved = {
+				start: shift(passage.start),
+				end: shift(passage.end),
+			};
+			const ok = await this.writeMarkerAt(
+				file,
+				path,
+				note,
+				current,
+				moved.start,
+				moved,
+				stripped,
+			);
+			return ok ? 'moved' : 'not-found';
+		});
+	}
+
+	// The start of the line `near` falls on, kept out of the note properties.
+	private restorePoint(content: string, near: number): number {
+		const clamped = Math.max(0, Math.min(near, content.length));
+		const lineStart = content.lastIndexOf('\n', clamped - 1) + 1;
+		return Math.max(lineStart, frontmatterEnd(content));
+	}
+
+	// Write `comment` at `at` (in `base`, which defaults to the note's text):
+	// its marker laid out by planMarkerInsert, a closer at the passage end
+	// when one is given and can be placed, and its store entry when the note
+	// keeps comments at the end. One splice set against the note as read.
+	private async writeMarkerAt(
+		file: TFile,
+		path: string,
+		note: NoteText,
+		comment: Comment,
+		at: number,
+		passage: { start: number; end: number } | undefined,
+		base: string = note.text,
+	): Promise<boolean> {
+		const id = comment.id;
+		if (!id) return false;
+		const markers = parseAll(base).map((c) => c.marker);
+		const eof = parseStore(base).length > 0;
+		const passageEnd = passage
+			? !eof
+				? headingRangeEnd(base, passage.start, passage.end)
+				: passage.end
+			: undefined;
+		const plan =
+			passage && passageEnd !== undefined
+				? planCloser(base, passage.start, passageEnd, [
+						...markers,
+						...scanClosers(base, markers),
+					])
+				: undefined;
+		const closeAt = plan?.kind === 'range' ? plan.at : undefined;
+		const restored: Comment = {
+			...comment,
+			range: closeAt !== undefined ? 'closed' : undefined,
+		};
+		const text = eof
+			? serializeLeanMarker(restored.category, id)
+			: serialize(restored);
+		const place = planMarkerInsert(base, at, text.includes('\n'));
+		const prose: SpliceRange[] = [
+			...(closeAt !== undefined
+				? [{ from: closeAt, to: closeAt, insert: serializeCloser(id) }]
+				: []),
+			{
+				from: place.at,
+				to: place.at,
+				insert: layoutMarker(place, text, ' '),
+			},
+		];
+		let updated = base;
+		const all = eof
+			? withStoreRewrite(base, prose, [
+					// Replaced, not added: an entry left behind when only the
+					// marker was dropped, or moved by a reattach, is this one.
+					...parseStore(base)
+						.map((e) => e.comment)
+						.filter((c) => c.id !== id),
+					toStored(id, restored),
+				])
+			: prose;
+		for (const sp of [...all].sort((a, b) => b.from - a.from))
+			updated =
+				updated.slice(0, sp.from) + sp.insert + updated.slice(sp.to);
+		const whole = diffToSplice(note.text, updated);
+		if (!whole) return true;
+		return this.applySplices(path, file, [whole], note);
+	}
+
 	private freshId(
 		content: string,
 		created: readonly CreatedComment[],
@@ -1041,6 +1251,7 @@ export class CommentService {
 		// newline to avoid a stranded blank line.
 		const splices: SpliceRange[] = [];
 		for (const c of resolved) {
+			if (c.id) this.plugin.lossGuard?.expectRemoval(c.id);
 			let start = c.marker.start;
 			let end = c.marker.end;
 			const standsAlone =
@@ -1500,6 +1711,8 @@ export class CommentService {
 		current: Comment,
 		eof: EofTarget | undefined,
 	): SpliceRange[] {
+		// Removed on purpose, so the loss guard does not offer it back.
+		if (current.id) this.plugin.lossGuard?.expectRemoval(current.id);
 		const markerSplice = this.buildDeleteSplice(
 			content,
 			current.marker.start,

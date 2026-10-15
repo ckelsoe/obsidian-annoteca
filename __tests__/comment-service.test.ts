@@ -3056,3 +3056,39 @@ describe('promote with closeRange', () => {
 		expect(c?.closer).toBeDefined();
 	});
 });
+
+// Anchoring hardening (C): moving a comment back to the text it quotes.
+describe('reattachComment', () => {
+	it('moves an end-of-file comment to its quoted text, keeping one store entry', async () => {
+		const lean = serializeLeanMarker('tone', 'aaaa1111');
+		const doc = writeStoreRegion(
+			`${lean} Intro.\n\nThe target phrase is here.\n`,
+			[
+				{
+					id: 'aaaa1111',
+					category: 'tone',
+					body: 'the body',
+					anchor: { text: 'target phrase', truncated: false },
+					replies: [],
+				},
+			],
+		);
+		const h = makeEditorHarness(doc);
+		const marker = parseAll(h.content)[0];
+		if (!marker) throw new Error('no marker');
+		expect(await h.service.reattachComment('note.md', marker)).toBe(
+			'moved',
+		);
+		const after = parseDocument(h.content);
+		expect(after.comments).toHaveLength(1);
+		expect(after.comments[0]?.body).toBe('the body');
+		expect(parseStore(h.content)).toHaveLength(1);
+		expect(h.content).toContain(
+			`The ${lean} target phrase<!-- /annoteca aaaa1111 --> is here.`,
+		);
+		expect(h.content.startsWith('Intro.')).toBe(true);
+		const again = parseAll(h.content)[0];
+		if (!again) throw new Error('no marker');
+		expect(await h.service.reattachComment('note.md', again)).toBe('here');
+	});
+});

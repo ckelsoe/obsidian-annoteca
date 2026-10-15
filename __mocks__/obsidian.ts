@@ -45,6 +45,13 @@ export class Modal {
 		(this as { onClose?: () => void }).onClose?.();
 	}
 }
+// Enough for a picker to be constructed in a test; choosing is driven directly.
+export class FuzzySuggestModal<T> extends Modal {
+	setPlaceholder(_text: string): void {}
+	getItems(): T[] {
+		return [];
+	}
+}
 export class App {}
 // Every Notice raised during a test, oldest first. A test imports this from
 // '../__mocks__/obsidian' (a relative path, so it types against THIS file
