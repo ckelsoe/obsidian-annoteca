@@ -174,6 +174,10 @@ BRAT lets power users install pre-release builds before they reach the marketpla
 
 Annoteca reads and writes only your vault. No network requests, no telemetry, no data leaves your machine. See [PRIVACY.md](./PRIVACY.md).
 
+## Changelog
+
+What changed in each version is in the [changelog](https://github.com/ckelsoe/obsidian-annoteca/blob/main/CHANGELOG.md). Each [release](https://github.com/ckelsoe/obsidian-annoteca/releases) also carries its own notes.
+
 ## Community
 
 Questions, ideas, and general discussion happen on [Discord](https://discord.gg/gd6tKJDPj4). For anything that needs tracking, a [GitHub issue](https://github.com/ckelsoe/obsidian-annoteca/issues) is still the better home.
