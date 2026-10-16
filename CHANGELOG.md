@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.25.1] - 2026-10-16
+
+No functional changes. Re-release of 1.25.0 so the Obsidian community store reprocesses it after its automated review failed on the store side.
+
 ## [1.25.0] - 2026-10-15
 
 Comments stay attached: edits around them keep them, comments another tool drops can be restored, and comments are placed so every note renders in reading view.
