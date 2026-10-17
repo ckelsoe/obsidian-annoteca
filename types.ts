@@ -263,6 +263,12 @@ export interface AnnotecaSettings {
 	// Applies to both the new-comment composer and the reply composer.
 	submitCommentOnEnter: boolean;
 
+	// When true (default), sending a comment from the composer opens the hub
+	// on it. Off for reviewers who leave many comments in a row and do not
+	// want the hub to take over the sidebar after each one. The hub still
+	// selects the new comment if it is already on screen.
+	openHubAfterComment: boolean;
+
 	// How the editor scrolls when navigating to a comment.
 	//   "top"     — anchor the marker near the top of the editor pane, always
 	//               (default). Gives a predictable reading position on small

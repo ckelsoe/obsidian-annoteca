@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Open the panel after commenting** (Settings > Composer, on by default). Turn it off to leave many comments in a row without the comment panel opening after each one. A panel that is already open still selects the new comment.
+
 ## [1.25.1] - 2026-10-16
 
 No functional changes. Re-release of 1.25.0 so the Obsidian community store reprocesses it after its automated review failed on the store side.

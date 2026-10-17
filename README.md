@@ -132,7 +132,7 @@ Settings are grouped in the order they appear in the tab:
 - **Comment storage**: where new comments keep their body, replies and history: inline in the marker, or at the end of the note.
 - **Editor indicators**: how comments look in the editor. Indicator style (icon, underline, both, or hidden) and size; the hover preview and its delay; what a click or tap does (open the side panel or a popover); whether bodies render as Markdown; the reply count on markers; underline style and thickness; and whether comments show when a file opens.
 - **Resolved comments**: whether resolved comments are dimmed or hidden, how strongly they dim, and whether resolving deletes the marker instead of keeping it as history.
-- **Composer**: where the comment form opens (modal or side panel), whether Enter sends or adds a line break, and the floating comment button on selected text.
+- **Composer**: where the comment form opens (modal or side panel), whether Enter sends or adds a line break, whether the panel opens after each comment you send, and the floating comment button on selected text.
 - **Reading view**: the indicator that stands in for comments where markers are invisible: a note banner, per-section badges, both, or off.
 - **Panel and navigation**: whether the hub collapses files you are not editing, and where a marker lands when you jump to a comment (top, center, or minimal scroll).
 - **Authors**: your author tag, plus collaborators each with a color so a multi-party thread is easy to scan.
