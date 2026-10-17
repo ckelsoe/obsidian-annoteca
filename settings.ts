@@ -84,6 +84,7 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 	composerLocation: 'panel',
 	selectionPopup: false,
 	submitCommentOnEnter: true,
+	openHubAfterComment: true,
 	markerScrollAlign: 'top',
 
 	enableAuthorTag: false,
@@ -534,6 +535,7 @@ const SETTING_VALIDATORS: {
 	composerLocation: oneOf('modal', 'panel'),
 	selectionPopup: bool,
 	submitCommentOnEnter: bool,
+	openHubAfterComment: bool,
 	markerScrollAlign: oneOf('top', 'center', 'minimal'),
 	debugMode: bool,
 	debugLogTarget: oneOf('console', 'vault'),
@@ -916,6 +918,14 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 						control: {
 							type: 'toggle',
 							key: 'submitCommentOnEnter',
+						},
+					},
+					{
+						name: 'Open the panel after commenting',
+						desc: 'When on, sending a new or edited comment opens the comment panel on it. Turn it off to leave many comments in a row without the panel taking over the sidebar each time.',
+						control: {
+							type: 'toggle',
+							key: 'openHubAfterComment',
 						},
 					},
 					{

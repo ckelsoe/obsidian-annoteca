@@ -1879,7 +1879,10 @@ export default class AnnotecaPlugin extends Plugin {
 			path,
 			start: markerStart,
 		});
-		await this.activateView(ANNOTECA_HUB_VIEW_TYPE, 'right');
+		// The event above still selects the new comment in a hub that is
+		// already open; the setting only decides whether to bring it forward.
+		if (this.settings.openHubAfterComment)
+			await this.activateView(ANNOTECA_HUB_VIEW_TYPE, 'right');
 	}
 
 	// Comment lifecycle operations ---------------------------------------

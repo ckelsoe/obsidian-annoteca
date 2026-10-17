@@ -26,6 +26,7 @@ import { CommentIndex } from '../index';
 import { serialize } from '../parser';
 import { noteText } from '../note-text';
 import { DEFAULT_SETTINGS } from '../settings';
+import { ANNOTECA_HUB_VIEW_TYPE } from '../views';
 import type { Comment } from '../types';
 import { at, defined } from './helpers/checked';
 
@@ -376,6 +377,38 @@ describe('notifyComposerSubmitted in panel-composer mode (m2)', () => {
 			.map((c) => c.body)
 			.sort();
 		expect(bodies).toEqual(['the old one', 'the one I just typed']);
+	});
+});
+
+describe('notifyComposerSubmitted and the open-hub setting', () => {
+	const submit = async (openHubAfterComment: boolean) => {
+		const leaf = loadedLeaf('notes/a.md', NOTE);
+		const { plugin } = makePlugin([leaf]);
+		plugin.settings.openHubAfterComment = openHubAfterComment;
+		const activated: string[] = [];
+		const triggered: string[] = [];
+		Object.assign(plugin, {
+			activateView: (type: string) => {
+				activated.push(type);
+				return Promise.resolve();
+			},
+			events: { trigger: (name: string) => triggered.push(name) },
+		});
+		await plugin.notifyComposerSubmitted('notes/a.md', 0);
+		return { activated, triggered };
+	};
+
+	it('opens the hub after a comment by default', async () => {
+		expect(DEFAULT_SETTINGS.openHubAfterComment).toBe(true);
+		const { activated } = await submit(true);
+		expect(activated).toEqual([ANNOTECA_HUB_VIEW_TYPE]);
+	});
+
+	it('leaves the hub alone when the setting is off', async () => {
+		const { activated, triggered } = await submit(false);
+		expect(activated).toEqual([]);
+		// An already-open hub still follows the new comment.
+		expect(triggered).toEqual(['index-changed', 'active-comment-changed']);
 	});
 });
 
