@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.27.1] - 2026-10-18
+
+### Fixed
+
+- **Copy ID, Copy debug log and reading-view Copy** now report a copy the clipboard refuses, instead of failing silently, and copy correctly from a pop-out window. 1.27.0 fixed this for Copy text and Copy all only.
+
 ## [1.27.0] - 2026-10-18
 
 ### Added
