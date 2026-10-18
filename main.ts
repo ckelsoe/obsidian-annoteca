@@ -332,8 +332,8 @@ export default class AnnotecaPlugin extends Plugin {
 				rejectAddressed: (m, sourcePath) => {
 					void this.rejectAddressedFromPopup(m, sourcePath);
 				},
-				copyPermalink: (m) => {
-					void this.copyCommentId(m);
+				copyPermalink: (m, win) => {
+					void this.copyCommentId(m, win);
 				},
 				copyText: (m, win) => {
 					void this.copyCommentText(m, win);
@@ -485,8 +485,9 @@ export default class AnnotecaPlugin extends Plugin {
 			new Notice('The debug log is empty.');
 			return;
 		}
-		await navigator.clipboard.writeText(log);
-		new Notice(
+		await this.copyToClipboard(
+			activeWindow,
+			log,
 			`Copied the debug log (${log.split('\n').length - 1} entries).`,
 		);
 	}
@@ -1733,12 +1734,9 @@ export default class AnnotecaPlugin extends Plugin {
 						.setTitle('Copy')
 						.setIcon('copy')
 						.onClick(() => {
-							navigator.clipboard
-								.writeText(selected)
-								.catch((err: unknown) => {
-									console.error('Annoteca: copy failed', err);
-									new Notice('Could not copy the selection.');
-								});
+							// Through the selection's own window: in a pop-out
+							// the main document is unfocused and refuses it.
+							void this.copyToClipboard(doc.win, selected);
 						}),
 				)
 				.addItem((item) =>
@@ -2176,13 +2174,16 @@ export default class AnnotecaPlugin extends Plugin {
 		return authorColorFor(tag, this.settings.authorStyles);
 	}
 
-	async copyCommentId(comment: Comment): Promise<void> {
+	// `win` as for copyCommentText below.
+	async copyCommentId(
+		comment: Comment,
+		win: ClipboardWindow = activeWindow,
+	): Promise<void> {
 		if (!comment.id) {
 			new Notice('This comment has no ID.');
 			return;
 		}
-		await navigator.clipboard.writeText(comment.id);
-		new Notice(`Copied ID ${comment.id}.`);
+		await this.copyToClipboard(win, comment.id, `Copied ID ${comment.id}.`);
 	}
 
 	categoryName(id: string): string {
@@ -2216,11 +2217,13 @@ export default class AnnotecaPlugin extends Plugin {
 	private async copyToClipboard(
 		win: ClipboardWindow,
 		text: string,
-		done: string,
+		// Left out where a copy is expected to be silent, as the reading
+		// view's own Copy is.
+		done?: string,
 	): Promise<void> {
 		try {
 			await win.navigator.clipboard.writeText(text);
-			new Notice(done);
+			if (done !== undefined) new Notice(done);
 		} catch (err: unknown) {
 			console.error('Annoteca: copy failed', err);
 			new Notice('Could not copy to the clipboard.');

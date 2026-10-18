@@ -1459,7 +1459,7 @@ export class ThreadTabRenderer {
 			void this.plugin.copyCommentText(c, actions.win);
 		});
 		this.createActionButton(actions, 'Copy ID', 'copy', () => {
-			void this.plugin.copyCommentId(c);
+			void this.plugin.copyCommentId(c, actions.win);
 		});
 		this.createActionButton(actions, 'Open', 'external-link', () => {
 			void this.plugin.navigateToComment(path, c.marker.start, c);
