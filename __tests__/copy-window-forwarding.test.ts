@@ -43,6 +43,27 @@ const settle = (): Promise<void> =>
 		window.setTimeout(resolve, 30);
 	});
 
+// These suites are single-realm, so every element's `win` is the global
+// window, and a copy that wrongly used the global window would look right.
+// Inside `root`, `win` answers a stand-in instead, so only a copy that asks
+// the clicked surface for its window can receive it. Restored after each test.
+const POPOUT = { name: 'popout window' };
+const winDescriptor = Object.getOwnPropertyDescriptor(Node.prototype, 'win');
+function ownedByPopout(root: Element): void {
+	const fallback = winDescriptor?.get;
+	Object.defineProperty(Node.prototype, 'win', {
+		configurable: true,
+		get(this: Node): unknown {
+			if (root.contains(this)) return POPOUT;
+			return fallback?.call(this);
+		},
+	});
+}
+afterEach(() => {
+	if (winDescriptor)
+		Object.defineProperty(Node.prototype, 'win', winDescriptor);
+});
+
 const button = (root: ParentNode, label: string): HTMLElement => {
 	const found = [
 		...root.querySelectorAll<HTMLElement>(
@@ -64,10 +85,10 @@ describe('popover copy buttons', () => {
 		const ctx = {
 			...stubDecorationContext(() => settings),
 			copyText: (m: Comment, win: Window) => {
-				calls.push(`text:${m.id ?? ''}:${String(win === window)}`);
+				calls.push(`text:${m.id ?? ''}:${String(win === POPOUT)}`);
 			},
 			copyPermalink: (m: Comment, win: Window) => {
-				calls.push(`id:${m.id ?? ''}:${String(win === window)}`);
+				calls.push(`id:${m.id ?? ''}:${String(win === POPOUT)}`);
 			},
 		};
 		const view = new EditorView({
@@ -84,6 +105,9 @@ describe('popover copy buttons', () => {
 			),
 		});
 		await settle();
+		const popover = document.querySelector('.annoteca-hover-preview');
+		if (!popover) throw new Error('popover did not open');
+		ownedByPopout(popover);
 
 		button(document, 'Copy text').click();
 		button(document, 'Copy ID').click();
@@ -99,7 +123,7 @@ describe('Thread tab copy buttons', () => {
 		index.rebuild(path, DOC);
 		const calls: string[] = [];
 		const record = (what: string) => (_x: unknown, win: Window) => {
-			calls.push(`${what}:${String(win === window)}`);
+			calls.push(`${what}:${String(win === POPOUT)}`);
 			return Promise.resolve();
 		};
 		const tfile = (p: string): TFile =>
@@ -145,6 +169,7 @@ describe('Thread tab copy buttons', () => {
 		const container = document.body.createDiv();
 		const renderer = new ThreadTabRenderer(plugin, app, () => undefined);
 		renderer.render(container);
+		ownedByPopout(container);
 
 		button(container, 'Copy text').click();
 		button(container, 'Copy ID').click();
