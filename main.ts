@@ -51,6 +51,11 @@ import {
 } from './settings';
 import { getCategoryOrFallback } from './categories';
 import {
+	commentAsMarkdown,
+	commentsAsMarkdown,
+	type ClipboardWindow,
+} from './comment-text';
+import {
 	buildSkillMarkdown,
 	skillTargetPaths,
 	parseSkillVersion,
@@ -329,6 +334,9 @@ export default class AnnotecaPlugin extends Plugin {
 				},
 				copyPermalink: (m) => {
 					void this.copyCommentId(m);
+				},
+				copyText: (m, win) => {
+					void this.copyCommentText(m, win);
 				},
 				submitReply: (m, body, author, sourcePath) =>
 					this.submitReplyFromPopup(m, body, author, sourcePath),
@@ -874,6 +882,14 @@ export default class AnnotecaPlugin extends Plugin {
 					);
 					menu.addItem((item) =>
 						item
+							.setTitle('Annoteca: copy comment text')
+							.setIcon('copy')
+							.onClick(() => {
+								void this.copyCommentText(inside);
+							}),
+					);
+					menu.addItem((item) =>
+						item
 							.setTitle('Annoteca: delete comment')
 							.setIcon('trash')
 							.onClick(() => {
@@ -931,6 +947,15 @@ export default class AnnotecaPlugin extends Plugin {
 				this.withCommentAtCursor(editor, view, (_path, c) =>
 					this.openEditModal(editor, view, c),
 				);
+			},
+		});
+		this.addCommand({
+			id: 'copy-comment-text-at-cursor',
+			name: 'Copy comment text here',
+			editorCallback: (editor: Editor, view: MarkdownFileInfo) => {
+				this.withCommentAtCursor(editor, view, (_path, c) => {
+					void this.copyCommentText(c);
+				});
 			},
 		});
 		this.addCommand({
@@ -2158,6 +2183,64 @@ export default class AnnotecaPlugin extends Plugin {
 		}
 		await navigator.clipboard.writeText(comment.id);
 		new Notice(`Copied ID ${comment.id}.`);
+	}
+
+	categoryName(id: string): string {
+		return getCategoryOrFallback(
+			id,
+			resolveSettingsCategories(this.settings),
+		).displayName;
+	}
+
+	// The whole thread as Markdown: body, notes and every reply. See
+	// comment-text.ts for the format.
+	// `win` is the window the copy was asked for from. The clipboard has to
+	// be written through that window's navigator: a pop-out's click leaves
+	// the main document unfocused, and a write through it is refused. A
+	// command or a menu item has no element to ask, and runs in the focused
+	// window, which is activeWindow.
+	async copyCommentText(
+		comment: Comment,
+		win: ClipboardWindow = activeWindow,
+	): Promise<void> {
+		await this.copyToClipboard(
+			win,
+			commentAsMarkdown(comment, this.categoryName(comment.category)),
+			'Copied comment text.',
+		);
+	}
+
+	// Every caller fires and forgets (`void`), so a refused write (no
+	// clipboard permission, the window lost focus) is reported here or it
+	// becomes an unhandled rejection and the user is told nothing.
+	private async copyToClipboard(
+		win: ClipboardWindow,
+		text: string,
+		done: string,
+	): Promise<void> {
+		try {
+			await win.navigator.clipboard.writeText(text);
+			new Notice(done);
+		} catch (err: unknown) {
+			console.error('Annoteca: copy failed', err);
+			new Notice('Could not copy to the clipboard.');
+		}
+	}
+
+	async copyCommentsText(
+		groups: readonly { path: string; comments: readonly Comment[] }[],
+		win: ClipboardWindow = activeWindow,
+	): Promise<void> {
+		const count = groups.reduce((n, g) => n + g.comments.length, 0);
+		if (count === 0) {
+			new Notice('No comments to copy.');
+			return;
+		}
+		await this.copyToClipboard(
+			win,
+			commentsAsMarkdown(groups, (id) => this.categoryName(id)),
+			`Copied ${count} ${count === 1 ? 'comment' : 'comments'}.`,
+		);
 	}
 
 	// Starred comments ---------------------------------------------------

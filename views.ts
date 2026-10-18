@@ -6,6 +6,7 @@ import { getCategoryOrFallback } from './categories';
 import { resolveSettingsCategories } from './settings';
 import { FOCUS_KEY_ATTR, extractIndexTerm } from './view-utils';
 import { rekeyScopeAnchor } from './scope';
+import { endsTextSelection } from './ui-helpers';
 import { ThreadTabRenderer } from './hub-thread-tab';
 import { OutlineTabRenderer } from './hub-outline-tab';
 import { StarredTabRenderer } from './hub-starred-tab';
@@ -210,6 +211,7 @@ export class VaultUnresolvedView extends IndexBackedListView {
 		row.createSpan({ cls: 'annoteca-row-body', text: body });
 
 		row.addEventListener('click', () => {
+			if (endsTextSelection(row)) return;
 			void this.plugin.navigateToComment(
 				located.path,
 				located.comment.marker.start,
@@ -277,6 +279,7 @@ export class IndexEntryView extends IndexBackedListView {
 					text: located.comment.body,
 				});
 				row.addEventListener('click', () => {
+					if (endsTextSelection(row)) return;
 					void this.plugin.navigateToComment(
 						located.path,
 						located.comment.marker.start,

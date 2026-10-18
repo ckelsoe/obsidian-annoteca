@@ -24,6 +24,7 @@ import {
 	shouldSubmitOnKeydown,
 } from './view-utils';
 import {
+	endsTextSelection,
 	renderReplyRow,
 	renderCategoryBadge,
 	renderStarButton,
@@ -829,6 +830,20 @@ export class ThreadTabRenderer {
 		pinBtn.addEventListener('click', () => {
 			void this.plugin.togglePinScope();
 		});
+
+		// Everything the list below shows, in the same order: same scope, same
+		// status filter.
+		const copyAllBtn = toolbar.createEl('button', {
+			cls: 'annoteca-scope-copy',
+			attr: { 'aria-label': 'Copy all comments shown as Markdown' },
+		});
+		setIcon(copyAllBtn, 'clipboard-copy');
+		copyAllBtn.addEventListener('click', () => {
+			void this.plugin.copyCommentsText(
+				this.buildScopedGroups(this.plugin.computeScopeFiles()),
+				copyAllBtn.win,
+			);
+		});
 	}
 
 	// Human-readable name for a scope that no dropdown option covers. Prefixed
@@ -1440,6 +1455,9 @@ export class ThreadTabRenderer {
 					cls: 'annoteca-reattach',
 				},
 			);
+		this.createActionButton(actions, 'Copy text', 'clipboard-copy', () => {
+			void this.plugin.copyCommentText(c, actions.win);
+		});
 		this.createActionButton(actions, 'Copy ID', 'copy', () => {
 			void this.plugin.copyCommentId(c);
 		});
@@ -1463,16 +1481,7 @@ export class ThreadTabRenderer {
 		el.setAttribute('tabindex', '0');
 		el.setAttribute('aria-label', 'Go to this comment in the note');
 		el.addEventListener('click', () => {
-			// Either end inside counts: a drag can start outside the block and
-			// end in it, which leaves only the focus end inside.
-			const selection = el.win.getSelection();
-			if (
-				selection &&
-				!selection.isCollapsed &&
-				(el.contains(selection.anchorNode) ||
-					el.contains(selection.focusNode))
-			)
-				return;
+			if (endsTextSelection(el)) return;
 			this.selectAndReveal(path, c, true);
 		});
 		el.addEventListener('keydown', (e) => {
@@ -1506,14 +1515,7 @@ export class ThreadTabRenderer {
 				target.closest('a, button, input, textarea, select, label')
 			)
 				return;
-			const selection = el.win.getSelection();
-			if (
-				selection &&
-				!selection.isCollapsed &&
-				(el.contains(selection.anchorNode) ||
-					el.contains(selection.focusNode))
-			)
-				return;
+			if (endsTextSelection(el)) return;
 			this.selectAndReveal(path, c, true);
 		});
 	}

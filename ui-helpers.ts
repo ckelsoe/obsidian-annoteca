@@ -13,6 +13,20 @@ import {
 	type MarkdownRenderHost,
 } from './markdown-render';
 
+// True when the click that is about to land on `el` ends a drag-selection
+// inside it. Comment text is selectable so people can copy from it, and a
+// click that finishes a selection is the reader copying, not asking to go
+// anywhere. Either end inside counts: a drag can start outside the element
+// and end in it, which leaves only the focus end inside.
+export function endsTextSelection(el: HTMLElement): boolean {
+	const selection = el.win.getSelection();
+	return (
+		selection !== null &&
+		!selection.isCollapsed &&
+		(el.contains(selection.anchorNode) || el.contains(selection.focusNode))
+	);
+}
+
 // Class names for a category badge on a given surface. `icon` is optional: the
 // panels show the category icon, the hover popup omits it. Passing each
 // surface's own classes keeps the existing CSS while sharing the structure.

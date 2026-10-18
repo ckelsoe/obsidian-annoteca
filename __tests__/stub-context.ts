@@ -36,6 +36,7 @@ export function stubDecorationContext(
 		reviseAddressed: noop,
 		rejectAddressed: noop,
 		copyPermalink: noop,
+		copyText: noop,
 		// Reports "written" so the double never looks like a refused write to a
 		// test that does exercise the composer.
 		submitReply: () => Promise.resolve(true),
