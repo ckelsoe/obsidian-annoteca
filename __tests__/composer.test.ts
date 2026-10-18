@@ -36,7 +36,12 @@ beforeEach(() => {
 // Obsidian hands the SAME Editor object back after a leaf switches file: the
 // buffer changes under it and the view starts naming the other note. That pair
 // of moves is the whole of the wrong-file defect.
-function makeEditor(initial: string, path = 'note.md', selection = '') {
+function makeEditor(
+	initial: string,
+	path = 'note.md',
+	selection = '',
+	cursor = 0,
+) {
 	let content = initial;
 	let showing: string | null = path;
 	const posToOffset = (pos: EditorPosition): number => {
@@ -54,7 +59,7 @@ function makeEditor(initial: string, path = 'note.md', selection = '') {
 	const editor = {
 		getValue: () => content,
 		getSelection: () => selection,
-		getCursor: () => offsetToPos(0),
+		getCursor: () => offsetToPos(cursor),
 		posToOffset,
 		offsetToPos,
 		replaceRange: (
@@ -999,5 +1004,75 @@ describe('the composer in reading view', () => {
 		await settle();
 		expect(h.saves).toHaveLength(1);
 		expect(parseAll(h.host.content)).toHaveLength(1);
+	});
+});
+
+// A new comment's marker must never start inside an existing one: the second
+// opener cuts the first marker short and both comments are damaged. Found
+// live on 2026-10-18, where "Add comment here" with the cursor inside a
+// marker in source mode wrote one marker into the middle of another.
+describe('composer create: never inside another marker', () => {
+	const EXISTING = serialize({
+		id: 'aaaaaaaa',
+		category: 'clarify',
+		body: 'already here',
+		date: '2026-10-17T10:16:12',
+	});
+	const NOTE = `Line ${EXISTING} one.`;
+	const markerStart = NOTE.indexOf('<!--');
+	const markerEnd = NOTE.indexOf('-->') + 3;
+
+	it('refuses with the cursor inside a marker, writing nothing', async () => {
+		const host = makeEditor(NOTE, 'note.md', '', markerStart + 8);
+		const { form, closed } = openCreate(host);
+		form.state.selectedCategory = 'clarify';
+		form.state.body = 'would corrupt it';
+		await form.submit();
+
+		expect(host.content).toBe(NOTE);
+		expect(noticeLog.join('\n')).toContain(
+			"can't start inside another comment's marker",
+		);
+		expect(closed()).toBe(false);
+	});
+
+	it('refuses with the cursor inside the note properties', async () => {
+		const withProps = `---\ntitle: x\n---\nBody text.`;
+		const host = makeEditor(withProps, 'note.md', '', 6);
+		const { form } = openCreate(host);
+		form.state.selectedCategory = 'clarify';
+		form.state.body = 'not in the yaml';
+		await form.submit();
+
+		expect(host.content).toBe(withProps);
+		expect(noticeLog.join('\n')).toContain("can't start inside");
+	});
+
+	it('refuses at the very start of a note that has properties', async () => {
+		const withProps = `---\ntitle: x\n---\nBody text.`;
+		const host = makeEditor(withProps, 'note.md', '', 0);
+		const { form } = openCreate(host);
+		form.state.selectedCategory = 'clarify';
+		form.state.body = 'not before the yaml';
+		await form.submit();
+
+		expect(host.content).toBe(withProps);
+		expect(noticeLog.join('\n')).toContain("can't start inside");
+	});
+
+	// The control: right after a marker is a legitimate place, and both
+	// comments must parse whole afterwards.
+	it('saves with the cursor just after a marker, both comments intact', async () => {
+		const host = makeEditor(NOTE, 'note.md', '', markerEnd);
+		const { form, closed } = openCreate(host);
+		form.state.selectedCategory = 'clarify';
+		form.state.body = 'second comment';
+		await form.submit();
+
+		const bodies = parseAll(host.content)
+			.map((c) => c.body)
+			.sort();
+		expect(bodies).toEqual(['already here', 'second comment']);
+		expect(closed()).toBe(true);
 	});
 });

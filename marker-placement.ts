@@ -24,6 +24,8 @@
 
 import { parseAll } from './parser';
 import type { ImportResult } from './imports';
+import { enclosingForbidden } from './forbidden';
+import { frontmatterEnd } from './range-placement';
 
 // What sits between a marker and its passage: the one space an inline marker
 // is followed by, or a line break plus the next line's indentation, quote
@@ -272,6 +274,46 @@ export function markerBreaksReadingView(
 	return rest.trim() !== '';
 }
 
+// planMarkerInsert, kept out of every place a marker must not go (another
+// marker, a closer, a store entry, the note properties; see forbidden.ts).
+// Placement moves a marker off the start of its block, and that move can carry
+// it into a multi-line marker above; so can a start that was already inside
+// one. Either way it goes just before what it landed in, which splits nothing,
+// or just after the properties, since nothing may go before them. Undefined
+// only if no such place settles, which the bounded loop guards against rather
+// than expects: every step but the properties one moves strictly backwards.
+export function planSafeMarkerInsert(
+	content: string,
+	start: number,
+	multiline: boolean,
+): MarkerInsert | undefined {
+	const properties = frontmatterEnd(content);
+	let place = planMarkerInsert(content, start, multiline);
+	for (let step = 0; step < 64; step++) {
+		const inside = enclosingForbidden(content, place.at);
+		if (inside === undefined) {
+			// Right after properties that end the note with no line break,
+			// the marker would share the closing `---` line, and the
+			// properties would stop being properties. Its own line instead.
+			if (
+				properties > 0 &&
+				place.at === properties &&
+				content.charAt(properties - 1) !== '\n'
+			)
+				return { ...place, before: `\n${place.before}` };
+			return place;
+		}
+		// Only the properties send it forward. A marker that opens the note
+		// also starts at 0, and before it is exactly where this one belongs.
+		const next =
+			properties > 0 && inside.start === 0 && inside.end === properties
+				? inside.end
+				: inside.start;
+		place = planMarkerInsert(content, next, multiline);
+	}
+	return undefined;
+}
+
 // Move every marker that breaks reading view to where planMarkerInsert would
 // have put it. The comment and its text are unchanged; only the marker's
 // position relative to the line moves. Latest first, so earlier offsets stay
@@ -282,15 +324,21 @@ export function repairMarkerPlacement(content: string): ImportResult {
 		.filter((m) => markerBreaksReadingView(content, m.start, m.end))
 		.sort((a, b) => b.start - a.start);
 	let updated = content;
+	let moved = 0;
 	for (const m of markers) {
 		const marker = updated.slice(m.start, m.end);
 		const passage = gapEnd((p) => updated.charAt(p), m.end);
 		const without = updated.slice(0, m.start) + updated.slice(passage);
 		const plan = planMarkerInsert(without, m.start, marker.includes('\n'));
+		// The planned spot can sit inside a multi-line marker above this one,
+		// and moving there would corrupt both. Such a marker stays where it
+		// is: it renders badly but is whole, which a repair must not change.
+		if (enclosingForbidden(without, plan.at) !== undefined) continue;
 		updated =
 			without.slice(0, plan.at) +
 			layoutMarker(plan, marker, ' ') +
 			without.slice(plan.at);
+		moved += 1;
 	}
-	return { updated, converted: markers.length };
+	return { updated, converted: moved };
 }

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Repair comments written inside other comments.** Notes damaged by the bugs below can be fixed with "Repair comments written inside other comments in this note", or across the vault with "...in all notes" (after a backup prompt). Each comment that landed inside another comment, a range end, the comment store or the note properties moves just outside, and the comment or store entry that held it gets its text back (in one rare case a space at the end of a line inside the comment's text is dropped, which can turn a hard line break into a plain one, because the damage looks the same with or without that space). A note is changed only when the result is whole with every comment kept. A comment from before 1.14.0 that quotes a marker in its text is left alone, since it looks the same as the damage. Opening a damaged note now names this command.
+
+### Fixed
+
+- **A new comment could be written inside another comment's marker, corrupting both.** Adding a comment with the cursor inside an existing marker (source mode) put the new marker in the middle of the old one. Annoteca now refuses, says why, and keeps what you typed. The same check covers the comment store and the note properties, including the very start of a note that has properties.
+- **The same damage from other paths:** restoring a lost comment, comments added by another plugin, and "Fix comments that break reading view" could each move a marker into a multi-line marker above it. They now place it just before that marker, or (for the repair) leave the marker where it was.
+- **Importing comments** no longer converts `%%...%%` inside the note properties or the comment store, and no longer turns comment-store entries or range ends into ordinary comments.
+- **A commented range** that ran into the comment store at the end of a note now stops where the store starts, instead of writing its end marker inside it.
+- **A marker with no closing `-->`** hides everything after it. New comments, range ends and the comment store are no longer written into that hidden text: a comment goes just before the open marker, and the store goes before it when it runs to the end of the note.
+- **Empty note properties** (`---` straight after `---`) followed by a horizontal rule later in the note were read as running to that rule, which blocked comments in between.
+
 ## [1.27.1] - 2026-10-18
 
 ### Fixed

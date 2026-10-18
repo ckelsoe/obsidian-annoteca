@@ -1,6 +1,7 @@
 // Import helpers (F-221, F-222, F-230). Pure conversion utilities; commands
 // in main.ts wrap these with backup-confirmation modals and bulk vault writes.
 
+import { forbiddenRanges } from './forbidden';
 import { scanMarkers, serialize, unclosedOpenerRanges } from './parser';
 
 // Match `%%text%%` Obsidian native comments. Non-greedy, multiline.
@@ -866,6 +867,14 @@ function protectedRanges(content: string): ProtectedRange[] {
 	if (openFence !== undefined)
 		out.push({ from: openFence.from, to: content.length });
 
+	// Everything a new marker must never land in, the one set every other
+	// write path guards (forbidden.ts): end-of-file store entries (a `%%` in
+	// a stored body converted into a marker writes a `-->` that ends the
+	// entry early), range closers, and the note properties (a marker inside
+	// the YAML breaks it).
+	for (const r of forbiddenRanges(content))
+		out.push({ from: r.start, to: r.end });
+
 	return out;
 }
 
@@ -922,9 +931,12 @@ export function convertGenericHtmlComments(
 	content: string,
 	category: string,
 ): ImportResult {
-	// Skip markers that already follow the annoteca format.
+	// Skip everything Annoteca writes as an HTML comment: markers
+	// (`annoteca/`), end-of-file store entries (`annoteca:store`) and range
+	// closers (`/annoteca <id>`). Converting a store entry or a closer into
+	// an ordinary comment loses the stored thread or the range's end.
 	return convertComments(content, category, HTML_COMMENT_RE, (body) =>
-		/^\s*annoteca\//.test(body),
+		/^\s*(?:annoteca[/:]|\/annoteca\s)/.test(body),
 	);
 }
 

@@ -210,6 +210,31 @@ describe('MarkerDamageReporter', () => {
 		expect(notice).toContain('Validate marker format');
 	});
 
+	it('names the repair when a comment was written inside another one', () => {
+		const r = new MarkerDamageReporter();
+		const notice = r.report(
+			'a.md',
+			'A',
+			[damage('Opener has no close.')],
+			() => true,
+		);
+		expect(notice).toContain('written inside another comment in A');
+		expect(notice).toContain(
+			'Repair comments written inside other comments in this note',
+		);
+	});
+
+	it('does not re-read the note when no notice will show', () => {
+		const r = new MarkerDamageReporter();
+		r.report('a.md', 'A', [damage('x')]);
+		const repairable = jest.fn(() => true);
+		expect(
+			r.report('a.md', 'A', [damage('x')], repairable),
+		).toBeUndefined();
+		expect(r.report('b.md', 'B', [], repairable)).toBeUndefined();
+		expect(repairable).not.toHaveBeenCalled();
+	});
+
 	it('says nothing at all for a clean note', () => {
 		const r = new MarkerDamageReporter();
 		expect(r.report('a.md', 'A', [])).toBeUndefined();

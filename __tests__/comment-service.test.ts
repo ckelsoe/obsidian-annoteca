@@ -5,11 +5,13 @@ import { noticeLog } from '../__mocks__/obsidian';
 import type AnnotecaPlugin from '../main';
 import {
 	CommentService,
+	enclosingForbidden,
+	insideForbidden,
 	markerDamageMessage,
 	REJECT_BLOCKED_MESSAGE,
 	VANISHED_MESSAGE,
 } from '../comment-service';
-import { parseAll, serializeLeanMarker } from '../parser';
+import { parseAll, serialize, serializeLeanMarker } from '../parser';
 import { toEditorText } from '../note-text';
 import type { PromoteRequest } from '../types';
 import { convertAllComments } from '../imports';
@@ -20,6 +22,7 @@ import {
 	type StoredComment,
 } from '../store';
 import { parseDocument } from '../document';
+import { at } from './helpers/checked';
 
 beforeEach(() => {
 	noticeLog.length = 0;
@@ -3090,5 +3093,96 @@ describe('reattachComment', () => {
 		const again = parseAll(h.content)[0];
 		if (!again) throw new Error('no marker');
 		expect(await h.service.reattachComment('note.md', again)).toBe('here');
+	});
+});
+
+describe('insideForbidden', () => {
+	const marker = serialize({
+		id: 'aaaaaaaa',
+		category: 'clarify',
+		body: 'b',
+	});
+	const doc = `Text ${marker} more.`;
+	const start = doc.indexOf('<!--');
+	const end = start + marker.length;
+
+	it('is true strictly inside a marker and false on either edge', () => {
+		expect(insideForbidden(doc, start + 1)).toBe(true);
+		expect(insideForbidden(doc, end - 1)).toBe(true);
+		expect(insideForbidden(doc, start)).toBe(false);
+		expect(insideForbidden(doc, end)).toBe(false);
+	});
+
+	it('names the range it is inside', () => {
+		expect(enclosingForbidden(doc, start + 3)).toEqual({ start, end });
+		expect(enclosingForbidden(doc, 0)).toBeUndefined();
+	});
+});
+
+// A lost comment goes back to the start of the line it was on, and that line
+// start can sit inside another comment's multi-line marker. It must land just
+// before that marker instead, never inside it.
+describe('restoreComment: never inside another marker', () => {
+	it('restores before a multi-line marker its line start falls inside', async () => {
+		const other = serialize({
+			id: 'bbbbbbbb',
+			category: 'clarify',
+			body: 'the other one',
+			date: '2026-10-17T10:16:12',
+			author: 'charles',
+		});
+		const initial = `First paragraph.\n\n${other}\nSecond paragraph.`;
+		const h = makeHarnessWith(initial);
+		// A line inside the other marker (its [date=...] line).
+		const near = initial.indexOf('[date=') + 2;
+		const lost = at(
+			parseAll(
+				serialize({
+					id: 'cccccccc',
+					category: 'tone',
+					body: 'lost one',
+				}),
+			),
+			0,
+		);
+		const ok = await h.service.restoreComment('note.md', lost, near);
+
+		expect(ok).toBe(true);
+		const bodies = parseAll(h.content)
+			.map((c) => c.body)
+			.sort();
+		expect(bodies).toEqual(['lost one', 'the other one']);
+		expect(h.content).toContain(other);
+	});
+});
+
+// promote's anchor passes validation, but placement moves a multi-line marker
+// on a heading line to the line start, which here is inside an existing
+// marker. The new one must land before it, both comments whole.
+describe('promote: placement never lands inside another marker', () => {
+	it('places before the marker a heading line start falls inside', async () => {
+		const doc = '<!-- annoteca/clarify: first\n# heading --> tail\n';
+		const h = makeHarnessWith(doc);
+		const start = doc.indexOf('tail');
+		const made = await h.service.promote(
+			'note.md',
+			[
+				{
+					category: 'prose-check',
+					body: 'Flagged.',
+					anchor: { start, end: start + 4 },
+					author: 'plumbline',
+					sourceKey: 'k1',
+				},
+			],
+			h.content,
+		);
+		expect(made).toHaveLength(1);
+		const bodies = parseAll(h.content).map((c) => c.body);
+		expect(bodies).toContain('Flagged.');
+		expect(bodies).toHaveLength(2);
+		expect(h.content).toContain(
+			'<!-- annoteca/clarify: first\n# heading -->',
+		);
 	});
 });

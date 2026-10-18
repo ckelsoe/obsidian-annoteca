@@ -50,7 +50,7 @@ import {
 	headingRangeEnd,
 	layoutMarker,
 	markerRemovalSpan,
-	planMarkerInsert,
+	planSafeMarkerInsert,
 } from './marker-placement';
 import { findPassage } from './reattach';
 import {
@@ -63,7 +63,6 @@ import {
 } from './document';
 import {
 	parseStore,
-	scanStoreEntries,
 	writeStoreRegion,
 	diffToSplice,
 	withStoreRewrite,
@@ -145,36 +144,18 @@ export function markerDamageMessage(finding: MalformedMarker): string {
 // unqueued form. Queueing at both layers would deadlock: resolveComment waiting
 // on resolveAndRemoveComment, which is waiting behind resolveComment in the same
 // queue.
-// Byte ranges a promoted marker must never be spliced into: existing markers,
-// end-of-file store blocks, and YAML frontmatter.
-//
-// Bounds alone are not enough. An offset inside an existing marker is in bounds
-// and splices a new marker into the middle of that one, which is the exact
-// damage `findMalformedMarkers` exists to report after the fact. A consumer
-// computing offsets over raw markdown reaches this honestly: Plumbline masks
-// markers before linting, and a bug in that masking would arrive here as a
-// perfectly well-formed request.
-export function forbiddenRanges(
-	content: string,
-): { start: number; end: number }[] {
-	const out = parseAll(content).map((c) => ({
-		start: c.marker.start,
-		end: c.marker.end,
-	}));
-	for (const e of scanStoreEntries(content)) {
-		out.push({ start: e.start, end: e.end });
-	}
-	// Range closers (#84), for the same reason as markers: a marker spliced
-	// into the middle of one breaks it, and its comment silently loses its end.
-	for (const k of scanClosers(content)) {
-		out.push({ start: k.start, end: k.end });
-	}
-	// Frontmatter, only when the document opens with it. A `---` fence anywhere
-	// else is a horizontal rule and is ordinary prose.
-	const fm = frontmatterEnd(content);
-	if (fm > 0) out.push({ start: 0, end: fm });
-	return out;
-}
+// Moved to forbidden.ts so the pure placement code can share it without an
+// import cycle; re-exported because api.ts, reattach.ts and reading-view.ts
+// import it from here.
+export {
+	enclosingForbidden,
+	forbiddenRanges,
+	insideForbidden,
+} from './forbidden';
+import { forbiddenRanges } from './forbidden';
+
+export const INSIDE_FORBIDDEN_MESSAGE =
+	"A comment can't start inside another comment's marker, the comment store or the note properties. Move the cursor outside it and try again.";
 
 // Vetted before ANY write, so a bad request cannot leave a partial batch the
 // caller cannot reconcile. Every field is checked against the same rules the
@@ -937,11 +918,16 @@ export class CommentService {
 			// the START of the passage it concerns so the prose follows it,
 			// moved off the start of a block where that would stop the note
 			// rendering (see marker-placement.ts).
-			const place = planMarkerInsert(
+			// Safe placement: the anchor passed validation, but moving the
+			// marker off the start of its block can carry it into a multi-line
+			// marker above (a heading line inside one). All or nothing, so a
+			// request with no safe spot writes nothing for the whole batch.
+			const place = planSafeMarkerInsert(
 				content,
 				r.anchor.start,
 				text.includes('\n'),
 			);
+			if (place === undefined) return [];
 			splices.push({
 				from: place.at,
 				to: place.at,
@@ -1104,7 +1090,7 @@ export class CommentService {
 	}
 
 	// Write `comment` at `at` (in `base`, which defaults to the note's text):
-	// its marker laid out by planMarkerInsert, a closer at the passage end
+	// its marker laid out by planSafeMarkerInsert, a closer at the passage end
 	// when one is given and can be placed, and its store entry when the note
 	// keeps comments at the end. One splice set against the note as read.
 	private async writeMarkerAt(
@@ -1140,7 +1126,12 @@ export class CommentService {
 		const text = eof
 			? serializeLeanMarker(restored.category, id)
 			: serialize(restored);
-		const place = planMarkerInsert(base, at, text.includes('\n'));
+		// A restore point is a line start, and a line start can sit inside a
+		// multi-line marker, so it can land in another comment. Safe placement
+		// moves it just before whatever it landed in, which splits nothing;
+		// refusing would lose the comment this is restoring.
+		const place = planSafeMarkerInsert(base, at, text.includes('\n'));
+		if (place === undefined) return false;
 		const prose: SpliceRange[] = [
 			...(closeAt !== undefined
 				? [{ from: closeAt, to: closeAt, insert: serializeCloser(id) }]
