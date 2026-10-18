@@ -841,6 +841,7 @@ export class ThreadTabRenderer {
 		copyAllBtn.addEventListener('click', () => {
 			void this.plugin.copyCommentsText(
 				this.buildScopedGroups(this.plugin.computeScopeFiles()),
+				copyAllBtn.win,
 			);
 		});
 	}
@@ -1455,7 +1456,7 @@ export class ThreadTabRenderer {
 				},
 			);
 		this.createActionButton(actions, 'Copy text', 'clipboard-copy', () => {
-			void this.plugin.copyCommentText(c);
+			void this.plugin.copyCommentText(c, actions.win);
 		});
 		this.createActionButton(actions, 'Copy ID', 'copy', () => {
 			void this.plugin.copyCommentId(c);

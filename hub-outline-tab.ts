@@ -472,7 +472,7 @@ export class OutlineTabRenderer {
 					this.plugin.openCommentInTab(file.path, c),
 				);
 			this.cardAction(acts, 'Copy text', 'clipboard-copy', () => {
-				void this.plugin.copyCommentText(c);
+				void this.plugin.copyCommentText(c, acts.win);
 			});
 		}
 	}

@@ -92,7 +92,8 @@ export interface DecorationContext {
 	reviseAddressed(marker: Comment, sourcePath: string): void;
 	rejectAddressed(marker: Comment, sourcePath: string): void;
 	copyPermalink(marker: Comment): void;
-	copyText(marker: Comment): void;
+	// `win` is the popover's window, for a clipboard write from a pop-out.
+	copyText(marker: Comment, win: Window): void;
 	// Resolves to whether the reply was actually written. The write can be
 	// refused (the marker was deleted, or an id-less one changed underneath),
 	// and the composer must not clear the draft or close on a refusal: the
@@ -1310,7 +1311,7 @@ function buildCommentPopover(
 	copyTextBtn.addEventListener('click', (e) => {
 		e.preventDefault();
 		e.stopPropagation();
-		ctx.copyText(ref.current);
+		ctx.copyText(ref.current, copyTextBtn.win);
 	});
 
 	if (m.id) {

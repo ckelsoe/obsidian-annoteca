@@ -50,7 +50,11 @@ import {
 	mergeRestoredSettings,
 } from './settings';
 import { getCategoryOrFallback } from './categories';
-import { commentAsMarkdown, commentsAsMarkdown } from './comment-text';
+import {
+	commentAsMarkdown,
+	commentsAsMarkdown,
+	type ClipboardWindow,
+} from './comment-text';
 import {
 	buildSkillMarkdown,
 	skillTargetPaths,
@@ -331,8 +335,8 @@ export default class AnnotecaPlugin extends Plugin {
 				copyPermalink: (m) => {
 					void this.copyCommentId(m);
 				},
-				copyText: (m) => {
-					void this.copyCommentText(m);
+				copyText: (m, win) => {
+					void this.copyCommentText(m, win);
 				},
 				submitReply: (m, body, author, sourcePath) =>
 					this.submitReplyFromPopup(m, body, author, sourcePath),
@@ -2190,8 +2194,17 @@ export default class AnnotecaPlugin extends Plugin {
 
 	// The whole thread as Markdown: body, notes and every reply. See
 	// comment-text.ts for the format.
-	async copyCommentText(comment: Comment): Promise<void> {
+	// `win` is the window the copy was asked for from. The clipboard has to
+	// be written through that window's navigator: a pop-out's click leaves
+	// the main document unfocused, and a write through it is refused. A
+	// command or a menu item has no element to ask, and runs in the focused
+	// window, which is activeWindow.
+	async copyCommentText(
+		comment: Comment,
+		win: ClipboardWindow = activeWindow,
+	): Promise<void> {
 		await this.copyToClipboard(
+			win,
 			commentAsMarkdown(comment, this.categoryName(comment.category)),
 			'Copied comment text.',
 		);
@@ -2200,9 +2213,13 @@ export default class AnnotecaPlugin extends Plugin {
 	// Every caller fires and forgets (`void`), so a refused write (no
 	// clipboard permission, the window lost focus) is reported here or it
 	// becomes an unhandled rejection and the user is told nothing.
-	private async copyToClipboard(text: string, done: string): Promise<void> {
+	private async copyToClipboard(
+		win: ClipboardWindow,
+		text: string,
+		done: string,
+	): Promise<void> {
 		try {
-			await navigator.clipboard.writeText(text);
+			await win.navigator.clipboard.writeText(text);
 			new Notice(done);
 		} catch (err: unknown) {
 			console.error('Annoteca: copy failed', err);
@@ -2212,6 +2229,7 @@ export default class AnnotecaPlugin extends Plugin {
 
 	async copyCommentsText(
 		groups: readonly { path: string; comments: readonly Comment[] }[],
+		win: ClipboardWindow = activeWindow,
 	): Promise<void> {
 		const count = groups.reduce((n, g) => n + g.comments.length, 0);
 		if (count === 0) {
@@ -2219,6 +2237,7 @@ export default class AnnotecaPlugin extends Plugin {
 			return;
 		}
 		await this.copyToClipboard(
+			win,
 			commentsAsMarkdown(groups, (id) => this.categoryName(id)),
 			`Copied ${count} ${count === 1 ? 'comment' : 'comments'}.`,
 		);

@@ -8,6 +8,12 @@
 import { formatStamp } from './view-utils';
 import type { Comment } from './types';
 
+// The one part of a window a copy touches. A real Window is one; naming
+// only this keeps a test's stand-in honest without asserting it is a Window.
+export interface ClipboardWindow {
+	navigator: { clipboard: Pick<Clipboard, 'writeText'> };
+}
+
 // "> " on every line, so a multi-line passage stays one blockquote.
 function quote(text: string): string {
 	return text
@@ -31,8 +37,9 @@ export function commentAsMarkdown(c: Comment, categoryName: string): string {
 			c.date === undefined ? undefined : formatStamp(c.date),
 		]),
 	];
-	if (c.anchor?.text)
-		blocks.push(quote(c.anchor.text + (c.anchor.truncated ? '…' : '')));
+	// A long capture is already shortened with an ellipsis in its middle
+	// (buildAnchorFromSelection), so it is quoted exactly as stored.
+	if (c.anchor?.text) blocks.push(quote(c.anchor.text));
 	if (c.body !== '') blocks.push(c.body);
 	if (c.addressed) {
 		blocks.push(

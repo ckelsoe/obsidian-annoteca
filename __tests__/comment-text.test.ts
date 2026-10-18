@@ -34,10 +34,23 @@ describe('commentAsMarkdown', () => {
 		).toBe('**Clarify**\n\ntest comment');
 	});
 
-	it('quotes the commented text, every line, and marks a truncated capture', () => {
-		const c = base({ anchor: { text: 'one\n\ntwo', truncated: true } });
+	it('quotes the commented text, every line', () => {
+		const c = base({ anchor: { text: 'one\n\ntwo', truncated: false } });
 		expect(commentAsMarkdown(c, 'Clarify')).toBe(
-			'**Clarify** · ed · 2026-10-17 12:46:31\n\n> one\n>\n> two…\n\ntest comment',
+			'**Clarify** · ed · 2026-10-17 12:46:31\n\n> one\n>\n> two\n\ntest comment',
+		);
+	});
+
+	it('quotes a truncated capture as stored, adding no second ellipsis', () => {
+		// buildAnchorFromSelection already cut the middle out.
+		const c = base({
+			anchor: {
+				text: 'The start of it … the end of it',
+				truncated: true,
+			},
+		});
+		expect(commentAsMarkdown(c, 'Clarify')).toBe(
+			'**Clarify** · ed · 2026-10-17 12:46:31\n\n> The start of it … the end of it\n\ntest comment',
 		);
 	});
 
