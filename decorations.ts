@@ -91,7 +91,7 @@ export interface DecorationContext {
 	acceptAddressed(marker: Comment, sourcePath: string): void;
 	reviseAddressed(marker: Comment, sourcePath: string): void;
 	rejectAddressed(marker: Comment, sourcePath: string): void;
-	copyPermalink(marker: Comment): void;
+	copyPermalink(marker: Comment, win: Window): void;
 	// `win` is the popover's window, for a clipboard write from a pop-out.
 	copyText(marker: Comment, win: Window): void;
 	// Resolves to whether the reply was actually written. The write can be
@@ -1322,7 +1322,7 @@ function buildCommentPopover(
 		copyBtn.addEventListener('click', (e) => {
 			e.preventDefault();
 			e.stopPropagation();
-			ctx.copyPermalink(ref.current);
+			ctx.copyPermalink(ref.current, copyBtn.win);
 		});
 	}
 

@@ -15,6 +15,7 @@ interface PluginUnderTest {
 		groups: { path: string; comments: Comment[] }[],
 		win: ClipboardWindow,
 	): Promise<void>;
+	copyCommentId(c: Comment, win: ClipboardWindow): Promise<void>;
 }
 
 const comment = (body: string): Comment => ({
@@ -105,6 +106,30 @@ describe('copyCommentsText', () => {
 				[{ path: 'a.md', comments: [comment('one')] }],
 				win,
 			),
+		).resolves.toBeUndefined();
+		expect(noticeLog).toEqual(['Could not copy to the clipboard.']);
+		error.mockRestore();
+	});
+});
+
+describe('copyCommentId', () => {
+	it('copies the id through the given window', async () => {
+		await plugin().copyCommentId(comment('hello'), win);
+		expect(written).toEqual(['aaaaaaaa']);
+		expect(noticeLog).toEqual(['Copied ID aaaaaaaa.']);
+	});
+
+	it('says so when the comment has no id, writing nothing', async () => {
+		await plugin().copyCommentId({ ...comment('x'), id: undefined }, win);
+		expect(written).toEqual([]);
+		expect(noticeLog).toEqual(['This comment has no ID.']);
+	});
+
+	it('reports a refused clipboard write instead of rejecting', async () => {
+		refuse = true;
+		const error = jest.spyOn(console, 'error').mockImplementation(() => {});
+		await expect(
+			plugin().copyCommentId(comment('x'), win),
 		).resolves.toBeUndefined();
 		expect(noticeLog).toEqual(['Could not copy to the clipboard.']);
 		error.mockRestore();
