@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.27.2] - 2026-10-18
+
 ### Added
 
 - **Repair comments written inside other comments.** Notes damaged by the bugs below can be fixed with "Repair comments written inside other comments in this note", or across the vault with "...in all notes" (after a backup prompt). Each comment that landed inside another comment, a range end, the comment store or the note properties moves just outside, and the comment or store entry that held it gets its text back (in one rare case a space at the end of a line inside the comment's text is dropped, which can turn a hard line break into a plain one, because the damage looks the same with or without that space). A note is changed only when the result is whole with every comment kept. A comment from before 1.14.0 that quotes a marker in its text is left alone, since it looks the same as the damage. Opening a damaged note now names this command.
