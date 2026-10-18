@@ -10,6 +10,7 @@
 // counts the editor text, where it is one. Comparing the two directly put
 // comments under the wrong heading on a CRLF note.
 
+import { SpanIndex } from './span-index';
 import type { Comment, MarkerRange } from './types';
 
 export interface HeadingInput {
@@ -64,6 +65,10 @@ export function buildOutlineTree(
 	occupied: readonly MarkerRange[],
 	includeItems: boolean,
 ): OutlineNode[] {
+	// Built once: filtering every marker and closer for every line was
+	// quadratic in a long note with many comments.
+	const cutIndex = new SpanIndex(occupied, (r) => r);
+
 	const lineStarts = [0];
 	for (let i = 0; i < text.length; i++)
 		if (text.charAt(i) === '\n') lineStarts.push(i + 1);
@@ -149,9 +154,7 @@ export function buildOutlineTree(
 		from: number,
 		to: number,
 	): { label: string; textFrom: number; textTo: number } {
-		const cuts = occupied
-			.filter((r) => r.end > from && r.start < to)
-			.sort((a, b) => a.start - b.start);
+		const cuts = cutIndex.overlapping(from, to);
 		let label = '';
 		let at = from;
 		for (const r of cuts) {
@@ -159,11 +162,19 @@ export function buildOutlineTree(
 			at = Math.max(at, r.end);
 		}
 		if (at < to) label += text.slice(at, to);
+		// First in start order wins, as a find over `cuts` did. Looked up,
+		// not searched, so a line holding many markers stays linear.
+		const byStart = new Map<number, MarkerRange>();
+		const byEnd = new Map<number, MarkerRange>();
+		for (const r of cuts) {
+			if (!byStart.has(r.start)) byStart.set(r.start, r);
+			if (!byEnd.has(r.end)) byEnd.set(r.end, r);
+		}
 		let textFrom = from;
 		for (;;) {
 			while (textFrom < to && /\s/.test(text.charAt(textFrom)))
 				textFrom += 1;
-			const m = cuts.find((r) => r.start === textFrom);
+			const m = byStart.get(textFrom);
 			if (!m) break;
 			textFrom = m.end;
 		}
@@ -175,7 +186,7 @@ export function buildOutlineTree(
 		for (;;) {
 			while (textTo > textFrom && /\s/.test(text.charAt(textTo - 1)))
 				textTo -= 1;
-			const m = cuts.find((r) => r.end === textTo);
+			const m = byEnd.get(textTo);
 			if (!m) break;
 			textTo = m.start;
 		}
@@ -247,27 +258,39 @@ export function buildOutlineTree(
 	// Attach each comment to the line its marker starts on: the innermost
 	// list item whose span holds it, else the section heading above it, else
 	// the preamble.
-	for (const c of comments) {
+	//
+	// One sweep over comments in position order, not a walk of every draft
+	// per comment, which was quadratic in a long outline. Spans only nest or
+	// follow each other, so the drafts open at a position form a chain, kept
+	// as a stack: the innermost one holding it is the top once the ones that
+	// end before it are dropped. The holders are then filled in the comments'
+	// own order.
+	const holders = new Map<Comment, OutlineNode>();
+	const stack: Draft[] = [];
+	let heading: OutlineNode | undefined;
+	let next = 0;
+	const byPos = comments
+		.map((c, i) => ({ c, i }))
+		.sort((a, b) => a.c.marker.start - b.c.marker.start || a.i - b.i);
+	for (const { c } of byPos) {
 		const pos = c.marker.start;
-		let best: Draft | undefined;
-		for (const d of drafts) {
-			if (d.spanFrom > pos) break;
-			// Spans only nest or follow each other, so the last one that
-			// still holds the position is the innermost.
-			if (pos <= d.spanTo) best = d;
+		for (
+			let d = drafts[next];
+			d !== undefined && d.spanFrom <= pos;
+			d = drafts[++next]
+		) {
+			while ((stack[stack.length - 1]?.spanTo ?? Infinity) < d.spanFrom)
+				stack.pop();
+			stack.push(d);
+			if (d.node.kind === 'heading') heading = d.node;
 		}
-		const holder = best?.node ?? sectionAt(pos) ?? preambleNode();
-		holder.own.push(c);
+		while ((stack[stack.length - 1]?.spanTo ?? Infinity) < pos) stack.pop();
+		holders.set(
+			c,
+			stack[stack.length - 1]?.node ?? heading ?? preambleNode(),
+		);
 	}
-
-	function sectionAt(pos: number): OutlineNode | undefined {
-		let found: OutlineNode | undefined;
-		for (const d of drafts) {
-			if (d.spanFrom > pos) break;
-			if (d.node.kind === 'heading') found = d.node;
-		}
-		return found;
-	}
+	for (const c of comments) holders.get(c)?.own.push(c);
 
 	const total = (n: OutlineNode): void => {
 		n.openTotal = n.own.filter((c) => !c.resolution).length;

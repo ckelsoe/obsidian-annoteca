@@ -231,10 +231,38 @@ export class CommentEventTracker {
 
 		const out: CommentEvent[] = [];
 		const used = new Set<number>();
+		// The vanished comments by id, in order, so each appeared one looks
+		// up its own id instead of searching them all: a renamed note with
+		// many comments made that quadratic. Each id's list keeps a cursor
+		// past the entries already taken, so many notes sharing one copied id
+		// do not rescan them either. A note holds an id at most once, so at
+		// most one entry (the appearing note's own) is passed over per lookup.
+		const vanishedById = new Map<
+			string,
+			{ list: number[]; from: number }
+		>();
+		vanished.forEach((v, n) => {
+			const entry = vanishedById.get(v.id);
+			if (entry) entry.list.push(n);
+			else vanishedById.set(v.id, { list: [n], from: 0 });
+		});
+		const takeVanished = (id: string, path: string): number => {
+			const entry = vanishedById.get(id);
+			if (entry === undefined) return -1;
+			while (
+				entry.from < entry.list.length &&
+				used.has(entry.list[entry.from] ?? -1)
+			)
+				entry.from += 1;
+			for (let k = entry.from; k < entry.list.length; k++) {
+				const n = entry.list[k];
+				if (n === undefined || used.has(n)) continue;
+				if (vanished[n]?.path !== path) return n;
+			}
+			return -1;
+		};
 		for (const a of appeared) {
-			const i = vanished.findIndex(
-				(v, n) => !used.has(n) && v.id === a.id && v.path !== a.path,
-			);
+			const i = takeVanished(a.id, a.path);
 			if (i === -1) {
 				out.push({
 					...base('created', a.id, a.path, a.s),

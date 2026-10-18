@@ -5,6 +5,7 @@
 
 import { parseAll, scanClosers, unclosedOpenerRanges } from './parser';
 import { frontmatterEnd } from './range-placement';
+import { SpanIndex } from './span-index';
 import { scanStoreEntries } from './store';
 
 // Byte ranges a promoted marker must never be spliced into: existing markers,
@@ -20,18 +21,26 @@ import { scanStoreEntries } from './store';
 export function forbiddenRanges(
 	content: string,
 ): { start: number; end: number }[] {
-	const out = parseAll(content).map((c) => ({
+	return forbiddenKinds(content).flat();
+}
+
+// forbiddenRanges by kind, in its order: markers, store entries, closers,
+// unclosed openers, the properties. Each kind is in document order.
+function forbiddenKinds(content: string): { start: number; end: number }[][] {
+	const markers = parseAll(content).map((c) => ({
 		start: c.marker.start,
 		end: c.marker.end,
 	}));
-	for (const e of scanStoreEntries(content)) {
-		out.push({ start: e.start, end: e.end });
-	}
+	const stores = scanStoreEntries(content).map((e) => ({
+		start: e.start,
+		end: e.end,
+	}));
 	// Range closers (#84), for the same reason as markers: a marker spliced
 	// into the middle of one breaks it, and its comment silently loses its end.
-	for (const k of scanClosers(content)) {
-		out.push({ start: k.start, end: k.end });
-	}
+	const closers = scanClosers(content).map((k) => ({
+		start: k.start,
+		end: k.end,
+	}));
 	// A marker opener with no `-->` of its own: everything from it to the next
 	// `-->` (or the end of the note) is inside an open HTML comment, so a
 	// marker written there is hidden and its `-->` closes the stray opener.
@@ -40,16 +49,15 @@ export function forbiddenRanges(
 	// nothing, since they are not rendered as HTML, and counting it would
 	// close off the whole note below them.
 	const properties = frontmatterEnd(content);
-	for (const r of unclosedOpenerRanges(content)) {
-		if (r.start < properties) continue;
-		out.push(
+	const unclosed = unclosedOpenerRanges(content)
+		.filter((r) => r.start >= properties)
+		.map((r) =>
 			r.end === content.length ? { start: r.start, end: r.end + 1 } : r,
 		);
-	}
 	// Frontmatter, only when the document opens with it. A `---` fence anywhere
 	// else is a horizontal rule and is ordinary prose.
-	if (properties > 0) out.push({ start: 0, end: properties });
-	return out;
+	const fm = properties > 0 ? [{ start: 0, end: properties }] : [];
+	return [markers, stores, closers, unclosed, fm];
 }
 
 // Whether a new marker placed at `offset` would land strictly inside one of
@@ -70,7 +78,28 @@ export function enclosingForbidden(
 ): { start: number; end: number } | undefined {
 	const fm = frontmatterEnd(content);
 	if (fm > 0 && offset < fm) return { start: 0, end: fm };
-	return forbiddenRanges(content).find(
-		(r) => offset > r.start && offset < r.end,
-	);
+	// The first range in forbiddenRanges' order that holds it, as a find over
+	// that list answered: the first kind with one, and within a kind the
+	// first in document order. Indexed, and kept for the last note asked
+	// about: a batch of promoted comments and the nested-comment repair ask
+	// this for one note many times, and rebuilding the list each time was
+	// quadratic.
+	for (const index of forbiddenIndexes(content)) {
+		const r = index.first(offset, offset);
+		if (r !== undefined) return { start: r.start, end: r.end };
+	}
+	return undefined;
+}
+
+type Range = { start: number; end: number };
+let lastIndexes: { content: string; indexes: SpanIndex<Range>[] } | undefined;
+function forbiddenIndexes(content: string): SpanIndex<Range>[] {
+	if (lastIndexes?.content !== content)
+		lastIndexes = {
+			content,
+			indexes: forbiddenKinds(content).map(
+				(kind) => new SpanIndex(kind, (r) => r),
+			),
+		};
+	return lastIndexes.indexes;
 }

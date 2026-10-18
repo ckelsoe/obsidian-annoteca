@@ -16,6 +16,7 @@
 //     an icon) is refused, and the cursor steps over the icon instead.
 // Deleting a comment is done from its menu, which says what it removes.
 
+import { SpanIndex } from './span-index';
 import {
 	ChangeSet,
 	EditorSelection,
@@ -71,8 +72,12 @@ export function guardEdit(
 	// into the prose. Refused, the cursor stepping over the marker. Editing
 	// the marker's own text between its delimiters (by hand, where markers
 	// show raw) is left alone.
+	// Indexed: a replace-all is one transaction with a change per match, and
+	// asking every range for every change was quadratic. A change can only
+	// cut a range it overlaps, or (an insertion) one it sits strictly in.
+	const index = new SpanIndex(ranges, (r) => r);
 	for (const c of changes) {
-		for (const r of ranges) {
+		for (const r of index.overlapping(c.from, Math.max(c.to, c.from + 1))) {
 			const whole = r.start >= c.from && r.end <= c.to;
 			if (whole) continue;
 			// A store block is guarded like an opener: its `<!--` and `-->`
@@ -106,9 +111,9 @@ export function guardEdit(
 	const cursors: number[] = [];
 	const out: GuardChange[] = [];
 	for (const c of changes) {
-		const inside = ranges
-			.filter((r) => r.start >= c.from && r.end <= c.to)
-			.sort((a, b) => a.start - b.start);
+		const inside = index
+			.overlapping(c.from, c.to)
+			.filter((r) => r.start >= c.from && r.end <= c.to);
 		if (inside.length === 0) {
 			out.push(c);
 			onlyMarkers = false;
@@ -214,9 +219,8 @@ export function markerGuard(
 		});
 		// Ordinary typing touches no marker: settle that without building the
 		// whole document as a string on every keystroke.
-		const near = changes.some((c) =>
-			ranges.some((r) => c.from <= r.end && c.to >= r.start),
-		);
+		const index = new SpanIndex(ranges, (r) => r);
+		const near = changes.some((c) => index.some(c.from - 1, c.to + 1));
 		if (!near) return tr;
 		const doc = tr.startState.doc.toString();
 		// Each store block on its own, so each one's delimiters are guarded.

@@ -2307,9 +2307,23 @@ export default class AnnotecaPlugin extends Plugin {
 
 	// Starred comments ---------------------------------------------------
 
+	// Looked up in a set per starred list, not searched: the panels ask once
+	// per card, which was quadratic with many stars. The list is replaced on
+	// every change (toggleStarred, the prune below, loading settings), never
+	// edited in place, so a set kept for one list cannot go stale.
+	private readonly starredSets = new WeakMap<
+		readonly string[],
+		Set<string>
+	>();
 	isStarred(comment: Comment): boolean {
 		if (!comment.id) return false;
-		return this.settings.starredComments.includes(comment.id);
+		const list = this.settings.starredComments;
+		let set = this.starredSets.get(list);
+		if (set === undefined) {
+			set = new Set(list);
+			this.starredSets.set(list, set);
+		}
+		return set.has(comment.id);
 	}
 
 	async toggleStarred(comment: Comment): Promise<void> {
@@ -2317,13 +2331,14 @@ export default class AnnotecaPlugin extends Plugin {
 			new Notice('This comment has no ID and cannot be starred.');
 			return;
 		}
+		// A new list, not an edit of the old one: isStarred keeps a set per list.
 		const current = this.settings.starredComments;
-		const idx = current.indexOf(comment.id);
-		if (idx >= 0) {
-			current.splice(idx, 1);
-		} else {
-			current.push(comment.id);
-		}
+		const id = comment.id;
+		const at = current.indexOf(id);
+		this.settings.starredComments =
+			at >= 0
+				? [...current.slice(0, at), ...current.slice(at + 1)]
+				: [...current, id];
 		await this.saveSettings();
 		this.events.trigger('starred-changed', { id: comment.id });
 	}

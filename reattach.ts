@@ -11,6 +11,7 @@
 //
 // Pure: no Obsidian dependency.
 
+import { SpanIndex } from './span-index';
 import { forbiddenRanges } from './comment-service';
 
 export interface Passage {
@@ -20,18 +21,27 @@ export interface Passage {
 
 // `text` with whitespace runs collapsed to one space (and, when `fold`,
 // lower-cased), with each kept character's offset in `text`.
+//
+// Built as an array and joined once, with the last character tracked: asking
+// a growing string whether it ends in a space made each step cost the length
+// so far.
 function normalized(text: string, fold: boolean): { s: string; map: number[] } {
-	let s = '';
+	const out: string[] = [];
 	const map: number[] = [];
+	let space = false;
 	for (let i = 0; i < text.length; i++) {
 		const ch = text.charAt(i);
 		if (/\s/.test(ch)) {
-			if (s.endsWith(' ')) continue;
-			s += ' ';
-		} else s += fold ? ch.toLowerCase() : ch;
+			if (space) continue;
+			out.push(' ');
+			space = true;
+		} else {
+			out.push(fold ? ch.toLowerCase() : ch);
+			space = false;
+		}
 		map.push(i);
 	}
-	return { s, map };
+	return { s: out.join(''), map };
 }
 
 function allMatches(hay: string, needle: string): number[] {
@@ -56,9 +66,15 @@ function matchSpans(hay: string, quote: string): [number, number][] {
 	const tail = quote.slice(ellipsis + 1).trimStart();
 	if (head === '' || tail === '') return [];
 	const out: [number, number][] = [];
+	// Every tail found once, and each head looks up the first one after it:
+	// searching the rest of the note per head was quadratic when the head
+	// is common.
+	const tails = allMatches(hay, tail);
+	let k = 0;
 	for (const at of allMatches(hay, head)) {
-		const t = hay.indexOf(tail, at + head.length);
-		if (t !== -1 && t - at < 2000) out.push([at, t + tail.length]);
+		while ((tails[k] ?? Infinity) < at + head.length) k += 1;
+		const t = tails[k];
+		if (t !== undefined && t - at < 2000) out.push([at, t + tail.length]);
 	}
 	return out;
 }
@@ -95,9 +111,10 @@ export function findPassage(
 	near: number,
 ): Passage | undefined {
 	if (quote === undefined || quote.trim() === '') return undefined;
-	const blocked = forbiddenRanges(content);
-	const clear = (p: Passage): boolean =>
-		!blocked.some((f) => f.start < p.end && f.end > p.start);
+	// Indexed: a quote that occurs often in a note full of comments made a
+	// scan of every range per occurrence quadratic.
+	const blocked = new SpanIndex(forbiddenRanges(content), (r) => r);
+	const clear = (p: Passage): boolean => !blocked.some(p.start, p.end);
 	for (const level of ['exact', 'spacing', 'case'] as const) {
 		const found = matchesAt(content, quote, level).filter(clear);
 		if (found.length === 0) continue;

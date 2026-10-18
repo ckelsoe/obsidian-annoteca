@@ -79,6 +79,7 @@ function decodeEntity(
 }
 
 export function visibleText(source: string): Visible {
+	const find = forwardSearch(source);
 	const chars: string[] = [];
 	const starts: number[] = [];
 	const ends: number[] = [];
@@ -133,12 +134,12 @@ export function visibleText(source: string): Visible {
 		}
 		// Embeds show content from elsewhere, not this text.
 		if (source.startsWith('![[', i)) {
-			const close = source.indexOf(']]', i + 3);
+			const close = find(']]', i + 3);
 			i = close === -1 ? source.length : close + 2;
 			continue;
 		}
 		if (source.startsWith('[[', i)) {
-			const close = source.indexOf(']]', i + 2);
+			const close = find(']]', i + 2);
 			if (close !== -1) {
 				const inner = source.slice(i + 2, close);
 				const pipe = inner.indexOf('|');
@@ -150,14 +151,14 @@ export function visibleText(source: string): Visible {
 			}
 		}
 		if (ch === '!' && source.charAt(i + 1) === '[') {
-			const link = markdownLink(source, i + 1);
+			const link = markdownLink(find, i + 1);
 			if (link) {
 				i = link.end;
 				continue;
 			}
 		}
 		if (ch === '[') {
-			const link = markdownLink(source, i);
+			const link = markdownLink(find, i);
 			if (link) {
 				for (let k = i + 1; k < link.textEnd; k++)
 					if (!isFormatting(source, k)) push(source.charAt(k), k);
@@ -190,17 +191,40 @@ export function visibleText(source: string): Visible {
 	return { text: chars.join(''), starts, ends };
 }
 
+// indexOf for a scan that only moves forward: each needle's next occurrence
+// is remembered, and reused while the scan has not passed it. An unclosed
+// `[[` or `[` otherwise searched the rest of the section, once per bracket,
+// which was quadratic in a section full of them. A search from behind the
+// last one is simply done again, so the answer is always indexOf's.
+function forwardSearch(
+	source: string,
+): (needle: string, from: number) => number {
+	const seen = new Map<string, { from: number; at: number }>();
+	return (needle, from) => {
+		const last = seen.get(needle);
+		if (
+			last !== undefined &&
+			from >= last.from &&
+			(last.at === -1 || last.at >= from)
+		)
+			return last.at;
+		const at = source.indexOf(needle, from);
+		seen.set(needle, { from, at });
+		return at;
+	};
+}
+
 // `[text](target)` starting at `open` (the `[`). The text ends at the first
 // `]` directly followed by `(`; the target at the matching `)`.
 function markdownLink(
-	source: string,
+	find: (needle: string, from: number) => number,
 	open: number,
 ): { textEnd: number; end: number } | undefined {
-	const textEnd = source.indexOf('](', open + 1);
+	const textEnd = find('](', open + 1);
 	if (textEnd === -1) return undefined;
-	const lineBreak = source.indexOf('\n', open);
+	const lineBreak = find('\n', open);
 	if (lineBreak !== -1 && lineBreak < textEnd) return undefined;
-	const close = source.indexOf(')', textEnd + 2);
+	const close = find(')', textEnd + 2);
 	if (close === -1) return undefined;
 	return { textEnd, end: close + 1 };
 }

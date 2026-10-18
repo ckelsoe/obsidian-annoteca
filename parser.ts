@@ -10,6 +10,7 @@ import type {
 	Reply,
 	Resolution,
 } from './types';
+import { countWhile, SpanIndex } from './span-index';
 
 // Canonical regex from data-format.md "greppable regex" section. Matches the
 // entire marker, opening through closing. The category is captured; the rest of
@@ -463,6 +464,18 @@ function firstUnescaped(text: string, re: RegExp): number {
 	return -1;
 }
 
+// Offset of the last UNESCAPED match of `re` in `text`, or -1. `re` must be a
+// global regex; its lastIndex is reset here rather than trusted.
+function lastUnescaped(text: string, re: RegExp): number {
+	re.lastIndex = 0;
+	let last = -1;
+	let match: RegExpExecArray | null;
+	while ((match = re.exec(text)) !== null) {
+		if (backslashRunBefore(text, match.index) === 0) last = match.index;
+	}
+	return last;
+}
+
 // `-->` is not the only sequence that can break a marker. Every bracketed
 // trailing line is a SINGLE-LINE grammar: parseInnerContent splits the inner
 // content on `\n` and matches each line against one pattern. A newline anywhere
@@ -615,7 +628,14 @@ export function scanMarkers(content: string): RawMarker[] {
 	const out: RawMarker[] = [];
 	MARKER_RE.lastIndex = 0;
 	let match: RegExpExecArray | null;
-	while ((match = MARKER_RE.exec(content)) !== null) {
+	// Matched only up to the last `-->`: an opener past it can never close,
+	// and the regex tried each one by reading to the end of the note, which
+	// was quadratic in a run of unclosed openers there. Every match ends at a
+	// terminator, so offsets and matches are unchanged.
+	const last = content.lastIndexOf(TERMINATOR);
+	const searchable =
+		last === -1 ? '' : content.slice(0, last + TERMINATOR.length);
+	while ((match = MARKER_RE.exec(searchable)) !== null) {
 		const full = match[0];
 		const category = match[1];
 		const inner = match[2];
@@ -635,10 +655,9 @@ export function scanMarkers(content: string): RawMarker[] {
 		// diagnostic that could see it.
 		//
 		// The terminator belongs to the LAST opener before it, so resuming the
-		// scan at the nested opener is what finds the real marker. With three
-		// openers stacked up this walks down one at a time until the match is
-		// clean. lastIndex always advances past match.index (an opener cannot
-		// nest inside itself), so the loop cannot stall.
+		// scan at that opener is what finds the real marker. lastIndex always
+		// advances past match.index (an opener cannot nest inside itself), so
+		// the loop cannot stall.
 		//
 		// A body that legitimately QUOTES an opener is why serialize() escapes
 		// `<!--` now: an unescaped one is evidence, an escaped one is prose.
@@ -665,7 +684,12 @@ export function scanMarkers(content: string): RawMarker[] {
 		// decidable, and it can only decide it going forward.
 		const innerStart =
 			match.index + full.length - inner.length - TERMINATOR.length;
-		const nested = firstUnescaped(inner, NESTED_OPENER_RE);
+		// Straight to the LAST nested opener: resuming at the first one walked
+		// them down one at a time, each step rematching up to the same
+		// terminator, which was quadratic in a run of unclosed openers. Every
+		// opener between matches up to that terminator too, so the walk always
+		// ended at the last one.
+		const nested = lastUnescaped(inner, NESTED_OPENER_RE);
 		if (nested >= 0) {
 			MARKER_RE.lastIndex = innerStart + nested;
 			continue;
@@ -1133,12 +1157,15 @@ export function scanClosers(
 	markers: readonly MarkerRange[] = scanMarkers(content),
 ): RawCloser[] {
 	const out: RawCloser[] = [];
+	// Indexed, not compared with every marker per closer: that was quadratic
+	// in the number of comments, on every index rebuild.
+	const inside = new SpanIndex(markers, (r) => r);
 	for (const m of content.matchAll(CLOSER_RE)) {
 		const id = m[1];
 		if (id === undefined) continue;
 		const start = m.index;
 		const end = start + m[0].length;
-		if (markers.some((r) => start >= r.start && start < r.end)) continue;
+		if (inside.some(start, start + 1)) continue;
 		out.push({ id, start, end });
 	}
 	return out;
@@ -1486,8 +1513,62 @@ export interface MalformedMarker {
 	kind: MalformedMarkerKind;
 }
 
-const OPENING_TOKEN_RE =
-	/<!--\s*annoteca\/(?![a-z][a-z0-9-]*\s*:)[^>]{0,120}-->|<!--\s*annoteca\/[^a-z][^>]*-->/g;
+// Where a closed opener that MARKER_RE cannot read starts: `<!-- annoteca/`
+// not followed by a category and a colon, closed by the first `>` after it as
+// a `-->` within 120 characters; or, when what follows the slash is not a
+// letter, by the first later `>` as a `-->` at any distance. This is the
+// regex
+//   /<!--\s*annoteca\/(?![a-z][a-z0-9-]*\s*:)[^>]{0,120}-->
+//    |<!--\s*annoteca\/[^a-z][^>]*-->/g
+// walked by hand. A `[^>]` run cannot pass a `>`, so each alternative can only
+// close at the first `>`, which is looked up; the regex read to it from every
+// opener, which was quadratic in a run of such openers with no `>` after them.
+// A match is skipped over whole, as the global regex resumed after it.
+const OPENER_PREFIX_RE = /<!--\s*annoteca\//g;
+const CATEGORY_AHEAD_RE = /[a-z][a-z0-9-]*\s*:/y;
+export function unreadableOpeners(content: string): number[] {
+	const gts: number[] = [];
+	for (
+		let at = content.indexOf('>');
+		at !== -1;
+		at = content.indexOf('>', at + 1)
+	)
+		gts.push(at);
+	const firstGt = (from: number): number => {
+		const lo = countWhile(gts.length, (mid) => (gts[mid] ?? 0) < from);
+		return gts[lo] ?? -1;
+	};
+	// A `-->` whose `>` is at q, starting no earlier than `min`.
+	const closesAt = (q: number, min: number): boolean =>
+		q !== -1 && q - 2 >= min && content.slice(q - 2, q) === '--';
+	const out: number[] = [];
+	let resume = 0;
+	OPENER_PREFIX_RE.lastIndex = 0;
+	let m: RegExpExecArray | null;
+	while ((m = OPENER_PREFIX_RE.exec(content)) !== null) {
+		if (m.index < resume) continue;
+		const p = m.index + m[0].length;
+		CATEGORY_AHEAD_RE.lastIndex = p;
+		let end = -1;
+		if (!CATEGORY_AHEAD_RE.test(content)) {
+			const q = firstGt(p);
+			if (closesAt(q, p) && q - 2 - p <= 120) end = q + 1;
+		}
+		if (
+			end === -1 &&
+			p < content.length &&
+			!/[a-z]/.test(content.charAt(p))
+		) {
+			const q = firstGt(p + 1);
+			if (closesAt(q, p + 1)) end = q + 1;
+		}
+		if (end === -1) continue;
+		out.push(m.index);
+		resume = end;
+		OPENER_PREFIX_RE.lastIndex = end;
+	}
+	return out;
+}
 
 // A marker opener, anywhere. Deliberately looser than MARKER_RE's category group
 // (case-insensitive, leading digits allowed) so a near-miss is still reported.
@@ -1555,15 +1636,13 @@ export function findMalformedMarkers(content: string): MalformedMarker[] {
 	const excerptAt = (start: number): string =>
 		content.slice(start, Math.min(content.length, start + 120));
 
-	OPENING_TOKEN_RE.lastIndex = 0;
-	let match: RegExpExecArray | null;
-	while ((match = OPENING_TOKEN_RE.exec(content)) !== null) {
-		if (valid.has(match.index)) continue;
-		if (backslashRunBefore(content, match.index) > 0) continue;
-		reported.add(match.index);
+	for (const at of unreadableOpeners(content)) {
+		if (valid.has(at)) continue;
+		if (backslashRunBefore(content, at) > 0) continue;
+		reported.add(at);
 		out.push({
-			start: match.index,
-			excerpt: excerptAt(match.index),
+			start: at,
+			excerpt: excerptAt(at),
 			reason: 'Marker did not match the canonical Annoteca format.',
 			kind: 'malformed',
 		});
@@ -1587,6 +1666,7 @@ export function findMalformedMarkers(content: string): MalformedMarker[] {
 	// which is right for a marker that closes itself and merely cannot be read.
 	const openers: number[] = [];
 	OPENER_ANYWHERE_RE.lastIndex = 0;
+	let match: RegExpExecArray | null;
 	while ((match = OPENER_ANYWHERE_RE.exec(content)) !== null) {
 		if (backslashRunBefore(content, match.index) === 0)
 			openers.push(match.index);
@@ -1690,11 +1770,12 @@ export function findMalformedMarkers(content: string): MalformedMarker[] {
 // That is deliberately more than the plugin's own parse would claim: this
 // answers "what is currently invisible", not "what is a marker".
 export function unclosedOpenerRanges(content: string): MarkerRange[] {
+	const regionEnd = openerRegionEnds(content);
 	return findMalformedMarkers(content)
 		.filter((f) => f.kind === 'unclosed-opener')
 		.map((f) => ({
 			start: f.start,
-			end: openerRegionEnd(content, f.start),
+			end: regionEnd(f.start),
 		}));
 }
 
@@ -1702,9 +1783,27 @@ export function unclosedOpenerRanges(content: string): MarkerRange[] {
 // `-->`, or the end of the document. Shared by the two callers that need it,
 // because they are asking the same question and a second copy of the answer is
 // the drift this file keeps warning about.
-function openerRegionEnd(content: string, start: number): number {
-	const closes = content.indexOf(TERMINATOR, start);
-	return closes === -1 ? content.length : closes + TERMINATOR.length;
+//
+// Every `-->` is found once and each opener looks its next one up: searching
+// the rest of the note per opener was quadratic in a note full of them.
+function openerRegionEnds(content: string): (start: number) => number {
+	const terminators: number[] = [];
+	for (
+		let at = content.indexOf(TERMINATOR);
+		at !== -1;
+		at = content.indexOf(TERMINATOR, at + 1)
+	)
+		terminators.push(at);
+	return (start) => {
+		const lo = countWhile(
+			terminators.length,
+			(mid) => (terminators[mid] ?? 0) < start,
+		);
+		const closes = terminators[lo];
+		return closes === undefined
+			? content.length
+			: closes + TERMINATOR.length;
+	};
 }
 
 // The finding that must stop a write from REMOVING this marker, or undefined
@@ -1748,11 +1847,20 @@ export function findRemovalBlocker(
 	// 'malformed' is not a blocker. It means a marker whose category this
 	// version cannot read, which closes itself: removing something else in the
 	// note cannot make it worse.
+	// The removal targets' starts, looked up rather than scanned per finding,
+	// which was quadratic in a damaged note with many targets. A start is a
+	// one-character span, so "a start strictly between two offsets" is an
+	// overlap with the gap between them.
+	const starts = new Set(markers.map((m) => m.start));
+	const startIndex = new SpanIndex(markers, (m) => ({
+		start: m.start,
+		end: m.start + 1,
+	}));
+	const regionEnd = openerRegionEnds(content);
 	return findMalformedMarkers(content).find((f) => {
-		if (f.kind === 'possible-merge')
-			return markers.some((m) => f.start === m.start);
+		if (f.kind === 'possible-merge') return starts.has(f.start);
 		if (f.kind !== 'unclosed-opener') return false;
-		const end = openerRegionEnd(content, f.start);
-		return markers.some((m) => m.start > f.start && m.start < end);
+		const end = regionEnd(f.start);
+		return startIndex.some(f.start + 1, end);
 	});
 }

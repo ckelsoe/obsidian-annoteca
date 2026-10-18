@@ -4,7 +4,11 @@
 // asking whether the spot was inside something; the old planCloser could put
 // a closer inside a store entry.
 
-import { hasRepairableNesting, repairNestedMarkers } from '../nested-repair';
+import {
+	hasRepairableNesting,
+	repairNestedMarkers,
+	repairWhole,
+} from '../nested-repair';
 import { enclosingForbidden } from '../forbidden';
 import { layoutMarker, planMarkerInsert } from '../marker-placement';
 import {
@@ -484,5 +488,226 @@ describe('repairNestedMarkers', () => {
 		const damaged = oldInsert(note, note.indexOf('next'), NEW_FULL, '');
 		expect(damaged).toContain(`line ${NEW_FULL} \nnext`);
 		expect(repairNestedMarkers(damaged).updated).toContain(host);
+	});
+
+	it('repairs a comment written inside one that was itself inside the properties', () => {
+		// Lifting the inner comment makes the outer one readable, and it is in
+		// the properties too, so it is lifted next. Both end up below them.
+		const marker = (id: string, body: string): string =>
+			`<!-- annoteca/todo: ${body}\n[id=${id}]\n[date=2026-10-17]\n-->`;
+		const outer = marker('aaaaaaaa', 'outer');
+		const at = outer.indexOf('todo') + 2;
+		const note = `---\ntitle: ${outer.slice(0, at)}${marker('bbbbbbbb', 'inner')}${outer.slice(at)}hello\n---\nprose`;
+		const { updated, converted } = repairNestedMarkers(note);
+		expect(converted).toBe(2);
+		healthy(updated);
+		expect(updated.startsWith('---\ntitle: hello\n---\n')).toBe(true);
+		expect(
+			parseAll(updated)
+				.map((c) => c.id)
+				.sort(),
+		).toEqual(['aaaaaaaa', 'bbbbbbbb']);
+	});
+
+	it('rejoins a hand-edited store entry whose JSON holds a blank line', () => {
+		const entry = encodeStoreEntry({
+			id: 'eeeeeeee',
+			category: 'tone',
+			body: 'kept',
+			replies: [],
+		}).replace('{\n', '{\n\n');
+		const note =
+			`${serializeLeanMarker('clarify', 'dddddddd')} Passage text.\n\n` +
+			writeStoreRegion('', [
+				{
+					id: 'dddddddd',
+					category: 'clarify',
+					body: 'x',
+					date: '2026-10-17T12:00:00',
+					range: 'closed',
+					replies: [],
+				},
+			]) +
+			'\n' +
+			entry +
+			'\n';
+		const at =
+			note.lastIndexOf('<!-- annoteca:store') +
+			'<!-- annoteca:store'.length;
+		const inserted =
+			note.slice(0, at) + serializeCloser('dddddddd') + note.slice(at);
+		const damaged = writeStoreRegion(
+			inserted,
+			parseStore(inserted).map((e) => e.comment),
+		);
+		const { updated, converted } = repairNestedMarkers(damaged);
+		expect(converted).toBe(1);
+		expect(
+			parseStore(updated)
+				.map((e) => e.comment.id)
+				.sort(),
+		).toEqual(['dddddddd', 'eeeeeeee']);
+	});
+
+	// The plain walk: one lift at a time over the whole note, no chain pass.
+	const plain = (note: string) => repairWhole(note, undefined, false);
+	const same = (note: string, got: unknown, want: unknown): void => {
+		if (JSON.stringify(got) !== JSON.stringify(want))
+			throw new Error(JSON.stringify({ note, got, want }));
+	};
+	const rng = (start: number): (() => number) => {
+		let seed = start;
+		return () => {
+			seed = (seed * 1103515245 + 12345) % 2147483648;
+			return seed / 2147483648;
+		};
+	};
+
+	it('repairs stretch by stretch exactly as a lift at a time over the whole note', () => {
+		// Several damaged spots at once, each made the way the old composer
+		// made them, at random places in a note with properties and a store.
+		const next = rng(5);
+		for (let round = 0; round < 150; round++) {
+			let note = EOF_NOTE.replace(
+				'Intro line',
+				`${PROPS}\n${INLINE_NOTE}\nIntro line`,
+			);
+			const spots = 1 + Math.floor(next() * 4);
+			for (let k = 0; k < spots; k++) {
+				const offsets = damagedOffsets(note);
+				const at = offsets[Math.floor(next() * offsets.length)];
+				if (at === undefined) break;
+				const text = serialize({
+					id: `n${String(round * 10 + k).padStart(7, '0')}`,
+					category: 'clarify',
+					body: 'new',
+					date: '2026-10-17T12:00:00',
+				});
+				note = oldInsert(note, at, text, '');
+			}
+			same(note, repairNestedMarkers(note), plain(note));
+		}
+	});
+
+	it('never starts a stretch at a `---` line, which read alone would be properties', () => {
+		const m = (id: string, body: string): string =>
+			serialize({ id, body, category: 'note', date: '2026-10-01' });
+		const d = (a: string, b: string): string =>
+			m(a, 'host').replace('host', `ho${m(b, 'new')}st`);
+		const note = `text\n---\nIntro\n${d('aaaaaaaa', 'bbbbbbbb')}\n---\n${d('cccccccc', 'dddddddd')}`;
+		same(note, repairNestedMarkers(note), plain(note));
+	});
+
+	it('lifts a chain of comments written into one comment as the plain walk does', () => {
+		const next = rng(9);
+		const gaps = [
+			'',
+			' ',
+			'word ',
+			'\n',
+			'\n\n',
+			'\nline\n',
+			' more text\n- item ',
+			'\n> q ',
+			'\nTAIL',
+			'\n\n\nx ',
+			// Long lines, which a stretch keeps only the ends of.
+			`${'long words '.repeat(60)}`,
+			`\n${'y'.repeat(700)} `,
+		];
+		const leads = [
+			'',
+			'Para text ',
+			'- ',
+			'> ',
+			'# Head ',
+			`${'lead '.repeat(150)}`,
+		];
+		for (let round = 0; round < 3000; round++) {
+			const n = 2 + Math.floor(next() * 11);
+			let body = 'host';
+			for (let i = 0; i < n; i++) {
+				const piece = serialize({
+					id: `c${String(round * 100 + i).padStart(7, '0')}`,
+					category: 'clarify',
+					body: 'new',
+					date: '2026-10-17T12:00:00',
+					...(next() < 0.3
+						? { anchor: { text: 'picked', truncated: false } }
+						: {}),
+				});
+				body += `${piece}${gaps[Math.floor(next() * gaps.length)] ?? ''}`;
+			}
+			const host = serialize({
+				id: `h${String(round).padStart(7, '0')}`,
+				category: 'tone',
+				body: 'x',
+				date: '2026-10-01T10:00:00',
+			}).replace('x', body);
+			const lead = leads[Math.floor(next() * leads.length)] ?? '';
+			const note = `Intro.\n\n${lead}${host}\nAfter.\n`;
+			same(note, repairNestedMarkers(note), plain(note));
+		}
+	});
+
+	it("keeps the plain walk's layout under a long list prefix", () => {
+		const m = (id: string, body: string): string =>
+			serialize({ id, body, category: 'note', date: '2026-10-01' });
+		let note = `- ${' '.repeat(513)}${m('hhhhhhhh', 'hostTAIL')}`;
+		for (const id of ['aaaaaaaa', 'bbbbbbbb'])
+			note = oldInsert(note, note.indexOf('TAIL'), m(id, 'new'), '');
+		same(note, repairNestedMarkers(note), plain(note));
+	});
+
+	it('does not treat a non-breaking space as JSON whitespace when rejoining', () => {
+		const stored = encodeStoreEntry({
+			id: 'eeeeeeee',
+			category: 'tone',
+			body: 'kept',
+			replies: [],
+		});
+		const note = `${serializeLeanMarker('clarify', 'dddddddd')} Passage.\n\n\u00a0\n\n${stored}\n`;
+		const at = note.indexOf('{\n') + 2;
+		const inserted =
+			note.slice(0, at) + serializeCloser('dddddddd') + note.slice(at);
+		const damaged = writeStoreRegion(
+			inserted,
+			parseStore(inserted).map((e) => e.comment),
+		);
+		// The plain walk shares the rejoin, so the entry itself is checked.
+		const { updated, converted } = repairNestedMarkers(damaged);
+		expect(converted).toBe(1);
+		expect(parseStore(updated).map((e) => e.comment.id)).toContain(
+			'eeeeeeee',
+		);
+	});
+
+	it('lifts chains in two neighbouring comments as the plain walk does', () => {
+		const m = (id: string, body: string): string =>
+			serialize({ id, body, category: 'note', date: '2026-10-01' });
+		const chained = (h: string, n: number): string => {
+			let body = 'host';
+			for (let i = 0; i < n; i++)
+				body += m(`${h}${String(i).padStart(4, '0')}`, 'new');
+			return m(`${h}0host`, 'X').replace('X', body);
+		};
+		const note = `Intro.\n${chained('aaa', 6)}\n${chained('bbb', 6)}\nAfter.\n`;
+		const got = repairNestedMarkers(note);
+		same(note, got, plain(note));
+		expect(got.converted).toBe(12);
+	});
+
+	it('reaches past the line after every comment a stretch lifts, not only its own', () => {
+		const m = (id: string, body: string): string =>
+			serialize({ id, body, category: 'note', date: '2026-10-01' });
+		const put = (note: string, at: number, id: string): string =>
+			oldInsert(note, at, m(id, 'new'), '');
+		let note = m('hhhhhhhh', 'host\n> > word - TAIL');
+		for (const id of ['aaaaaaaa', 'bbbbbbbb'])
+			note = put(note, note.indexOf('\n> > word') + 3, id);
+		note = put(note, note.indexOf('word'), 'cccccccc');
+		for (const id of ['dddddddd', 'eeeeeeee', 'ffffffff'])
+			note = put(note, note.indexOf('- TAIL'), id);
+		same(note, repairNestedMarkers(note), plain(note));
 	});
 });

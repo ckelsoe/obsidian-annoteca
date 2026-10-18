@@ -15,6 +15,8 @@
 
 import { frontmatterEnd } from './frontmatter';
 import { unclosedOpenerRanges } from './parser';
+import { inlineCodeSpans } from './code-spans';
+import { countWhile, SpanIndex } from './span-index';
 import { scanStoreEntries } from './store';
 import type { MarkerRange } from './types';
 
@@ -42,22 +44,33 @@ export function planCloser(
 	// a store entry ends that entry early and loses the comment it holds, and
 	// one after the store would make the store part of the passage. It stops
 	// where the store starts.
-	for (const s of scanStoreEntries(content))
-		if (end > s.start && from <= s.start) end = s.start;
+	// Looked up, not walked: a batch of promoted comments plans a closer for
+	// each, and walking every store entry, open marker and occupied range per
+	// plan was quadratic. Both lists are in document order, so the loop that
+	// clamped `end` to each start in turn stopped at the first start at or
+	// after `from`, if that is before `end`.
+	const scanned = closerScan(content);
+	const firstStore = firstAtOrAfter(scanned.storeStarts, from);
+	if (firstStore !== undefined && firstStore < end) end = firstStore;
 	// A marker opener with no `-->` of its own hides everything up to the next
 	// one, so a closer in there is hidden too, and the next `-->` it reaches
 	// may be another comment's. The range stops at that opener, and a passage
 	// that starts inside one gets no closer.
-	for (const r of unclosedOpenerRanges(content)) {
-		// Inside the properties it hides nothing (see forbiddenRanges).
-		if (r.start < frontmatterEnd(content)) continue;
-		if (from > r.start && from < r.end) return { kind: 'none' };
-		if (end > r.start && from <= r.start) end = r.start;
-	}
+	if (scanned.unclosedIndex.some(from, from)) return { kind: 'none' };
+	const firstOpen = firstAtOrAfter(scanned.unclosedStarts, from);
+	if (firstOpen !== undefined && firstOpen < end) end = firstOpen;
 	while (end > from && /\s/.test(content.charAt(end - 1))) end -= 1;
 	// A selection ending inside an existing marker or closer ends after it.
 	// Splitting one would break that comment.
-	for (const r of occupied) if (end > r.start && end < r.end) end = r.end;
+	const index = occupiedIndex(occupied);
+	const holding = index.overlapping(end, end);
+	const only = holding.length === 1 ? holding[0] : undefined;
+	// One range holds it and none holds that range's end: the walk would
+	// move `end` there and nowhere further. Otherwise the ranges overlap,
+	// which callers never pass, and the walk itself decides.
+	if (only !== undefined && !index.some(only.end, only.end)) end = only.end;
+	else if (holding.length > 0)
+		for (const r of occupied) if (end > r.start && end < r.end) end = r.end;
 	if (end <= from) return { kind: 'none' };
 
 	if (
@@ -69,6 +82,63 @@ export function planCloser(
 		return { kind: 'refused', reason: CLOSER_REFUSED_MESSAGE };
 	}
 	return { kind: 'range', at: end };
+}
+
+// The store entries and the unclosed openers outside the properties, for the
+// last note planned in, so a batch of promoted comments scans the note once.
+let lastScan:
+	| {
+			content: string;
+			storeStarts: number[];
+			unclosedStarts: number[];
+			unclosedIndex: SpanIndex<MarkerRange>;
+	  }
+	| undefined;
+function closerScan(content: string): NonNullable<typeof lastScan> {
+	if (lastScan?.content !== content) {
+		const properties = frontmatterEnd(content);
+		// Inside the properties an open marker hides nothing (see
+		// forbiddenRanges).
+		const unclosed = unclosedOpenerRanges(content).filter(
+			(r) => r.start >= properties,
+		);
+		lastScan = {
+			content,
+			storeStarts: scanStoreEntries(content).map((e) => e.start),
+			unclosedStarts: unclosed.map((r) => r.start),
+			unclosedIndex: new SpanIndex(unclosed, (r) => r),
+		};
+	}
+	return lastScan;
+}
+
+// The first of `sorted` at or after `x`.
+function firstAtOrAfter(
+	sorted: readonly number[],
+	x: number,
+): number | undefined {
+	const lo = countWhile(
+		sorted.length,
+		(mid) => (sorted[mid] ?? Infinity) < x,
+	);
+	return sorted[lo];
+}
+
+// An index per occupied list. A batch passes the same list for every plan,
+// so it is indexed once.
+const occupiedIndexes = new WeakMap<
+	readonly MarkerRange[],
+	SpanIndex<MarkerRange>
+>();
+function occupiedIndex(
+	occupied: readonly MarkerRange[],
+): SpanIndex<MarkerRange> {
+	let index = occupiedIndexes.get(occupied);
+	if (index === undefined) {
+		index = new SpanIndex(occupied, (r) => r);
+		occupiedIndexes.set(occupied, index);
+	}
+	return index;
 }
 
 // Where the note properties end, kept in its own module so store.ts can ask
@@ -125,24 +195,47 @@ function stripQuote(line: string): string {
 	}
 }
 
-const lineAt = (lines: readonly Line[], pos: number): number =>
-	lines.findIndex((l) => pos >= l.start && pos <= l.end);
+// The first line holding `pos` (a line's end, its line break, counts as on
+// it), as findIndex over the lines answered, by binary search.
+const lineAt = (lines: readonly Line[], pos: number): number => {
+	const lo = countWhile(
+		lines.length,
+		(mid) => (lines[mid]?.end ?? Infinity) < pos,
+	);
+	const line = lines[lo];
+	return line !== undefined && pos >= line.start ? lo : -1;
+};
 
-const isBlank = (body: string): boolean => body.trim() === '';
-
-// A fence opens with three or more backticks or tildes, indented at most three
-// spaces, and closes with a run of the same character at least as long.
-const FENCE_LINE_RE = /^ {0,3}(`{3,}|~{3,})/;
-
-// Inside a fenced block, its opening and closing lines included. An unclosed
-// fence runs to the end of the note, which is how markdown renders it.
-function inFencedCode(content: string, pos: number): boolean {
+// One note's lines and which of them are fenced code, worked out once. Every
+// closer plan asks about two positions, a batch of promoted comments asks for
+// each, and splitting the note into lines and walking its fences from the top
+// per question was quadratic in the note. The last note asked about is kept;
+// a different one replaces it.
+interface NoteLines {
+	content: string;
+	lines: Line[];
+	// Line i is inside a fenced block, or is one of its fence lines.
+	fenced: boolean[];
+	// For each line, the first and last line of the run of non-blank lines
+	// around it, as inInlineCode walks them: back while the line above is not
+	// blank, forward while the line below is not. A blank line's run takes in
+	// the paragraphs on both sides.
+	up: number[];
+	down: number[];
+	// For each line, the top of the run of indented or blank lines directly
+	// above it, as inIndentedCode walks it.
+	runTop: number[];
+	// Inline code spans per run, keyed by both ends of it, as sorted
+	// [open, close + run) note offsets. Filled as runs are asked about.
+	spans: Map<string, [number, number][]>;
+}
+let lastLines: NoteLines | undefined;
+function noteLines(content: string): NoteLines {
+	if (lastLines?.content === content) return lastLines;
 	const lines = linesOf(content);
-	const target = lineAt(lines, pos);
+	const fenced: boolean[] = [];
 	let open: { char: string; len: number } | undefined;
-	for (let i = 0; i <= target; i++) {
-		const line = lines[i];
-		if (!line) break;
+	for (const line of lines) {
 		const match = FENCE_LINE_RE.exec(line.body);
 		const fence = match?.[1];
 		// An opening fence may carry an info string (```js), but a closing one
@@ -157,14 +250,53 @@ function inFencedCode(content: string, pos: number): boolean {
 				(closes &&
 					fence.startsWith(open.char) &&
 					fence.length >= open.len));
-		if (i === target) return open !== undefined || isDelimiter;
+		fenced.push(open !== undefined || isDelimiter);
 		if (fence !== undefined && isDelimiter)
 			open =
 				open === undefined
 					? { char: fence.charAt(0), len: fence.length }
 					: undefined;
 	}
-	return false;
+	const blank = lines.map((l) => isBlank(l.body));
+	const up: number[] = [];
+	for (let i = 0; i < lines.length; i++)
+		up.push(i > 0 && !blank[i - 1] ? (up[i - 1] ?? 0) : i);
+	const down: number[] = new Array<number>(lines.length);
+	for (let i = lines.length - 1; i >= 0; i--)
+		down[i] =
+			i < lines.length - 1 && !blank[i + 1] ? (down[i + 1] ?? i) : i;
+	const runTop: number[] = [];
+	for (let i = 0; i < lines.length; i++) {
+		const prev = lines[i - 1];
+		runTop.push(
+			prev !== undefined && (isIndented(prev.body) || isBlank(prev.body))
+				? (runTop[i - 1] ?? i)
+				: i,
+		);
+	}
+	lastLines = {
+		content,
+		lines,
+		fenced,
+		up,
+		down,
+		runTop,
+		spans: new Map(),
+	};
+	return lastLines;
+}
+
+const isBlank = (body: string): boolean => body.trim() === '';
+
+// A fence opens with three or more backticks or tildes, indented at most three
+// spaces, and closes with a run of the same character at least as long.
+const FENCE_LINE_RE = /^ {0,3}(`{3,}|~{3,})/;
+
+// Inside a fenced block, its opening and closing lines included. An unclosed
+// fence runs to the end of the note, which is how markdown renders it.
+function inFencedCode(content: string, pos: number): boolean {
+	const note = noteLines(content);
+	return note.fenced[lineAt(note.lines, pos)] ?? false;
 }
 
 // An indented code block: a non-blank line indented by a tab or four spaces,
@@ -175,16 +307,13 @@ const isIndented = (body: string): boolean =>
 	!isBlank(body) && (body.startsWith('\t') || body.startsWith('    '));
 
 function inIndentedCode(content: string, pos: number): boolean {
-	const lines = linesOf(content);
-	let i = lineAt(lines, pos);
-	const line = lines[i];
+	const note = noteLines(content);
+	const { lines } = note;
+	const target = lineAt(lines, pos);
+	const line = lines[target];
 	if (!line || !isIndented(line.body)) return false;
-	// Walk up the run of indented (or blank) lines to what precedes it.
-	while (i > 0) {
-		const prev = lines[i - 1];
-		if (!prev || !(isIndented(prev.body) || isBlank(prev.body))) break;
-		i -= 1;
-	}
+	// The top of the run of indented (or blank) lines above it.
+	const i = note.runTop[target] ?? target;
 	const first = lines[i];
 	const before = lines[i - 1];
 	return (
@@ -201,51 +330,29 @@ function inIndentedCode(content: string, pos: number): boolean {
 // span is outside it. A scanner rather than a regex, because the regex form
 // needs a lookbehind, which older iOS cannot even parse.
 function inInlineCode(content: string, pos: number): boolean {
-	const lines = linesOf(content);
+	const note = noteLines(content);
+	const { lines } = note;
 	const target = lineAt(lines, pos);
-	let first = target;
-	let last = target;
-	while (first > 0 && !isBlank(lines[first - 1]?.body ?? '')) first -= 1;
-	while (last < lines.length - 1 && !isBlank(lines[last + 1]?.body ?? ''))
-		last += 1;
-	const startLine = lines[first];
-	const endLine = lines[last];
-	if (!startLine || !endLine) return false;
-	const para = content.slice(startLine.start, endLine.end);
-	const local = pos - startLine.start;
-	let i = 0;
-	while (i < para.length) {
-		if (para.charAt(i) !== '`') {
-			i += 1;
-			continue;
-		}
-		const open = runLength(para, i);
-		let j = i + open;
-		let close = -1;
-		while (j < para.length) {
-			if (para.charAt(j) !== '`') {
-				j += 1;
-				continue;
-			}
-			const run = runLength(para, j);
-			if (run === open) {
-				close = j;
-				break;
-			}
-			j += run;
-		}
-		if (close === -1) {
-			i += open;
-			continue;
-		}
-		if (local > i && local < close + open) return true;
-		i = close + open;
+	const first = note.up[target];
+	const last = note.down[target];
+	if (first === undefined || last === undefined) return false;
+	const key = `${first}:${last}`;
+	let spans = note.spans.get(key);
+	if (spans === undefined) {
+		const startLine = lines[first];
+		const endLine = lines[last];
+		if (!startLine || !endLine) return false;
+		spans = inlineCodeSpans(
+			content.slice(startLine.start, endLine.end),
+		).map(([a, b]) => [startLine.start + a, startLine.start + b]);
+		note.spans.set(key, spans);
 	}
-	return false;
-}
-
-function runLength(text: string, at: number): number {
-	let n = 0;
-	while (text.charAt(at + n) === '`') n += 1;
-	return n;
+	// The spans do not overlap and are in order: the last one opening before
+	// `pos` is the only one that can hold it.
+	const lo = countWhile(
+		spans.length,
+		(mid) => (spans[mid]?.[0] ?? Infinity) < pos,
+	);
+	const span = spans[lo - 1];
+	return span !== undefined && pos < span[1];
 }
