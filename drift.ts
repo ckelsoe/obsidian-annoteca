@@ -51,6 +51,12 @@ export function detectDrift(
 } {
 	const refreshed = { ...priorSnapshots };
 	const findings: DriftFinding[] = [];
+	// The legacy comments by id, first one winning as find() did. Searched
+	// once per drifted comment, that was quadratic in a note's comments.
+	const legacyById = new Map<string, Comment>();
+	for (const c of legacy?.comments ?? [])
+		if (c.id !== undefined && !legacyById.has(c.id))
+			legacyById.set(c.id, c);
 	for (const c of comments) {
 		if (!c.id) continue;
 		const current = captureSnapshot(content, c);
@@ -58,7 +64,7 @@ export function detectDrift(
 		if (prev) {
 			if (
 				!sameSnapshot(prev, current) &&
-				!matchesLegacyBasis(prev, c.id, legacy)
+				!matchesLegacyBasis(prev, legacyById.get(c.id), legacy?.content)
 			) {
 				findings.push({ path, comment: c, prev, current });
 			}
@@ -74,13 +80,12 @@ function sameSnapshot(a: PositionSnapshot, b: PositionSnapshot): boolean {
 
 function matchesLegacyBasis(
 	prev: PositionSnapshot,
-	id: string,
-	legacy: { content: string; comments: Comment[] } | undefined,
+	old: Comment | undefined,
+	legacyContent: string | undefined,
 ): boolean {
-	if (!legacy) return false;
-	const old = legacy.comments.find((c) => c.id === id);
 	return (
 		old !== undefined &&
-		sameSnapshot(prev, captureSnapshot(legacy.content, old))
+		legacyContent !== undefined &&
+		sameSnapshot(prev, captureSnapshot(legacyContent, old))
 	);
 }

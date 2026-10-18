@@ -436,7 +436,13 @@ export function scanStoreEntries(content: string): RawStoreEntry[] {
 	const out: RawStoreEntry[] = [];
 	STORE_ENTRY_RE.lastIndex = 0;
 	let match: RegExpExecArray | null;
-	while ((match = STORE_ENTRY_RE.exec(content)) !== null) {
+	// Only up to the last `-->`: an opener past it can never close, and the
+	// regex read to the end of the note from each one. Every entry ends at a
+	// `-->`, so the matches are unchanged.
+	const last = content.lastIndexOf(STORE_TERMINATOR);
+	const searchable =
+		last === -1 ? '' : content.slice(0, last + STORE_TERMINATOR.length);
+	while ((match = STORE_ENTRY_RE.exec(searchable)) !== null) {
 		const json = match[1];
 		if (json === undefined) continue;
 		out.push({

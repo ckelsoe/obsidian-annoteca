@@ -289,12 +289,25 @@ export function rangeSpan(
 // Whether `c` has an id that no other comment in its note shares. A copied
 // comment carries a copied id, and anything saved by an ambiguous id (a
 // comment's own tab) would find both copies, so only a unique id qualifies.
+//
+// The panels ask this once per card, so counting the note's ids afresh each
+// time was quadratic in its comments. The count is kept per array: a note's
+// comment list is replaced, never changed in place, when it is re-read.
+const idCounts = new WeakMap<readonly Comment[], Map<string, number>>();
 export function hasUniqueId(
 	comments: readonly Comment[],
 	c: Pick<Comment, 'id'>,
 ): boolean {
 	if (c.id === undefined) return false;
-	return comments.filter((x) => x.id === c.id).length === 1;
+	let counts = idCounts.get(comments);
+	if (counts === undefined) {
+		counts = new Map();
+		for (const x of comments)
+			if (x.id !== undefined)
+				counts.set(x.id, (counts.get(x.id) ?? 0) + 1);
+		idCounts.set(comments, counts);
+	}
+	return counts.get(c.id) === 1;
 }
 
 export const FLASH_COMMENT_CLASS = 'annoteca-flash-comment';
@@ -358,13 +371,18 @@ export function bucketCommentsByHeading(
 		open: 0,
 		resolved: 0,
 	}));
-	for (const c of comments) {
-		let bucketIdx = -1;
-		for (let i = 0; i < headings.length; i++) {
-			const h = headings[i];
+	// One sweep over the comments in position order, not a walk of the
+	// headings per comment, which was quadratic. The heading a comment falls
+	// under only moves forward as its position does.
+	const byPos = [...comments].sort((a, b) => a.marker.start - b.marker.start);
+	let next = 0;
+	let bucketIdx = -1;
+	for (const c of byPos) {
+		for (; next < headings.length; next++) {
+			const h = headings[next];
 			if (!h) continue;
 			if (h.position.start.offset > c.marker.start) break;
-			bucketIdx = i;
+			bucketIdx = next;
 		}
 		if (bucketIdx === -1) continue;
 		const bucket = buckets[bucketIdx];

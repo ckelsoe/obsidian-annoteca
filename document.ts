@@ -296,16 +296,14 @@ export function convertFileToEof(content: string): StorageConvertResult {
 
 	const newEntries: StoredComment[] = [];
 	const edits: ConvertEdit[] = [];
+	// A Set, not a search of the store per marker, which was quadratic.
+	const storedIds = new Set(storeEntries.map((e) => e.comment.id));
 	for (const m of markers) {
 		if (isLeanMarker(m)) continue;
 		// A marker with no id, or one whose id already backs a store entry (the
 		// degenerate inline-wins-over-a-stray-entry case), needs a fresh id so the
 		// new entry cannot collide with an existing one.
-		const id =
-			m.id === undefined ||
-			storeEntries.some((e) => e.comment.id === m.id)
-				? freshId()
-				: m.id;
+		const id = m.id === undefined || storedIds.has(m.id) ? freshId() : m.id;
 		newEntries.push(toStored(id, { ...m, id }));
 		edits.push({
 			start: m.marker.start,

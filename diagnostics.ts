@@ -90,13 +90,20 @@ export function detectOrphans(content: string, path: string): OrphanFinding[] {
 }
 
 function isOrphan(content: string, c: Comment): boolean {
-	const beforeStart = findLineStart(content, c.marker.start);
-	const afterEnd = findLineEnd(content, c.marker.end);
-
-	const lineContent = content.slice(beforeStart, afterEnd);
-	const markerPiece = content.slice(c.marker.start, c.marker.end);
-	const lineWithoutMarker = lineContent.replace(markerPiece, '');
-	if (lineWithoutMarker.trim() !== '') return false;
+	// Alone on its line: only whitespace between the marker and the line's
+	// ends. Walked outward and stopped at the first other character, rather
+	// than slicing the whole line for every marker, which was quadratic when
+	// many markers share one long line.
+	let beforeStart = c.marker.start;
+	while (beforeStart > 0 && content.charAt(beforeStart - 1) !== '\n') {
+		if (!/\s/.test(content.charAt(beforeStart - 1))) return false;
+		beforeStart -= 1;
+	}
+	let afterEnd = c.marker.end;
+	while (afterEnd < content.length && content.charAt(afterEnd) !== '\n') {
+		if (!/\s/.test(content.charAt(afterEnd))) return false;
+		afterEnd += 1;
+	}
 
 	const previousLineBlank =
 		beforeStart === 0 || isBlankLine(content, beforeStart - 1);
@@ -223,11 +230,23 @@ export function detectRangeIssues(
 		comments.map((c) => c.marker),
 	);
 	const out: RangeFinding[] = [];
+	// Grouped by id once. Filtering the whole note per closer and per comment
+	// was quadratic in the number of comments.
+	const openersById = new Map<string, Comment[]>();
+	for (const c of comments) {
+		if (c.id === undefined) continue;
+		const list = openersById.get(c.id);
+		if (list) list.push(c);
+		else openersById.set(c.id, [c]);
+	}
+	const closerCount = new Map<string, number>();
+	for (const k of closers)
+		closerCount.set(k.id, (closerCount.get(k.id) ?? 0) + 1);
 	for (const c of comments) {
 		if (c.range !== 'closed' || c.id === undefined || c.closer) continue;
 		// A closer that exists but did not pair is reported below, as what it
 		// is. This is only for the one that is gone.
-		if (closers.some((k) => k.id === c.id)) continue;
+		if (closerCount.has(c.id)) continue;
 		out.push({
 			path,
 			kind: 'missing-closer',
@@ -236,14 +255,13 @@ export function detectRangeIssues(
 		});
 	}
 	for (const k of closers) {
-		const openers = comments.filter((c) => c.id === k.id);
-		const siblings = closers.filter((o) => o.id === k.id);
+		const openers = openersById.get(k.id) ?? [];
 		const kind: RangeFinding['kind'] | undefined =
 			openers.length === 0
 				? 'orphaned-closer'
 				: openers.length > 1
 					? 'duplicate-opener'
-					: siblings.length > 1
+					: (closerCount.get(k.id) ?? 0) > 1
 						? 'duplicate-closer'
 						: openers.some((o) => o.marker.end <= k.start)
 							? undefined

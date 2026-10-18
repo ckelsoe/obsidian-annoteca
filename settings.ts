@@ -417,11 +417,15 @@ export function parseNamespaceAllowlist(raw: string): {
 	const accepted: string[] = [];
 	const rejected: string[] = [];
 	const seen = new Set<string>();
+	const seenRejected = new Set<string>();
 	for (const token of raw.split(/[,\s]+/)) {
 		if (token === '') continue;
 		const value = token.toLowerCase();
 		if (!isNamespacePrefix(value)) {
-			if (!rejected.includes(token)) rejected.push(token);
+			if (!seenRejected.has(token)) {
+				seenRejected.add(token);
+				rejected.push(token);
+			}
 			continue;
 		}
 		if (seen.has(value)) continue;

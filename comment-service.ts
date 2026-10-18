@@ -16,6 +16,7 @@
 // editor keeps the in-memory document and disk in sync. The edit composer
 // already used `editor.replaceRange` for the same reason.
 
+import { SpanIndex } from './span-index';
 import { MarkdownView, Notice, TFile } from 'obsidian';
 
 import type AnnotecaPlugin from './main';
@@ -172,7 +173,7 @@ export const INSIDE_FORBIDDEN_MESSAGE =
 function isValidPromoteRequest(
 	value: unknown,
 	docLength: number,
-	forbidden: readonly { start: number; end: number }[],
+	forbidden: SpanIndex<{ start: number; end: number }>,
 ): value is PromoteRequest {
 	if (typeof value !== 'object' || value === null) return false;
 	const r = value as Record<string, unknown>;
@@ -206,10 +207,7 @@ function isValidPromoteRequest(
 	// start..end, so both have to be clear of existing syntax. A range that
 	// merely touches a boundary is fine: inserting at the position a marker ends
 	// is inserting after it.
-	return (
-		!forbidden.some((f) => start > f.start && start < f.end) &&
-		!forbidden.some((f) => end > f.start && start < f.end)
-	);
+	return !forbidden.some(start, start) && !forbidden.some(start, end);
 }
 
 // Removes a range comment's closer (#84). Exactly the closer, nothing around it:
@@ -218,6 +216,14 @@ function isValidPromoteRequest(
 // store region's splice when the closer is the last thing before it.
 function closerSplice(closer: MarkerRange): SpliceRange {
 	return { from: closer.start, to: closer.end, insert: '' };
+}
+
+// An id none of `taken` holds, added to it so the next one avoids it too.
+function freshId(taken: Set<string | undefined>): string {
+	let id = generateId();
+	while (taken.has(id)) id = generateId();
+	taken.add(id);
+	return id;
 }
 
 export class CommentService {
@@ -794,7 +800,9 @@ export class CommentService {
 		// comments than it asked for cannot tell which of its findings were
 		// rejected and which were merely already present, and would record a
 		// partial analysis as complete.
-		const forbidden = forbiddenRanges(content);
+		// Indexed once for the batch: scanning every range for every request
+		// was quadratic in a note with many comments.
+		const forbidden = new SpanIndex(forbiddenRanges(content), (r) => r);
 		const allValid = requests.every((r) =>
 			isValidPromoteRequest(r, content.length, forbidden),
 		);
@@ -868,8 +876,11 @@ export class CommentService {
 		// Existing markers and closers, which a new closer must not split.
 		const markers = parseAll(content).map((c) => c.marker);
 		const occupied = [...markers, ...scanClosers(content, markers)];
+		// Every id the note holds, read once for the batch and extended as each
+		// new one is issued. Re-reading the note per request was quadratic.
+		const taken = new Set(parseDocument(content).comments.map((c) => c.id));
 		for (const r of valid) {
-			const id = this.freshId(content, created);
+			const id = freshId(taken);
 			const anchorText = buildAnchorFromSelection(
 				content.slice(r.anchor.start, r.anchor.end),
 			);
@@ -1159,19 +1170,6 @@ export class CommentService {
 		const whole = diffToSplice(note.text, updated);
 		if (!whole) return true;
 		return this.applySplices(path, file, [whole], note);
-	}
-
-	private freshId(
-		content: string,
-		created: readonly CreatedComment[],
-	): string {
-		const taken = new Set([
-			...parseDocument(content).comments.map((c) => c.id),
-			...created.map((c) => c.id),
-		]);
-		let id = generateId();
-		while (taken.has(id)) id = generateId();
-		return id;
 	}
 
 	async listResolvedInFile(path: string): Promise<Comment[]> {

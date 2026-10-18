@@ -1,8 +1,10 @@
 // Import helpers (F-221, F-222, F-230). Pure conversion utilities; commands
 // in main.ts wrap these with backup-confirmation modals and bulk vault writes.
 
+import { inlineCodeSpans } from './code-spans';
 import { forbiddenRanges } from './forbidden';
 import { scanMarkers, serialize, unclosedOpenerRanges } from './parser';
+import { SpanIndex } from './span-index';
 
 // Match `%%text%%` Obsidian native comments. Non-greedy, multiline.
 const NATIVE_COMMENT_RE = /%%([\s\S]*?)%%/g;
@@ -70,44 +72,7 @@ const QUOTE_PREFIX_RE = /^(?: {0,3}>[ \t]?)+/;
 // not merely mis-scanned a note. A scan also drops the backtracking, so it is
 // linear in the text.
 function codeSpans(text: string): ProtectedRange[] {
-	const spans: ProtectedRange[] = [];
-	const runEnd = (at: number): number => {
-		let i = at;
-		while (i < text.length && text.charAt(i) === '`') i++;
-		return i;
-	};
-	let i = 0;
-	while (i < text.length) {
-		if (text.charAt(i) !== '`') {
-			i++;
-			continue;
-		}
-		const openEnd = runEnd(i);
-		const length = openEnd - i;
-		let closeAt = -1;
-		let j = openEnd;
-		while (j < text.length) {
-			if (text.charAt(j) !== '`') {
-				j++;
-				continue;
-			}
-			const end = runEnd(j);
-			if (end - j === length) {
-				closeAt = j;
-				break;
-			}
-			j = end;
-		}
-		if (closeAt === -1) {
-			// No matching run: the opener is literal, and scanning carries on
-			// after it rather than trying a shorter one.
-			i = openEnd;
-			continue;
-		}
-		spans.push({ from: i, to: closeAt + length });
-		i = closeAt + length;
-	}
-	return spans;
+	return inlineCodeSpans(text).map(([from, to]) => ({ from, to }));
 }
 
 // A code span is inline content of ONE block, so a run must stop wherever a new
@@ -454,6 +419,10 @@ function protectedRanges(content: string): ProtectedRange[] {
 		  }
 		| undefined;
 	let inHtmlComment = false;
+	// Whether any `-->` follows a point is whether the last one does: found
+	// once, not searched for from every unterminated opener, which was
+	// quadratic in a note full of them.
+	const lastTerminator = content.lastIndexOf('-->');
 	// Content indents, in columns, of the list items currently open, outermost
 	// first. What the fence and indented-code rules are measured against, and it
 	// deliberately SURVIVES a blank line: a blank line does not close a list
@@ -730,7 +699,7 @@ function protectedRanges(content: string): ProtectedRange[] {
 			// block. Reading it as one would put the rest of the file inside a
 			// comment and stop every run there.
 			if (!line.includes('-->'))
-				inHtmlComment = content.indexOf('-->', lineEnd) !== -1;
+				inHtmlComment = lastTerminator >= lineEnd;
 		} else if (BLOCK_OPENER_RE.test(line)) {
 			// A quote's content follows the same block rules as the document's,
 			// so this mirrors the unquoted chain against `body`. It used to model
@@ -878,14 +847,6 @@ function protectedRanges(content: string): ProtectedRange[] {
 	return out;
 }
 
-function intersectsProtected(
-	ranges: readonly ProtectedRange[],
-	from: number,
-	to: number,
-): boolean {
-	return ranges.some((r) => from < r.to && r.from < to);
-}
-
 // Shared replacement engine for both comment syntaxes. The regex picks the
 // source format; `skip` lets a format leave specific matches untouched (the
 // HTML pass must not re-convert markers already in the annoteca format).
@@ -895,14 +856,18 @@ function convertComments(
 	pattern: RegExp,
 	skip?: (body: string) => boolean,
 ): ImportResult {
-	const ranges = protectedRanges(content);
+	// Indexed once: asking every range for every match was quadratic in a
+	// note with many comments to convert.
+	const ranges = new SpanIndex(protectedRanges(content), (r) => ({
+		start: r.from,
+		end: r.to,
+	}));
 	let converted = 0;
 	const updated = content.replace(
 		pattern,
 		(full: string, body: string, offset: number) => {
 			if (skip?.(body)) return full;
-			if (intersectsProtected(ranges, offset, offset + full.length))
-				return full;
+			if (ranges.some(offset, offset + full.length)) return full;
 			converted += 1;
 			const cleaned = body.trim().replace(/\n+/g, ' ');
 			// Through serialize() rather than interpolated, so imported text

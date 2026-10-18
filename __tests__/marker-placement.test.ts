@@ -169,6 +169,14 @@ describe('repairMarkerPlacement', () => {
 		expect(repairMarkerPlacement(updated).converted).toBe(0);
 	});
 
+	it('keeps the line after a heading its marker ended on (released 1.25.0 to 1.27.2 joined them)', () => {
+		const doc = `Intro.\n\n# Head ${M}\nNext paragraph.\n`;
+		expect(repairMarkerPlacement(doc)).toEqual({
+			updated: `Intro.\n\n${M}\n# Head\nNext paragraph.\n`,
+			converted: 1,
+		});
+	});
+
 	it('changes nothing in a note that renders', () => {
 		const doc = `Fine ${M} text.`;
 		expect(repairMarkerPlacement(doc)).toEqual({

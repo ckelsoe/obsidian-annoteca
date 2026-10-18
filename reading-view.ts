@@ -4,6 +4,7 @@
 // via getSectionInfo and renders a small indicator: a note-level banner, a
 // per-section badge, or both, per the readingViewIndicator setting.
 
+import { countWhile } from './span-index';
 import type { MarkdownPostProcessorContext, MarkdownView } from 'obsidian';
 import type AnnotecaPlugin from './main';
 import { parseDocument } from './document';
@@ -62,6 +63,52 @@ export function offsetOfLine(content: string, line: number): number {
 	return offset;
 }
 
+// One note's source as the per-section indicator reads it: parsed once, with
+// its line offsets, rather than once per rendered section. A note renders as
+// one section per block, and re-reading the whole note for each block made a
+// long note with many comments quadratic to display.
+export class SectionSource {
+	readonly comments: Comment[];
+	private readonly lineStarts: number[] = [0];
+	private readonly starts: number[];
+
+	constructor(readonly raw: string) {
+		const text = toEditorText(raw);
+		this.comments = parseDocument(text).comments;
+		for (let i = 0; i < text.length; i++)
+			if (text.charAt(i) === '\n') this.lineStarts.push(i + 1);
+		this.lineStarts.push(text.length);
+		this.starts = this.comments.map((c) => c.marker.start);
+	}
+
+	// What offsetOfLine answers for the editor text, by lookup.
+	lineOffset(line: number): number {
+		const last = this.lineStarts.length - 1;
+		return this.lineStarts[Math.min(Math.max(line, 0), last)] ?? 0;
+	}
+
+	// The comments whose marker starts in [from, to), in document order.
+	startingIn(from: number, to: number): Comment[] {
+		return this.comments.slice(
+			lowerBound(this.starts, from),
+			lowerBound(this.starts, to),
+		);
+	}
+}
+
+function lowerBound(xs: readonly number[], x: number): number {
+	const lo = countWhile(xs.length, (mid) => (xs[mid] ?? 0) < x);
+	return lo;
+}
+
+// The last note parsed. Every section of one render hands over the same
+// source, so this holds one note at a time; a different note replaces it.
+let lastSource: SectionSource | undefined;
+export function sectionSource(raw: string): SectionSource {
+	if (lastSource?.raw !== raw) lastSource = new SectionSource(raw);
+	return lastSource;
+}
+
 export function registerReadingViewIndicator(plugin: AnnotecaPlugin): void {
 	plugin.registerMarkdownPostProcessor((el, ctx) => {
 		const mode = plugin.settings.readingViewIndicator;
@@ -81,17 +128,14 @@ export function registerReadingViewIndicator(plugin: AnnotecaPlugin): void {
 		// always looks open and the indicator counts would be wrong.
 		// Editor offsets, like the index: a click here hands the comment to the
 		// hub, which keys its selection on marker.start.
-		const text = toEditorText(info.text);
-		const all = parseDocument(text).comments;
+		const note = sectionSource(info.text);
+		const all = note.comments;
 		if (all.length === 0) {
 			return;
 		}
-		const sectionStart = offsetOfLine(text, info.lineStart);
-		const sectionEnd = offsetOfLine(text, info.lineEnd + 1);
-		const inSection = all.filter(
-			(c) =>
-				c.marker.start >= sectionStart && c.marker.start < sectionEnd,
-		);
+		const sectionStart = note.lineOffset(info.lineStart);
+		const sectionEnd = note.lineOffset(info.lineEnd + 1);
+		const inSection = note.startingIn(sectionStart, sectionEnd);
 
 		const open = (comment: Comment) => {
 			plugin.openReviewerOnComment(comment, ctx.sourcePath, el);

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **"Fix comments that break reading view" merged a line into a heading.** A multi-line comment marker at the end of a heading was moved above the heading together with the line break after it, so the next line (a paragraph, or the closing `---` of a block) joined the heading. The marker now moves on its own and the next line stays where it was.
+- **Long notes with many comments are no longer slow.** Many passes compared every comment with every other one, so their time grew with the square of the comment count. A note with 8,000 comments took minutes to repair and seconds to index or import. Each pass now runs in time proportional to the note. Affected: indexing and range checks, importing comments, the Outline tab, the reading-view indicators, sentence selection, moving a comment back to its text, comments added by other plugins, the copied-comment and starred checks, "Fix comments that break reading view", and "Repair comments written inside other comments". Unusual input (very long runs of punctuation, digits, spaces, blank lines or unclosed markers) no longer slows them down either.
+
 ## [1.27.2] - 2026-10-18
 
 ### Added

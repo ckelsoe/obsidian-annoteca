@@ -7,6 +7,7 @@
 import { convertGenericHtmlComments, convertNativeComments } from '../imports';
 import { enclosingForbidden, insideForbidden } from '../forbidden';
 import {
+	planMarkerInsert,
 	planSafeMarkerInsert,
 	repairMarkerPlacement,
 } from '../marker-placement';
@@ -215,5 +216,23 @@ describe('edges found by the fourth sweep', () => {
 			kind: 'range',
 			at: body + 2,
 		});
+	});
+
+	it('answers the same about inline code whatever was asked before', () => {
+		// The cached spans were keyed by a run's first line only, which a
+		// blank line shares with the paragraph above it.
+		const s = '`a\n\nb` tail';
+		const cold = planCloser(s, 3, 6, []);
+		planCloser(`${s} `, 0, 2, []);
+		planCloser(s, 0, 2, []);
+		expect(planCloser(s, 3, 6, [])).toEqual(cold);
+		expect(cold.kind).toBe('refused');
+	});
+
+	it('plans the first offset of a note that opens with a blank line the same every time', () => {
+		planMarkerInsert('something else', 0, true);
+		const doc = '\n# Test';
+		const cold = planSafeMarkerInsert(doc, 0, true);
+		expect(planSafeMarkerInsert(doc, 0, true)).toEqual(cold);
 	});
 });
