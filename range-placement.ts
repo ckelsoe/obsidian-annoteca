@@ -13,6 +13,9 @@
 // visible damage in the note. So an indented line that might be a nested list
 // paragraph rather than an indented code block is treated as code.
 
+import { frontmatterEnd } from './frontmatter';
+import { unclosedOpenerRanges } from './parser';
+import { scanStoreEntries } from './store';
 import type { MarkerRange } from './types';
 
 export type CloserPlan =
@@ -35,6 +38,22 @@ export function planCloser(
 	// that runs on into trailing spaces or line breaks would otherwise put it at
 	// the start of the next line, outside the text the reader picked.
 	let end = to;
+	// A range never runs into the end-of-file comment store: a closer inside
+	// a store entry ends that entry early and loses the comment it holds, and
+	// one after the store would make the store part of the passage. It stops
+	// where the store starts.
+	for (const s of scanStoreEntries(content))
+		if (end > s.start && from <= s.start) end = s.start;
+	// A marker opener with no `-->` of its own hides everything up to the next
+	// one, so a closer in there is hidden too, and the next `-->` it reaches
+	// may be another comment's. The range stops at that opener, and a passage
+	// that starts inside one gets no closer.
+	for (const r of unclosedOpenerRanges(content)) {
+		// Inside the properties it hides nothing (see forbiddenRanges).
+		if (r.start < frontmatterEnd(content)) continue;
+		if (from > r.start && from < r.end) return { kind: 'none' };
+		if (end > r.start && from <= r.start) end = r.start;
+	}
 	while (end > from && /\s/.test(content.charAt(end - 1))) end -= 1;
 	// A selection ending inside an existing marker or closer ends after it.
 	// Splitting one would break that comment.
@@ -52,15 +71,9 @@ export function planCloser(
 	return { kind: 'range', at: end };
 }
 
-// The note's frontmatter block, as its end offset, or 0 when it has none. Only
-// a block that opens the document counts; a `---` anywhere else is a
-// horizontal rule. Shared with forbiddenRanges in comment-service, so the two
-// never disagree about where the properties end.
-const FRONTMATTER_RE = /^---\n[\s\S]*?\n---[ \t]*(\n|$)/;
-
-export function frontmatterEnd(content: string): number {
-	return FRONTMATTER_RE.exec(content)?.[0].length ?? 0;
-}
+// Where the note properties end, kept in its own module so store.ts can ask
+// too without importing this file (which imports store.ts).
+export { frontmatterEnd };
 
 function inFrontmatter(content: string, pos: number): boolean {
 	return pos < frontmatterEnd(content);

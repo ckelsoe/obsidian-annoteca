@@ -32,6 +32,7 @@ import {
 import { EventJournal } from './event-journal';
 import { noteText, spliceRaw, toEditorText } from './note-text';
 import { repairMarkerPlacement } from './marker-placement';
+import { hasRepairableNesting, repairNestedMarkers } from './nested-repair';
 import { LossGuard, type LostComment } from './loss-guard';
 import { LostCommentModal } from './confirm-modal';
 import { diffToSplice } from './store';
@@ -137,7 +138,12 @@ import {
 	rekeyScopeAnchor,
 	type ScopeFile,
 } from './scope';
-import { CommentService, fileGoneMessage } from './comment-service';
+import {
+	CommentService,
+	INSIDE_FORBIDDEN_MESSAGE,
+	fileGoneMessage,
+	insideForbidden,
+} from './comment-service';
 import { DiagnosticsService } from './diagnostics-service';
 import {
 	applyFrontmatterSummary,
@@ -1374,6 +1380,46 @@ export default class AnnotecaPlugin extends Plugin {
 				).open();
 			},
 		});
+		// Before 1.27.2 a new comment could be written inside another one,
+		// a closer, the comment store or the note properties. These lift each
+		// such comment back out (nested-repair.ts).
+		this.addCommand({
+			id: 'repair-nested-comments-in-note',
+			name: 'Repair comments written inside other comments in this note',
+			checkCallback: (checking: boolean) => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file || file.extension !== 'md') return false;
+				if (!checking)
+					this.runGuarded('Comment repair', () =>
+						this.repairNestedInNote(file),
+					);
+				return true;
+			},
+		});
+		this.addCommand({
+			id: 'repair-nested-comments-in-vault',
+			name: 'Repair comments written inside other comments in all notes',
+			callback: () => {
+				new ConfirmBackupModal(
+					this.app,
+					'Repair comments written inside other comments',
+					'Find every comment that was written inside another comment, a range end, the comment store or the note properties, and move it just outside. The comment that held it gets its text back. A note is changed only when the repair leaves it whole with every comment kept.',
+					() => {
+						this.runGuarded('Comment repair', async () => {
+							const { totalConverted, filesTouched } =
+								await this.convertVaultFiles(
+									repairNestedMarkers,
+								);
+							new Notice(
+								totalConverted === 0
+									? 'No comments needed repairing.'
+									: `Repaired ${totalConverted} comment(s) in ${filesTouched} note(s).`,
+							);
+						});
+					},
+				).open();
+			},
+		});
 		this.addCommand({
 			id: 'convert-note-to-eof-storage',
 			name: 'Convert this note to end-of-file comment storage',
@@ -1433,6 +1479,7 @@ export default class AnnotecaPlugin extends Plugin {
 			file.path,
 			file.basename,
 			idx.malformed,
+			() => hasRepairableNesting(content),
 		);
 		if (notice !== undefined) new Notice(notice);
 		this.events.trigger('index-changed', { path: file.path });
@@ -1855,6 +1902,18 @@ export default class AnnotecaPlugin extends Plugin {
 	// fail quietly (no right leaf to put it in), and API compose() reports
 	// this result to its caller, so it is awaited rather than assumed.
 	private openComposer(request: ComposerRequest): Promise<boolean> {
+		// A new comment whose marker would start inside an existing marker,
+		// the comment store or the properties would corrupt both. Said before
+		// the form opens, so nobody writes a comment only to have Save refuse
+		// it. The composer checks again at Save, against the note as it is then.
+		if (!request.editing) {
+			const editor = request.editor;
+			const at = editor.posToOffset(editor.getCursor('from'));
+			if (insideForbidden(editor.getValue(), at)) {
+				new Notice(INSIDE_FORBIDDEN_MESSAGE);
+				return Promise.resolve(false);
+			}
+		}
 		if (this.settings.composerLocation === 'panel')
 			return this.openComposerPanel(request);
 		new AddCommentModal(this.app, this, request).open();
@@ -3390,6 +3449,19 @@ export default class AnnotecaPlugin extends Plugin {
 			fixed === 0
 				? 'No comments in this note break reading view.'
 				: `Fixed ${fixed} comment(s) in this note.`,
+		);
+	}
+
+	private async repairNestedInNote(file: TFile): Promise<void> {
+		const fixed = await this.comments.convertFileComments(
+			file.path,
+			file,
+			repairNestedMarkers,
+		);
+		new Notice(
+			fixed === 0
+				? 'No comments in this note were written inside another one.'
+				: `Repaired ${fixed} comment(s) in this note.`,
 		);
 	}
 

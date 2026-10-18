@@ -47,7 +47,12 @@ import type {
 	Reply,
 	Resolution,
 } from './types';
-import { isCommentSource, RANGE_CLOSED_LINE } from './parser';
+import {
+	isCommentSource,
+	RANGE_CLOSED_LINE,
+	unclosedOpenerRanges,
+} from './parser';
+import { frontmatterEnd } from './frontmatter';
 
 // Schema version stamped into every entry. The marker format deliberately has NO
 // version sentinel (see parser.ts's escapeTerminator note: adding one there is a
@@ -516,6 +521,25 @@ export function writeStoreRegion(
 		return prose === '' ? '' : `${prose}\n`;
 	}
 	const joined = region.join('\n\n');
+	// A marker opener with no `-->` that runs to the end of the note leaves an
+	// HTML comment open there, and a store appended after it is swallowed: the
+	// stray opener pairs with the first entry's `-->` and reads that entry as
+	// its body. The region goes just before that opener instead, where nothing
+	// is open. Still a fixed point: the next rebuild strips it, finds the same
+	// opener and puts it back in the same place.
+	// One inside the properties is left alone: they are not rendered as
+	// HTML, so it hides nothing, and the region must never go in there.
+	const properties = frontmatterEnd(prose);
+	const open = unclosedOpenerRanges(prose).find(
+		(r) => r.end === prose.length && r.start >= properties,
+	);
+	if (open !== undefined) {
+		const head = prose.slice(0, open.start).trimEnd();
+		const tail = prose.slice(open.start);
+		return head === ''
+			? `${joined}\n\n${tail}\n`
+			: `${head}\n\n${joined}\n\n${tail}\n`;
+	}
 	return prose === '' ? `${joined}\n` : `${prose}\n\n${joined}\n`;
 }
 

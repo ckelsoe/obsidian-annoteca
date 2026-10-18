@@ -15,7 +15,7 @@ import type AnnotecaPlugin from './main';
 import {
 	headingRangeEnd,
 	layoutMarker,
-	planMarkerInsert,
+	planSafeMarkerInsert,
 } from './marker-placement';
 import { toEditorText } from './note-text';
 import type { AnchorText, Comment, StorageMode } from './types';
@@ -38,7 +38,12 @@ import {
 	storeEntriesWith,
 } from './document';
 import { diffToSplice, parseStore, toStored, writeStoreRegion } from './store';
-import { VANISHED_MESSAGE, ambiguousMessage } from './comment-service';
+import {
+	INSIDE_FORBIDDEN_MESSAGE,
+	VANISHED_MESSAGE,
+	ambiguousMessage,
+	insideForbidden,
+} from './comment-service';
 import { getCategoryOrFallback } from './categories';
 import { resolveSettingsCategories } from './settings';
 import { shouldSubmitOnKeydown } from './view-utils';
@@ -728,6 +733,17 @@ export class ComposerForm {
 		// is what lets a closer that later goes missing be reported.
 		const from = editor.getCursor('from');
 		const fromOffset = editor.posToOffset(from);
+		// The note can have changed since the form opened (the side panel keeps
+		// the editor live), so the open-time check is not enough. Refused before
+		// anything is written; the form stays open with the text.
+		const requested =
+			selection.length > 0
+				? fromOffset
+				: editor.posToOffset(editor.getCursor());
+		if (insideForbidden(editor.getValue(), requested)) {
+			new Notice(INSIDE_FORBIDDEN_MESSAGE);
+			return;
+		}
 		const plan =
 			selection.length > 0 && id !== undefined
 				? this.closerPlan(editor, fromOffset, mode !== 'eof')
@@ -754,13 +770,18 @@ export class ComposerForm {
 
 		// Where the marker goes: at the passage, moved off the start of a block
 		// where that would stop the note rendering (see marker-placement.ts).
-		const place = planMarkerInsert(
+		// Safe placement: moving the marker off the start of its block can
+		// carry it into a multi-line marker above, and it goes just before that
+		// marker instead. The requested spot itself was checked above.
+		const place = planSafeMarkerInsert(
 			editor.getValue(),
-			selection.length > 0
-				? fromOffset
-				: editor.posToOffset(editor.getCursor()),
+			requested,
 			text.includes('\n'),
 		);
+		if (place === undefined) {
+			new Notice(INSIDE_FORBIDDEN_MESSAGE);
+			return;
+		}
 		const placeAt = editor.offsetToPos(place.at);
 		let markerStart: number;
 		if (selection.length > 0) {
