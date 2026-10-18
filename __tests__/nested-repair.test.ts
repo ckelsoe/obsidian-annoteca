@@ -4,7 +4,7 @@
 // asking whether the spot was inside something; the old planCloser could put
 // a closer inside a store entry.
 
-import { repairNestedMarkers } from '../nested-repair';
+import { hasRepairableNesting, repairNestedMarkers } from '../nested-repair';
 import { enclosingForbidden } from '../forbidden';
 import { layoutMarker, planMarkerInsert } from '../marker-placement';
 import {
@@ -145,6 +145,17 @@ function damagedOffsets(content: string): number[] {
 }
 
 describe('repairNestedMarkers', () => {
+	it('answers whether a note needs the repair without running it all', () => {
+		expect(hasRepairableNesting(INLINE_NOTE)).toBe(false);
+		const damaged = oldInsert(
+			INLINE_NOTE,
+			INLINE_NOTE.indexOf('first comment body') + 3,
+			NEW_FULL,
+			'',
+		);
+		expect(hasRepairableNesting(damaged)).toBe(true);
+	});
+
 	it('leaves a healthy note alone', () => {
 		expect(repairNestedMarkers(INLINE_NOTE)).toEqual({
 			updated: INLINE_NOTE,

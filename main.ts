@@ -32,7 +32,7 @@ import {
 import { EventJournal } from './event-journal';
 import { noteText, spliceRaw, toEditorText } from './note-text';
 import { repairMarkerPlacement } from './marker-placement';
-import { repairNestedMarkers } from './nested-repair';
+import { hasRepairableNesting, repairNestedMarkers } from './nested-repair';
 import { LossGuard, type LostComment } from './loss-guard';
 import { LostCommentModal } from './confirm-modal';
 import { diffToSplice } from './store';
@@ -1479,7 +1479,7 @@ export default class AnnotecaPlugin extends Plugin {
 			file.path,
 			file.basename,
 			idx.malformed,
-			() => repairNestedMarkers(content).converted > 0,
+			() => hasRepairableNesting(content),
 		);
 		if (notice !== undefined) new Notice(notice);
 		this.events.trigger('index-changed', { path: file.path });

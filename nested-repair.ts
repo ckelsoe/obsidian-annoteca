@@ -489,6 +489,12 @@ function liftOne(content: string): string | undefined {
 	return keeps(rejoined) ? rejoined : undefined;
 }
 
+// Whether the repair would do anything: one step of it, for the damage
+// notice, which only asks yes or no on the note being opened or saved.
+export function hasRepairableNesting(content: string): boolean {
+	return liftOne(content) !== undefined;
+}
+
 // Lift every piece that was written inside another one. `converted` is how
 // many moved. Bounded: each lift lowers the damage count, so the loop ends
 // on its own well before the guard.
