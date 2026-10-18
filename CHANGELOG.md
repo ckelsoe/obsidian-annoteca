@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.27.3] - 2026-10-18
+
 ### Fixed
 
 - **"Fix comments that break reading view" merged a line into a heading.** A multi-line comment marker at the end of a heading was moved above the heading together with the line break after it, so the next line (a paragraph, or the closing `---` of a block) joined the heading. The marker now moves on its own and the next line stays where it was.
