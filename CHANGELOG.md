@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.27.0] - 2026-10-18
+
 ### Added
 
 - **Select and copy comment text.** Comment bodies, replies, addressed and resolution notes, and an edit's original text can now be selected and copied in the hub, a comment's own tab, and the popup. So can the comment text in the Outline, Starred, unresolved and index lists; a click that ends a selection there no longer jumps away.
