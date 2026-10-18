@@ -471,6 +471,9 @@ export class OutlineTabRenderer {
 				this.cardAction(acts, 'Open in tab', 'app-window', () =>
 					this.plugin.openCommentInTab(file.path, c),
 				);
+			this.cardAction(acts, 'Copy text', 'clipboard-copy', () => {
+				void this.plugin.copyCommentText(c);
+			});
 		}
 	}
 

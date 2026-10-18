@@ -7,7 +7,11 @@ import type { Comment } from './types';
 import { getCategoryOrFallback } from './categories';
 import { resolveSettingsCategories } from './settings';
 import { formatStamp, truncate } from './view-utils';
-import { renderCategoryBadge, renderStarButton } from './ui-helpers';
+import {
+	endsTextSelection,
+	renderCategoryBadge,
+	renderStarButton,
+} from './ui-helpers';
 
 export class StarredTabRenderer {
 	constructor(private readonly plugin: AnnotecaPlugin) {}
@@ -106,6 +110,7 @@ export class StarredTabRenderer {
 			}
 
 			card.addEventListener('click', () => {
+				if (endsTextSelection(card)) return;
 				void this.plugin.navigateToComment(
 					entry.path,
 					c.marker.start,

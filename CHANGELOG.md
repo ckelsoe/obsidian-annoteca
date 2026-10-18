@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Select and copy comment text.** Comment bodies, replies, addressed and resolution notes, and an edit's original text can now be selected and copied in the hub, a comment's own tab, and the popup. So can the comment text in the Outline, Starred, unresolved and index lists; a click that ends a selection there no longer jumps away.
+- **Copy text**: copies a whole thread (body, notes and every reply) as Markdown. On each comment in the hub and the popup, on Outline cards, in the editor's right-click menu, and as the "Copy comment text here" command.
+- **Copy all**: a button in the Thread tab's toolbar copies every comment the tab is showing (same scope and status filter), grouped by note.
+
 ## [1.26.0] - 2026-10-17
 
 ### Added

@@ -1468,7 +1468,8 @@ settings:
 	flex-shrink: 0;
 }
 
-.annoteca-scope-pin {
+.annoteca-scope-pin,
+.annoteca-scope-copy {
 	flex-shrink: 0;
 	width: 28px;
 	height: 28px;
@@ -1483,7 +1484,8 @@ settings:
 	cursor: pointer;
 }
 
-.annoteca-scope-pin:hover {
+.annoteca-scope-pin:hover,
+.annoteca-scope-copy:hover {
 	background-color: var(--background-modifier-hover);
 	color: var(--text-normal);
 }
@@ -1492,6 +1494,31 @@ settings:
 	background-color: var(--interactive-accent);
 	border-color: var(--interactive-accent);
 	color: var(--text-on-accent);
+}
+
+/* Selectable comment text ------------------------------------------------- */
+/*
+ * Obsidian turns text selection off across its interface, so without this
+ * nothing a comment says could be selected and copied: not a body, not an
+ * agent's long reply, not the original text an edit replaced. Only the text
+ * opts back in. Buttons, badges and the compact row (which toggles the card)
+ * stay unselectable, so a click on a control never starts a selection.
+ */
+.annoteca-reviewer-body,
+.annoteca-reviewer-resolution,
+.annoteca-reviewer-addressed,
+.annoteca-reply,
+.annoteca-hover-body,
+.annoteca-hover-reply,
+.annoteca-hover-addressed,
+.annoteca-hover-resolution,
+.annoteca-hover-original,
+.annoteca-outline-card-body,
+.annoteca-starred-file,
+.annoteca-starred-body,
+.annoteca-row-path,
+.annoteca-row-body {
+	user-select: text;
 }
 
 /* File groups in hierarchical Thread tab ----------------------------------- */
