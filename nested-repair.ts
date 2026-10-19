@@ -744,6 +744,20 @@ export function hasRepairableNesting(content: string): boolean {
 	return liftOne(content) !== undefined;
 }
 
+// How many comments and range ends sit where the repair would look for
+// them, counted in one pass without repairing. Exact for the damage that is
+// slow to repair, many comments written into one stretch of a note; a chain
+// of comments written into each other counts as its first only, and that
+// repairs quickly. Used to warn before a repair that may take seconds, so it
+// is not shown as a number.
+export function damagedPieceCount(content: string): number {
+	return suspects(content).length;
+}
+
+// Past this many, a repair can take a second or more rather than a moment:
+// 160 took up to 2 s in the slowest shapes measured.
+export const SLOW_REPAIR_PIECES = 100;
+
 // Lift every piece that was written inside another one. `converted` is how
 // many moved.
 //

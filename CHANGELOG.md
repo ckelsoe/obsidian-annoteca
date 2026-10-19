@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **"Repair comments written inside other comments in all notes" now shows what it will change before it starts.** It looks through the vault first and lists the notes that need the repair, and names any note with many damaged comments, which can take a few seconds to repair. If no note needs it, it says so without asking for a backup. While it runs, a notice shows which note it is on. Each note is repaired once; before, a damaged note was repaired twice, once to check and once to write, which doubled the wait on the notes where it is long.
+- **"Repair comments written inside other comments in this note"** says first when the note has many damaged comments and may take a few seconds.
+
 ### Fixed
 
 - **"Repair comments written inside other comments" could not mend a note with more than one damaged store entry.** When range ends had landed inside several comment-store entries, the repair took one out and ran that entry on into the next, then counted the two as one problem fixed. It now rejoins each entry with its own left-behind half, ends each range where its passage ended, and keeps the ranges nested. It also no longer pairs one entry's half with another's when both happen to sit near each other, or joins two halves into an id the note never had. It mends all of 20,000 generated notes with up to four such entries, and no comment is lost in any of them.

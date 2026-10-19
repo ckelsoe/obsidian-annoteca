@@ -1420,21 +1420,31 @@ export class CommentService {
 		);
 	}
 
+	// `live` is asked again once the write's turn comes and just before it
+	// writes: a bulk run the plugin unloaded during writes nothing more.
 	async convertFileComments(
 		path: string,
 		file: TFile,
 		convert: (content: string) => ImportResult,
+		live: () => boolean = () => true,
 	): Promise<number> {
 		return this.enqueue(path, () =>
-			this.convertFileCommentsUnqueued(path, file, convert),
+			this.convertFileCommentsUnqueued(file, convert, live),
 		);
 	}
 
+	// Found by the file, where it is now, not by the path it was queued
+	// under: a note renamed while its write waited would otherwise have the
+	// write go to the editor of whatever note took over the old path.
 	private async convertFileCommentsUnqueued(
-		path: string,
 		file: TFile,
 		convert: (content: string) => ImportResult,
+		live: () => boolean,
 	): Promise<number> {
+		if (!live()) return 0;
+		const path = file.path;
+		if (this.plugin.app.vault.getAbstractFileByPath(path) !== file)
+			return 0;
 		const view = this.getOpenMarkdownView(path);
 		if (view) {
 			// The editor's document is the truth for an open file, and writing
@@ -1466,6 +1476,7 @@ export class CommentService {
 		// converts, and written back as the one span that changed, in the
 		// ending of the line it starts on. Bytes outside that span keep theirs.
 		const updated = await this.plugin.app.vault.process(file, (current) => {
+			if (!live()) return current;
 			const note = noteText(current);
 			const result = convert(note.text);
 			converted = result.converted;
@@ -1476,6 +1487,8 @@ export class CommentService {
 			return splice ? spliceRaw(note, [splice]) : current;
 		});
 		if (converted === 0) return 0;
+		// Written, but the plugin is gone: nothing left to tell.
+		if (!live()) return converted;
 		this.plugin.commentIndex.rebuild(path, updated);
 		this.plugin.events.trigger('index-changed', { path });
 		return converted;

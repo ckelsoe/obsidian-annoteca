@@ -90,7 +90,9 @@ function makeHarness(deleteOnResolve: boolean) {
 function makeHarnessWith(initial: string, deleteOnResolve = false) {
 	let content = initial;
 	let frontmatter: Record<string, unknown> | undefined;
-	const file = new TFile();
+	// A note's file knows its path, as a vault's does: a write looks the note
+	// up by it.
+	const file = Object.assign(new TFile(), { path: 'note.md' });
 	const plugin = {
 		settings: {
 			enableAuthorTag: true,
@@ -132,6 +134,7 @@ function makeHarnessWith(initial: string, deleteOnResolve = false) {
 	} as unknown as AnnotecaPlugin;
 	return {
 		service: new CommentService(plugin),
+		file,
 		// Exposed so a test can change a setting the service reads, which the
 		// promotion-budget cases need.
 		plugin,
@@ -1265,7 +1268,9 @@ function makeEditorHarness(
 	// Both write paths land in the same `content`, so a test that only reads it
 	// back cannot tell them apart. This counter is what distinguishes them.
 	let processCalls = 0;
-	const file = new TFile();
+	// A note's file knows its path, as a vault's does: a write looks the note
+	// up by it.
+	const file = Object.assign(new TFile(), { path: 'note.md' });
 	const editor = {
 		getValue: () => {
 			const snapshot = content;
@@ -1315,6 +1320,7 @@ function makeEditorHarness(
 	} as unknown as AnnotecaPlugin;
 	return {
 		service: new CommentService(plugin),
+		file,
 		get content() {
 			return content;
 		},
@@ -1538,7 +1544,9 @@ function makeConvertHarness(initial: string) {
 	const frontmatter: Record<string, unknown> | undefined = undefined;
 	let beforeNextProcess: (() => void) | undefined;
 	let afterNextRead: (() => void) | undefined;
-	const file = new TFile();
+	// A note's file knows its path, as a vault's does: a write looks the note
+	// up by it.
+	const file = Object.assign(new TFile(), { path: 'note.md' });
 	const plugin = {
 		settings: {
 			enableAuthorTag: true,
@@ -1638,6 +1646,40 @@ describe('convertFileComments', () => {
 		expect(h.content).not.toContain('annoteca/uncategorized:');
 	});
 
+	it('writes nothing when the plugin unloaded while the write waited', async () => {
+		const h = makeConvertHarness(NOTE_WITH_NATIVE);
+		const before = h.content;
+		let live = true;
+		// Unloaded between the write's turn coming and the note being read
+		// under the lock.
+		h.onceBeforeWrite(() => {
+			live = false;
+		});
+		const n = await h.service.convertFileComments(
+			'note.md',
+			h.file,
+			convertAll,
+			() => live,
+		);
+		expect(n).toBe(0);
+		expect(h.content).toBe(before);
+	});
+
+	it('writes nothing to a note whose file is no longer at its path', async () => {
+		// The file was renamed while its write waited; what is at the path it
+		// was queued under is not this file.
+		const h = makeConvertHarness(NOTE_WITH_NATIVE);
+		const before = h.content;
+		Object.assign(h.file, { path: 'renamed.md' });
+		const n = await h.service.convertFileComments(
+			'note.md',
+			h.file,
+			convertAll,
+		);
+		expect(n).toBe(0);
+		expect(h.content).toBe(before);
+	});
+
 	it('does not lose a resolve that lands while the sweep runs', async () => {
 		// The ledger's repro, as an interleaving rather than a wall-clock race:
 		// both verbs are queued per file, so the sweep can no longer compute its
@@ -1705,7 +1747,7 @@ describe('convertFileComments', () => {
 		const h = makeEditorHarness(NOTE_WITH_NATIVE);
 		const n = await h.service.convertFileComments(
 			'note.md',
-			new TFile(),
+			h.file,
 			convertAll,
 		);
 		expect(n).toBe(1);
@@ -2704,7 +2746,7 @@ const MATRIX_ACTIONS: {
 		name: 'convert',
 		doc: `${NOTE_WITH_NATIVE}\nAnother line.\n`,
 		run: (h) =>
-			h.service.convertFileComments('note.md', new TFile(), convertAll),
+			h.service.convertFileComments('note.md', h.file, convertAll),
 	},
 ];
 

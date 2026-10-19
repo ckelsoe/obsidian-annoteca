@@ -259,11 +259,18 @@ describe('navigateToOffset against a leaf that is still loading', () => {
 			files: { 'notes/empty.md': '' },
 		});
 
-		const started = process.hrtime.bigint();
-		await plugin.navigateToOffset('notes/empty.md', 0);
-		const ms = Number(process.hrtime.bigint() - started) / 1e6;
-
-		expect(ms).toBeLessThan(100);
+		// Counted, not timed: a wall-clock bound failed when the machine was
+		// busy running the rest of the suite. The editor wait polls on a
+		// timer shorter than the 20 ms the fake openFile takes to fill the
+		// buffer; the highlight flash after the jump runs far longer.
+		const timers = jest.spyOn(window, 'setTimeout');
+		try {
+			await plugin.navigateToOffset('notes/empty.md', 0);
+			const polls = timers.mock.calls.filter((c) => (c[1] ?? 0) < 20);
+			expect(polls).toHaveLength(0);
+		} finally {
+			timers.mockRestore();
+		}
 		expect(leaf.view.editor.cursor.offset).toBe(0);
 	});
 
