@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.27.4] - 2026-10-19
+
 ### Changed
 
 - **"Repair comments written inside other comments in all notes" now shows what it will change before it starts.** It looks through the vault first and lists the notes that need the repair, and names any note with many damaged comments, which can take a few seconds to repair. If no note needs it, it says so without asking for a backup. While it runs, a notice shows which note it is on. Each note is repaired once; before, a damaged note was repaired twice, once to check and once to write, which doubled the wait on the notes where it is long.
