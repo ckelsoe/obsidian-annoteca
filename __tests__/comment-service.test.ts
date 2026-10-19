@@ -1544,6 +1544,10 @@ function makeConvertHarness(initial: string) {
 	const frontmatter: Record<string, unknown> | undefined = undefined;
 	let beforeNextProcess: (() => void) | undefined;
 	let afterNextRead: (() => void) | undefined;
+	// Where the vault holds the note, and who hears an index rebuild: a test
+	// can move the note mid-write and see where it was indexed.
+	let heldAt = 'note.md';
+	let rebuilt: ((path: string) => void) | undefined;
 	// A note's file knows its path, as a vault's does: a write looks the note
 	// up by it.
 	const file = Object.assign(new TFile(), { path: 'note.md' });
@@ -1556,7 +1560,7 @@ function makeConvertHarness(initial: string) {
 		app: {
 			vault: {
 				getAbstractFileByPath: (p: string) =>
-					p === 'note.md' ? file : null,
+					p === heldAt ? file : null,
 				// Snapshots first, then fires the hook, so a hook can land a
 				// whole other write inside the window between a verb's read and
 				// the write it computes from it.
@@ -1586,7 +1590,11 @@ function makeConvertHarness(initial: string) {
 				getActiveFile: () => null,
 			},
 		},
-		commentIndex: { rebuild: () => undefined },
+		commentIndex: {
+			rebuild: (path: string) => {
+				rebuilt?.(path);
+			},
+		},
 		events: { trigger: () => undefined },
 		debug: QUIET_DEBUG,
 	} as unknown as AnnotecaPlugin;
@@ -1604,6 +1612,12 @@ function makeConvertHarness(initial: string) {
 		},
 		onceAfterRead(fn: () => void) {
 			afterNextRead = fn;
+		},
+		movedTo(path: string) {
+			heldAt = path;
+		},
+		onRebuild(fn: (path: string) => void) {
+			rebuilt = fn;
 		},
 	};
 }
@@ -1663,6 +1677,23 @@ describe('convertFileComments', () => {
 		);
 		expect(n).toBe(0);
 		expect(h.content).toBe(before);
+	});
+
+	it('indexes a note renamed while its write was on disk under its new path', async () => {
+		const h = makeConvertHarness(NOTE_WITH_NATIVE);
+		const rebuilt: string[] = [];
+		h.onRebuild((path) => rebuilt.push(path));
+		h.onceBeforeWrite(() => {
+			Object.assign(h.file, { path: 'renamed.md' });
+			h.movedTo('renamed.md');
+		});
+		const n = await h.service.convertFileComments(
+			'note.md',
+			h.file,
+			convertAll,
+		);
+		expect(n).toBe(1);
+		expect(rebuilt).toEqual(['renamed.md']);
 	});
 
 	it('writes nothing to a note whose file is no longer at its path', async () => {

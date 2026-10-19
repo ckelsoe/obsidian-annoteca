@@ -1489,8 +1489,13 @@ export class CommentService {
 		if (converted === 0) return 0;
 		// Written, but the plugin is gone: nothing left to tell.
 		if (!live()) return converted;
-		this.plugin.commentIndex.rebuild(path, updated);
-		this.plugin.events.trigger('index-changed', { path });
+		// Indexed where the note is now: it can be renamed while the write
+		// is on disk, and the rename moved its old entry already.
+		const now = file.path;
+		if (this.plugin.app.vault.getAbstractFileByPath(now) !== file)
+			return converted;
+		this.plugin.commentIndex.rebuild(now, updated);
+		this.plugin.events.trigger('index-changed', { path: now });
 		return converted;
 	}
 
