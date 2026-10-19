@@ -155,10 +155,19 @@ export class ConfirmDeleteResolvedModal extends Modal {
 // Two-step confirmation modal used by the bulk-conversion command (F-230)
 // before it touches any file in the vault.
 
+// A run that changes only some notes lists them (`items`) and says so in
+// place of the every-file warning (`scope`); `cta` names what it runs.
+export interface ConfirmBackupDetails {
+	items?: readonly string[];
+	scope?: string;
+	cta?: string;
+}
+
 export class ConfirmBackupModal extends Modal {
 	private readonly title: string;
 	private readonly description: string;
 	private readonly onConfirm: () => void;
+	private readonly details: ConfirmBackupDetails;
 	private acknowledged = false;
 
 	constructor(
@@ -166,11 +175,13 @@ export class ConfirmBackupModal extends Modal {
 		title: string,
 		description: string,
 		onConfirm: () => void,
+		details: ConfirmBackupDetails = {},
 	) {
 		super(app);
 		this.title = title;
 		this.description = description;
 		this.onConfirm = onConfirm;
+		this.details = details;
 	}
 
 	onOpen(): void {
@@ -178,8 +189,15 @@ export class ConfirmBackupModal extends Modal {
 		contentEl.empty();
 		contentEl.createEl('h3', { text: this.title });
 		contentEl.createEl('p', { text: this.description });
+		if (this.details.items) {
+			const list = contentEl.createEl('ul');
+			for (const item of this.details.items)
+				list.createEl('li', { text: item });
+		}
 		contentEl.createEl('p', {
-			text: 'This operation modifies every Markdown file in your vault and cannot be reversed by the plugin. Use Git, Obsidian Sync, or an external backup to make sure you can roll back.',
+			text:
+				this.details.scope ??
+				'This operation modifies every Markdown file in your vault and cannot be reversed by the plugin. Use Git, Obsidian Sync, or an external backup to make sure you can roll back.',
 		});
 
 		new Setting(contentEl)
@@ -193,7 +211,7 @@ export class ConfirmBackupModal extends Modal {
 		new Setting(contentEl)
 			.addButton((b) =>
 				b
-					.setButtonText('Run conversion')
+					.setButtonText(this.details.cta ?? 'Run conversion')
 					.then((btn) => btn.buttonEl.addClass('mod-warning'))
 					.onClick(() => {
 						if (!this.acknowledged) return;

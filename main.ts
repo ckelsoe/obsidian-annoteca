@@ -33,6 +33,14 @@ import { EventJournal } from './event-journal';
 import { noteText, spliceRaw, toEditorText } from './note-text';
 import { repairMarkerPlacement } from './marker-placement';
 import { hasRepairableNesting, repairNestedMarkers } from './nested-repair';
+import {
+	REPAIR_SCOPE_TEXT,
+	repairConfirmText,
+	repairProgressText,
+	repairSlowNoteText,
+	repairTarget,
+	type RepairTarget,
+} from './repair-plan';
 import { LossGuard, type LostComment } from './loss-guard';
 import { LostCommentModal } from './confirm-modal';
 import { diffToSplice } from './store';
@@ -154,6 +162,14 @@ import {
 	type FrontmatterSummaryOptions,
 } from './frontmatter-summary';
 import { DebugLog, elapsedMs } from './debug-log';
+
+// A moment for a notice just shown or changed to paint before work that
+// keeps Obsidian busy, such as a long repair. Long enough for a frame when
+// what follows takes seconds; a bare yield otherwise, so a run over many
+// quick notes is not slowed by waiting on each.
+function letNoticeShow(long: boolean): Promise<void> {
+	return new Promise((resolve) => window.setTimeout(resolve, long ? 50 : 0));
+}
 
 // The element a note-side action came from, for finding its leaf: a command
 // or menu gets the note's view, which in a pop-out window is how the comment
@@ -1400,24 +1416,9 @@ export default class AnnotecaPlugin extends Plugin {
 			id: 'repair-nested-comments-in-vault',
 			name: 'Repair comments written inside other comments in all notes',
 			callback: () => {
-				new ConfirmBackupModal(
-					this.app,
-					'Repair comments written inside other comments',
-					'Find every comment that was written inside another comment, a range end, the comment store or the note properties, and move it just outside. The comment that held it gets its text back. A note is changed only when the repair leaves it whole with every comment kept.',
-					() => {
-						this.runGuarded('Comment repair', async () => {
-							const { totalConverted, filesTouched } =
-								await this.convertVaultFiles(
-									repairNestedMarkers,
-								);
-							new Notice(
-								totalConverted === 0
-									? 'No comments needed repairing.'
-									: `Repaired ${totalConverted} comment(s) in ${filesTouched} note(s).`,
-							);
-						});
-					},
-				).open();
+				this.runGuarded('Comment repair', () =>
+					this.confirmAndRepairNested(),
+				);
 			},
 		});
 		this.addCommand({
@@ -3339,6 +3340,7 @@ export default class AnnotecaPlugin extends Plugin {
 				f.path,
 				f,
 				convert,
+				() => !this.unloaded,
 			);
 			if (converted === 0) continue;
 			totalConverted += converted;
@@ -3373,6 +3375,7 @@ export default class AnnotecaPlugin extends Plugin {
 			file.path,
 			file,
 			convert,
+			() => !this.unloaded,
 		);
 		if (converted === 0) {
 			new Notice(
@@ -3459,6 +3462,7 @@ export default class AnnotecaPlugin extends Plugin {
 			file.path,
 			file,
 			repairMarkerPlacement,
+			() => !this.unloaded,
 		);
 		new Notice(
 			fixed === 0
@@ -3468,15 +3472,114 @@ export default class AnnotecaPlugin extends Plugin {
 	}
 
 	private async repairNestedInNote(file: TFile): Promise<void> {
-		const fixed = await this.comments.convertFileComments(
-			file.path,
-			file,
-			repairNestedMarkers,
-		);
+		const { text } = await this.comments.currentNoteText(file.path, file);
+		if (this.unloaded) return;
+		const target = repairTarget(file.path, file.basename, text);
+		const wait = target?.slow
+			? new Notice(repairSlowNoteText(file.basename), 0)
+			: undefined;
+		let fixed: number;
+		try {
+			if (wait) await letNoticeShow(true);
+			fixed = await this.comments.convertFileComments(
+				file.path,
+				file,
+				repairNestedMarkers,
+				() => !this.unloaded,
+			);
+		} finally {
+			wait?.hide();
+		}
+		if (this.unloaded) return;
 		new Notice(
 			fixed === 0
 				? 'No comments in this note were written inside another one.'
 				: `Repaired ${fixed} comment(s) in this note.`,
+		);
+	}
+
+	// The notes the repair would change are found first, with the quick check
+	// the damage notice uses, and listed in the confirmation, with the heavily
+	// damaged ones named as slow. Each note is then repaired once: a pass that
+	// ran the whole repair to decide whether to write, and then again to
+	// write, doubled the time on exactly the notes where it is long.
+	private async confirmAndRepairNested(): Promise<void> {
+		// Each note is held by its file, not its path: one renamed before the
+		// run is still repaired, and a note that takes over its old path is
+		// not.
+		const found: { target: RepairTarget; file: TFile }[] = [];
+		const looking = new Notice('Looking for comments to repair...', 0);
+		try {
+			for (const f of this.app.vault.getMarkdownFiles()) {
+				const { text } = await this.comments.currentNoteText(f.path, f);
+				if (this.unloaded) return;
+				const target = repairTarget(f.path, f.basename, text);
+				if (target) found.push({ target, file: f });
+			}
+		} finally {
+			looking.hide();
+		}
+		const targets = found.map((x) => x.target);
+		if (targets.length === 0) {
+			new Notice('No comments needed repairing.');
+			return;
+		}
+		const { description, items } = repairConfirmText(targets);
+		new ConfirmBackupModal(
+			this.app,
+			'Repair comments written inside other comments',
+			description,
+			() => {
+				this.runGuarded('Comment repair', () =>
+					this.repairNestedIn(found),
+				);
+			},
+			{ items, scope: REPAIR_SCOPE_TEXT, cta: 'Run repair' },
+		).open();
+	}
+
+	private async repairNestedIn(
+		found: readonly { target: RepairTarget; file: TFile }[],
+	): Promise<void> {
+		let total = 0;
+		let touched = 0;
+		const progress = new Notice('', 0);
+		try {
+			for (const [i, { target, file }] of found.entries()) {
+				// Stopped when the plugin is: nothing is written after it
+				// unloads.
+				if (this.unloaded) return;
+				// Gone since the scan.
+				if (this.app.vault.getFileByPath(file.path) !== file) continue;
+				progress.setMessage(
+					repairProgressText(i + 1, found.length, {
+						...target,
+						name: file.basename,
+					}),
+				);
+				await letNoticeShow(target.slow);
+				if (this.unloaded) return;
+				// Read again inside the write, so a note edited since the
+				// list was made is repaired as it is now, or left alone.
+				const n = await this.comments.convertFileComments(
+					file.path,
+					file,
+					repairNestedMarkers,
+					() => !this.unloaded,
+				);
+				if (n === 0) continue;
+				total += n;
+				touched += 1;
+			}
+		} finally {
+			progress.hide();
+		}
+		if (this.unloaded) return;
+		this.events.trigger('index-changed');
+		new Notice(
+			total === 0
+				? 'No comments needed repairing.'
+				: `Repaired ${total} comment(s) in ${touched} note(s).`,
 		);
 	}
 

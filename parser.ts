@@ -190,8 +190,13 @@ const UNKNOWN_STAMPED_LINE_RE = new RegExp(
 // widens the fence when the content holds a run that would close it, and content
 // like that cannot round-trip through the old form at all, so no marker that
 // reads correctly today is rewritten.
-const ORIGINAL_FENCE_RE =
-	/^(`{3,})annoteca-original[ \t]*\r?\n([\s\S]*?)\r?\n\1[ \t]*$/gm;
+//
+// Found by findOriginalFences below, which reads them the way the pattern
+//   /^(`{3,})annoteca-original[ \t]*\r?\n([\s\S]*?)\r?\n\1[ \t]*$/gm
+// would, without its backtracking: each unclosed opener made that pattern
+// search the rest of the body for a closer, which was quadratic in a body
+// holding many of them.
+const ORIGINAL_FENCE_INFO = 'annoteca-original';
 
 // Longest run of backticks starting a line, which is the only place a run can
 // close the fence (the closing pattern anchors to a whole line).
@@ -724,18 +729,69 @@ interface FenceBlock {
 	content: string;
 }
 
-function findOriginalFences(inner: string): FenceBlock[] {
+// The line breaks `^` and `$` stop at in a multiline pattern.
+function isLineBreak(ch: string): boolean {
+	return ch === '\n' || ch === '\r' || ch === '\u2028' || ch === '\u2029';
+}
+
+function skipBlanks(text: string, at: number): number {
+	let i = at;
+	while (text.charAt(i) === ' ' || text.charAt(i) === '\t') i += 1;
+	return i;
+}
+
+function backtickRun(text: string, at: number): number {
+	let i = at;
+	while (text.charAt(i) === '`') i += 1;
+	return i - at;
+}
+
+// Exported for its test, which holds it to the pattern it replaced.
+export function findOriginalFences(inner: string): FenceBlock[] {
+	// Every possible closing line, by its backtick count: a line after a
+	// `\n` holding exactly that run, then blanks, then a line break or the
+	// end. Collected once, so each opener finds its closer by lookup.
+	const closers = new Map<number, number[]>();
+	for (
+		let q = inner.indexOf('\n') + 1;
+		q > 0;
+		q = inner.indexOf('\n', q) + 1
+	) {
+		const run = backtickRun(inner, q);
+		if (run < 3) continue;
+		const after = skipBlanks(inner, q + run);
+		if (after < inner.length && !isLineBreak(inner.charAt(after))) continue;
+		const list = closers.get(run);
+		if (list) list.push(q);
+		else closers.set(run, [q]);
+	}
 	const out: FenceBlock[] = [];
-	for (const match of inner.matchAll(ORIGINAL_FENCE_RE)) {
-		// match.index is always present for matchAll results; only the optional
-		// capture group can be undefined, so that is the one thing to guard.
-		const content = match[2];
-		if (content === undefined) continue;
-		out.push({
-			start: match.index,
-			end: match.index + match[0].length,
-			content,
-		});
+	const cursors = new Map<number, number>();
+	let from = 0;
+	for (let p = 0; p < inner.length; p += 1) {
+		if (p > 0 && !isLineBreak(inner.charAt(p - 1))) continue;
+		if (p < from) continue;
+		const run = backtickRun(inner, p);
+		if (run < 3 || !inner.startsWith(ORIGINAL_FENCE_INFO, p + run))
+			continue;
+		let at = skipBlanks(inner, p + run + ORIGINAL_FENCE_INFO.length);
+		if (inner.charAt(at) === '\r') at += 1;
+		if (inner.charAt(at) !== '\n') continue;
+		const bodyStart = at + 1;
+		// The first closing line whose `\n` is in the body or ends it. The
+		// body stops before that `\n`, and before a `\r` just ahead of it.
+		// Openers come in order, so each run's cursor only moves forward.
+		const list = closers.get(run) ?? [];
+		let k = cursors.get(run) ?? 0;
+		while (k < list.length && (list[k] ?? 0) - 1 < bodyStart) k += 1;
+		cursors.set(run, k);
+		const q = list[k];
+		if (q === undefined) continue;
+		const bodyEnd =
+			q - 2 >= bodyStart && inner.charAt(q - 2) === '\r' ? q - 2 : q - 1;
+		const end = skipBlanks(inner, q + run);
+		out.push({ start: p, end, content: inner.slice(bodyStart, bodyEnd) });
+		from = end;
 	}
 	return out;
 }

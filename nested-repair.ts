@@ -25,6 +25,7 @@
 
 import { countWhile } from './span-index';
 import { detectRangeIssues } from './diagnostics';
+import { isLeanMarker } from './document';
 import { enclosingForbidden } from './forbidden';
 import type { ImportResult } from './imports';
 import {
@@ -45,6 +46,7 @@ import {
 } from './json-scan';
 import {
 	decodeStoreEntry,
+	encodeStoreEntry,
 	parseStore,
 	scanStoreEntries,
 	type StoredComment,
@@ -419,12 +421,30 @@ interface Placed {
 // where a new one there would go. The left-behind half is found by decoding,
 // not guessed: it has no `<` or `>` (the store escapes both), it follows the
 // blank line the store region opens with, and joined to the moved half it
-// decodes to an entry the note does not already hold.
-function rejoinStore(
+// decodes to an entry the note does not already hold. Each such join is
+// offered in turn, and the caller keeps the first that checks out.
+function* rejoinStore(
 	content: string,
+	marked: boolean,
+	canonical: boolean,
 	known?: Stored,
-): { placed: Placed; piece: Piece } | undefined {
+): Generator<{ placed: Placed[]; piece: Piece }> {
 	const decoded = new Set(parseStore(content).map((e) => e.comment.id));
+	// The ids of lean markers still waiting for their entry. A head cut
+	// inside its id can take another entry's tail, cut inside that one's id,
+	// and decode as an id the note never had. Only a lean marker with no
+	// entry vouches for an id: a full comment that happens to carry the
+	// made-up id needs no entry, and must not pull the join its way.
+	const waiting = new Set<string>();
+	for (const c of parseAll(content))
+		if (c.id !== undefined && !decoded.has(c.id) && isLeanMarker(c))
+			waiting.add(c.id);
+	// Every closer in the note, wherever it sits now, by id: a broken entry
+	// can often be finished by more than one left-behind half, and only the
+	// one that gives a range comment its range, and no other comment one,
+	// is its own.
+	const closerIds = new Set<string>();
+	for (const k of scanClosers(content, [])) closerIds.add(k.id);
 	// By end, so each broken entry looks up its piece instead of searching
 	// them all.
 	const pieceByEnd = new Map<number, Piece>();
@@ -543,15 +563,41 @@ function rejoinStore(
 					fail();
 					continue;
 				}
+				if ((entry.range === 'closed') !== closerIds.has(entry.id))
+					continue;
+				if (waiting.has(entry.id) !== marked) continue;
+				// Joins that give back exactly what the store writes come first:
+				// JSON takes a repeated key, so a half can finish another
+				// entry's head and still decode. A hand-edited entry is never
+				// canonical and is tried after them.
+				if ((encodeStoreEntry(entry) === restored) !== canonical)
+					continue;
 				const rest =
 					content.slice(0, b.start) + restored + content.slice(b.end);
 				const prose = rest.slice(0, s) + rest.slice(t);
-				const placed = place(prose, s, piece, p, s);
-				return placed === undefined ? undefined : { placed, piece: p };
+				// A closer ends its passage before the closers already there,
+				// or after them: whichever keeps the ranges nested is for
+				// helpsIn to find. Two closers split into entries one rewrite
+				// after another both end where the store began.
+				const spots = [s];
+				if (p.closer) {
+					const run = /\s*<!--\s*\/annoteca\s+[a-z0-9]{1,32}\s*-->/y;
+					let c = s;
+					while (c > 0 && /\s/.test(prose.charAt(c - 1))) c -= 1;
+					let end = c;
+					run.lastIndex = c;
+					while (run.exec(prose) !== null) end = run.lastIndex;
+					if (end > c) spots.push(end);
+				}
+				const placed: Placed[] = [];
+				for (const at of spots) {
+					const one = place(prose, at, piece, p, at);
+					if (one !== undefined) placed.push(one);
+				}
+				yield { placed, piece: p };
 			}
 		}
 	}
-	return undefined;
 }
 
 // The entry as it was before `piece` went in between `head` and `tail`. The
@@ -607,8 +653,14 @@ function helpsIn(
 ): (p: Piece, placed: Placed | undefined) => placed is Placed {
 	const before = damage(content);
 	const had = ids(content);
+	const entries = scanStoreEntries(content).length;
 	return (p: Piece, placed: Placed | undefined): placed is Placed => {
 		if (placed === undefined || damage(placed.text) > before) return false;
+		// Taking a piece out of a broken store entry whose `-->` it was read
+		// as ending at can run that entry on into the next one. The two then
+		// count as one broken entry instead of two, which reads as less
+		// damage while both are still lost.
+		if (scanStoreEntries(placed.text).length < entries) return false;
 		const moved = {
 			...p,
 			start: placed.start,
@@ -620,24 +672,69 @@ function helpsIn(
 	};
 }
 
-function liftOne(content: string, known?: Stored): string | undefined {
+// Whether taking `p` out runs the store entry its `-->` ends on into the next
+// entry, or to no `-->` at all: then the entry count drops, and helpsIn turns
+// the lift down whatever it is. Asked first because it is cheap, and each lift
+// it saves reads the whole note: with many broken entries, trying and
+// rejecting one per entry at every step was cubic.
+function runsOnInStore(
+	content: string,
+	p: Piece,
+	storeStartByEnd: ReadonlyMap<number, number>,
+): boolean {
+	const start = storeStartByEnd.get(p.end);
+	if (start === undefined || start >= p.start) return false;
+	// A piece written into the entry's own `-->` gives it back when it goes,
+	// and a cut that takes a character next to the piece can too: none of
+	// that is ruled out here, and helpsIn decides.
+	const edges =
+		content.slice(Math.max(0, p.start - 3), p.start) +
+		content.slice(p.end, p.end + 3);
+	if (/[->]/.test(edges)) return false;
+	const next = content.indexOf('-->', p.end);
+	if (next === -1) return true;
+	return /<!--\s*annoteca:store\b/.test(content.slice(p.end, next));
+}
+
+function liftOne(
+	content: string,
+	known?: Stored,
+	rejoins = true,
+): string | undefined {
 	const before = damage(content);
 	const helps = helpsIn(content);
+	const storeStartByEnd = new Map(
+		scanStoreEntries(content).map((e) => [e.end, e.start]),
+	);
 	for (const p of suspects(content, known)) {
+		if (runsOnInStore(content, p, storeStartByEnd)) continue;
 		if (!nested(content, p)) continue;
 		for (const out of withouts(content, p)) {
 			const placed = lift(content, p, out);
 			if (helps(p, placed)) return placed.text;
 		}
 	}
+	if (!rejoins) return undefined;
 	// A rejoin has to mend the store entry it rebuilt, too.
-	const rejoined = rejoinStore(content, known);
-	if (
-		rejoined !== undefined &&
-		damage(rejoined.placed.text) < before &&
-		helps(rejoined.piece, rejoined.placed)
-	)
-		return rejoined.placed.text;
+	// Every way to rejoin that decodes, in order: with several entries split,
+	// the first JSON that fits can be another entry's other half, which the
+	// checks turn down.
+	// A join that gives a lean marker its missing entry comes before one that
+	// does not, which is kept for an entry whose marker was deleted.
+	for (const marked of [true, false])
+		for (const canonical of [true, false])
+			for (const rejoined of rejoinStore(
+				content,
+				marked,
+				canonical,
+				known,
+			))
+				for (const placed of rejoined.placed)
+					if (
+						damage(placed.text) < before &&
+						helps(rejoined.piece, placed)
+					)
+						return placed.text;
 	return undefined;
 }
 
@@ -646,6 +743,20 @@ function liftOne(content: string, known?: Stored): string | undefined {
 export function hasRepairableNesting(content: string): boolean {
 	return liftOne(content) !== undefined;
 }
+
+// How many comments and range ends sit where the repair would look for
+// them, counted in one pass without repairing. Exact for the damage that is
+// slow to repair, many comments written into one stretch of a note; a chain
+// of comments written into each other counts as its first only, and that
+// repairs quickly. Used to warn before a repair that may take seconds, so it
+// is not shown as a number.
+export function damagedPieceCount(content: string): number {
+	return suspects(content).length;
+}
+
+// Past this many, a repair can take a second or more rather than a moment:
+// 160 took up to 2 s in the slowest shapes measured.
+export const SLOW_REPAIR_PIECES = 100;
 
 // Lift every piece that was written inside another one. `converted` is how
 // many moved.
@@ -657,7 +768,10 @@ export function hasRepairableNesting(content: string): boolean {
 // that overlap are joined. Repairing the whole note per piece made a note
 // with many of them quadratic. What a stretch cannot settle alone (a store entry
 // split across the note, broken properties) is left to a pass over the whole
-// note afterwards, which then finds little or nothing to do.
+// note afterwards, which then finds little or nothing to do. A stretch never
+// rejoins a store entry, even when it holds both halves: the halves it can see
+// need not be each other's, and with other entries split outside it, joining
+// two that fit paired them wrongly and left the rest unreadable.
 export function repairNestedMarkers(content: string): ImportResult {
 	const known: Stored = new Map(
 		parseStore(content).map((e) => [e.comment.id, e.comment]),
@@ -722,7 +836,12 @@ export function repairNestedMarkers(content: string): ImportResult {
 	let at = 0;
 	let moved = 0;
 	for (const sp of merged) {
-		const local = repairWhole(content.slice(sp.lo, sp.hi), known);
+		const local = repairWhole(
+			content.slice(sp.lo, sp.hi),
+			known,
+			true,
+			false,
+		);
 		updated += content.slice(at, sp.lo) + local.updated;
 		at = sp.hi;
 		moved += local.converted;
@@ -733,12 +852,14 @@ export function repairNestedMarkers(content: string): ImportResult {
 }
 
 // The repair over one string, a lift at a time (after lifting any chain in one
-// pass, unless `chains` is off). Exported for the tests that hold the
+// pass, unless `chains` is off; rejoining split store entries unless
+// `rejoins` is off). Exported for the tests that hold the
 // stretch-by-stretch repair and the chain pass to the plain walk.
 export function repairWhole(
 	content: string,
 	known?: Stored,
 	chains = true,
+	rejoins = true,
 ): ImportResult {
 	let updated = content;
 	let moved = 0;
@@ -759,7 +880,7 @@ export function repairWhole(
 			moved += chained.converted;
 			continue;
 		}
-		const next = liftOne(updated, known);
+		const next = liftOne(updated, known, rejoins);
 		if (next === undefined) break;
 		updated = next;
 		moved += 1;

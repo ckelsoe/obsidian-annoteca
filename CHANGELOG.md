@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **"Repair comments written inside other comments in all notes" now shows what it will change before it starts.** It looks through the vault first and lists the notes that need the repair, and names any note with many damaged comments, which can take a few seconds to repair. If no note needs it, it says so without asking for a backup. While it runs, a notice shows which note it is on. Each note is repaired once; before, a damaged note was repaired twice, once to check and once to write, which doubled the wait on the notes where it is long.
+- **"Repair comments written inside other comments in this note"** says first when the note has many damaged comments and may take a few seconds.
+
+### Fixed
+
+- **The commands that convert or repair comments across all notes no longer write to the wrong note when one is renamed during the run,** and stop writing when Annoteca is turned off partway through.
+- **"Repair comments written inside other comments" could not mend a note with more than one damaged store entry.** When range ends had landed inside several comment-store entries, the repair took one out and ran that entry on into the next, then counted the two as one problem fixed. It now rejoins each entry with its own left-behind half, ends each range where its passage ended, and keeps the ranges nested. It also no longer pairs one entry's half with another's when both happen to sit near each other, or joins two halves into an id the note never had. It mends all of 20,000 generated notes with up to four such entries, and no comment is lost in any of them.
+- **The Outline tab showed a list item's sub-items in its own row.** In a list with blank lines between items, a parent item that continues after its sub-items had their text in its label, and "comment on this line" selected all of them. The row now shows and selects the item's own line. Deeply nested lists like this no longer slow the tab down.
+- **A comment whose text holds many unclosed `annoteca-original` code fences** no longer slows reading the note down.
+
 ## [1.27.3] - 2026-10-18
 
 ### Fixed
