@@ -83,7 +83,12 @@ export function buildOutlineTree(
 
 	// One node per heading, and per list item when asked for.
 	interface Draft {
-		node: OutlineNode;
+		kind: 'heading' | 'item';
+		level: number;
+		task?: string;
+		// The line's own text, before markup is stripped.
+		from: number;
+		to: number;
 		// The span a comment must start in to belong to this line.
 		spanFrom: number;
 		spanTo: number;
@@ -96,7 +101,10 @@ export function buildOutlineTree(
 		const from = lineStart(h.line);
 		const to = lineEnd(h.line);
 		drafts.push({
-			node: makeNode('heading', h.level, from, to),
+			kind: 'heading',
+			level: h.level,
+			from,
+			to,
 			spanFrom: from,
 			spanTo: to,
 			line: h.line,
@@ -107,10 +115,12 @@ export function buildOutlineTree(
 		for (const li of listItems) {
 			const from = offsetOf(li.startLine, li.startCol);
 			const to = offsetOf(li.endLine, li.endCol);
-			const node = makeNode('item', 0, from, to);
-			if (li.task !== undefined) node.task = li.task;
 			drafts.push({
-				node,
+				kind: 'item',
+				level: 0,
+				...(li.task !== undefined ? { task: li.task } : {}),
+				from,
+				to,
 				spanFrom: lineStart(li.startLine),
 				spanTo: to,
 				line: li.startLine,
@@ -119,7 +129,27 @@ export function buildOutlineTree(
 			});
 		}
 	}
-	drafts.sort((a, b) => a.spanFrom - b.spanFrom);
+	drafts.sort((a, b) => a.spanFrom - b.spanFrom || a.from - b.from);
+
+	// An item's own text stops where the next line of the outline starts.
+	// Obsidian's span for an item that continues after its children (a loose
+	// list) covers those children too, so the row read its descendants' words
+	// as its label, and "comment on this line" selected the whole subtree.
+	// Every ancestor also re-read the same text, which was quadratic in a
+	// deeply nested list. A child on the same line stops it at the child's
+	// own text.
+	const placed = drafts.map((d, i) => {
+		const next = drafts[i + 1];
+		let to = d.to;
+		if (next && next.from > d.from)
+			to = Math.min(
+				to,
+				next.spanFrom > d.from ? next.spanFrom : next.from,
+			);
+		const node = makeNode(d.kind, d.level, d.from, to);
+		if (d.task !== undefined) node.task = d.task;
+		return { ...d, node };
+	});
 
 	function makeNode(
 		kind: 'heading' | 'item',
@@ -223,7 +253,7 @@ export function buildOutlineTree(
 		}
 		return preamble;
 	};
-	for (const d of drafts) {
+	for (const d of placed) {
 		const n = d.node;
 		if (n.kind === 'heading') {
 			while (
@@ -266,7 +296,7 @@ export function buildOutlineTree(
 	// end before it are dropped. The holders are then filled in the comments'
 	// own order.
 	const holders = new Map<Comment, OutlineNode>();
-	const stack: Draft[] = [];
+	const stack: (typeof placed)[number][] = [];
 	let heading: OutlineNode | undefined;
 	let next = 0;
 	const byPos = comments
@@ -275,9 +305,9 @@ export function buildOutlineTree(
 	for (const { c } of byPos) {
 		const pos = c.marker.start;
 		for (
-			let d = drafts[next];
+			let d = placed[next];
 			d !== undefined && d.spanFrom <= pos;
-			d = drafts[++next]
+			d = placed[++next]
 		) {
 			while ((stack[stack.length - 1]?.spanTo ?? Infinity) < d.spanFrom)
 				stack.pop();

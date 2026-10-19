@@ -509,6 +509,150 @@ describe('repairNestedMarkers', () => {
 		).toEqual(['aaaaaaaa', 'bbbbbbbb']);
 	});
 
+	it('rejoins several store entries that closers split, one rewrite after another', () => {
+		// Each closer went into a store entry and the store was rewritten
+		// before the next. Taking a closer out of the first broken entry runs
+		// it on into the next one, which counts as one broken entry where
+		// there were two: that must not pass for progress.
+		const ids = ['d0000000', 'd0000001', 'd0000002'];
+		let note = writeStoreRegion(
+			ids
+				.map(
+					(id, i) =>
+						`Para ${i} ${serializeLeanMarker('clarify', id)} text.\n\n`,
+				)
+				.join(''),
+			ids.map((id) => ({
+				id,
+				category: 'clarify',
+				body: 'x',
+				date: '2026-10-17T12:00:00',
+				range: 'closed' as const,
+				replies: [],
+			})),
+		);
+		for (const [k, id] of ['d0000002', 'd0000000', 'd0000001'].entries()) {
+			const whole = scanStoreEntries(note).filter(
+				(e) => decodeStoreEntry(e.json) !== undefined,
+			);
+			const e = whole[k % whole.length];
+			if (!e) throw new Error('no entry');
+			const at = note.indexOf('{\n', e.start) + 2;
+			const inserted =
+				note.slice(0, at) + serializeCloser(id) + note.slice(at);
+			note = writeStoreRegion(
+				inserted,
+				parseStore(inserted).map((x) => x.comment),
+			);
+		}
+		const { updated, converted } = repairNestedMarkers(note);
+		expect(converted).toBe(3);
+		healthy(updated);
+		expect(
+			parseStore(updated)
+				.map((e) => e.comment.id)
+				.sort(),
+		).toEqual(ids);
+		for (const id of ids) expect(updated).toContain(serializeCloser(id));
+		expect(updated.indexOf('"v"')).toBeGreaterThan(
+			updated.indexOf('<!-- annoteca:store'),
+		);
+	});
+
+	it('repairs closers and markers split into several store entries at random offsets', () => {
+		// The old writers, in turn: a range comment whose closer went into a
+		// store entry, then the store rewritten with its own entry; or a
+		// comment written into a store entry, rewritten or not.
+		const next = rng(11);
+		for (let round = 0; round < 150; round++) {
+			const base = ['e0000000', 'e0000001'].map((id) => `${id}${round}`);
+			let note = writeStoreRegion(
+				base
+					.map(
+						(id, i) =>
+							`Para ${i} ${serializeLeanMarker('clarify', id)} text.\n\n`,
+					)
+					.join(''),
+				base.map((id) => ({
+					id,
+					category: 'clarify',
+					body: 'x',
+					date: '2026-10-17T12:00:00',
+					replies: [],
+				})),
+			);
+			const all = [...base];
+			const hits = 1 + Math.floor(next() * 4);
+			for (let k = 0; k < hits; k++) {
+				const whole = scanStoreEntries(note).filter(
+					(e) => decodeStoreEntry(e.json) !== undefined,
+				);
+				const e = whole[Math.floor(next() * whole.length)];
+				if (!e) break;
+				const at =
+					e.start + 1 + Math.floor(next() * (e.end - e.start - 1));
+				const id = `n${String(round * 10 + k).padStart(7, '0')}`;
+				all.push(id);
+				if (next() < 0.6) {
+					// A range comment on a new paragraph, its closer astray.
+					const para = note.indexOf('\n\n<!-- annoteca:store');
+					const withCloser =
+						note.slice(0, at) +
+						serializeCloser(id) +
+						note.slice(at);
+					const marked =
+						withCloser.slice(0, para) +
+						`\n\nNew ${k} ${serializeLeanMarker('clarify', id)} words.` +
+						withCloser.slice(para);
+					note = writeStoreRegion(marked, [
+						...parseStore(marked).map((x) => x.comment),
+						{
+							id,
+							category: 'clarify',
+							body: 'r',
+							date: '2026-10-17T12:00:00',
+							range: 'closed' as const,
+							replies: [],
+						},
+					]);
+				} else {
+					note = oldInsert(
+						note,
+						at,
+						serialize({
+							id,
+							category: 'clarify',
+							body: 'new',
+							date: '2026-10-17T12:00:00',
+						}),
+						'',
+					);
+					if (next() < 0.5)
+						note = writeStoreRegion(
+							note,
+							parseStore(note).map((x) => x.comment),
+						);
+				}
+			}
+			const { updated } = repairNestedMarkers(note);
+			try {
+				healthy(updated);
+				const kept = new Set([
+					...parseStore(updated).map((x) => x.comment.id),
+					...parseAll(updated).map((c) => c.id),
+				]);
+				for (const id of all) expect(kept.has(id)).toBe(true);
+				expect(
+					parseStore(updated).filter((x) =>
+						base.includes(x.comment.id),
+					),
+				).toHaveLength(base.length);
+			} catch (err) {
+				throw new Error(`${JSON.stringify(note)}\n${String(err)}`);
+			}
+		}
+	});
+
 	it('rejoins a hand-edited store entry whose JSON holds a blank line', () => {
 		const entry = encodeStoreEntry({
 			id: 'eeeeeeee',

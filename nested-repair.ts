@@ -45,6 +45,7 @@ import {
 } from './json-scan';
 import {
 	decodeStoreEntry,
+	encodeStoreEntry,
 	parseStore,
 	scanStoreEntries,
 	type StoredComment,
@@ -419,12 +420,20 @@ interface Placed {
 // where a new one there would go. The left-behind half is found by decoding,
 // not guessed: it has no `<` or `>` (the store escapes both), it follows the
 // blank line the store region opens with, and joined to the moved half it
-// decodes to an entry the note does not already hold.
-function rejoinStore(
+// decodes to an entry the note does not already hold. Each such join is
+// offered in turn, and the caller keeps the first that checks out.
+function* rejoinStore(
 	content: string,
+	canonical: boolean,
 	known?: Stored,
-): { placed: Placed; piece: Piece } | undefined {
+): Generator<{ placed: Placed[]; piece: Piece }> {
 	const decoded = new Set(parseStore(content).map((e) => e.comment.id));
+	// Every closer in the note, wherever it sits now, by id: a broken entry
+	// can often be finished by more than one left-behind half, and only the
+	// one that gives a range comment its range, and no other comment one,
+	// is its own.
+	const closerIds = new Set<string>();
+	for (const k of scanClosers(content, [])) closerIds.add(k.id);
 	// By end, so each broken entry looks up its piece instead of searching
 	// them all.
 	const pieceByEnd = new Map<number, Piece>();
@@ -543,15 +552,40 @@ function rejoinStore(
 					fail();
 					continue;
 				}
+				if ((entry.range === 'closed') !== closerIds.has(entry.id))
+					continue;
+				// Joins that give back exactly what the store writes come first:
+				// JSON takes a repeated key, so a half can finish another
+				// entry's head and still decode. A hand-edited entry is never
+				// canonical and is tried after them.
+				if ((encodeStoreEntry(entry) === restored) !== canonical)
+					continue;
 				const rest =
 					content.slice(0, b.start) + restored + content.slice(b.end);
 				const prose = rest.slice(0, s) + rest.slice(t);
-				const placed = place(prose, s, piece, p, s);
-				return placed === undefined ? undefined : { placed, piece: p };
+				// A closer ends its passage before the closers already there,
+				// or after them: whichever keeps the ranges nested is for
+				// helpsIn to find. Two closers split into entries one rewrite
+				// after another both end where the store began.
+				const spots = [s];
+				if (p.closer) {
+					const run = /\s*<!--\s*\/annoteca\s+[a-z0-9]{1,32}\s*-->/y;
+					let c = s;
+					while (c > 0 && /\s/.test(prose.charAt(c - 1))) c -= 1;
+					let end = c;
+					run.lastIndex = c;
+					while (run.exec(prose) !== null) end = run.lastIndex;
+					if (end > c) spots.push(end);
+				}
+				const placed: Placed[] = [];
+				for (const at of spots) {
+					const one = place(prose, at, piece, p, at);
+					if (one !== undefined) placed.push(one);
+				}
+				yield { placed, piece: p };
 			}
 		}
 	}
-	return undefined;
 }
 
 // The entry as it was before `piece` went in between `head` and `tail`. The
@@ -607,8 +641,14 @@ function helpsIn(
 ): (p: Piece, placed: Placed | undefined) => placed is Placed {
 	const before = damage(content);
 	const had = ids(content);
+	const entries = scanStoreEntries(content).length;
 	return (p: Piece, placed: Placed | undefined): placed is Placed => {
 		if (placed === undefined || damage(placed.text) > before) return false;
+		// Taking a piece out of a broken store entry whose `-->` it was read
+		// as ending at can run that entry on into the next one. The two then
+		// count as one broken entry instead of two, which reads as less
+		// damage while both are still lost.
+		if (scanStoreEntries(placed.text).length < entries) return false;
 		const moved = {
 			...p,
 			start: placed.start,
@@ -620,10 +660,38 @@ function helpsIn(
 	};
 }
 
+// Whether taking `p` out runs the store entry its `-->` ends on into the next
+// entry, or to no `-->` at all: then the entry count drops, and helpsIn turns
+// the lift down whatever it is. Asked first because it is cheap, and each lift
+// it saves reads the whole note: with many broken entries, trying and
+// rejecting one per entry at every step was cubic.
+function runsOnInStore(
+	content: string,
+	p: Piece,
+	storeStartByEnd: ReadonlyMap<number, number>,
+): boolean {
+	const start = storeStartByEnd.get(p.end);
+	if (start === undefined || start >= p.start) return false;
+	// A piece written into the entry's own `-->` gives it back when it goes,
+	// and a cut that takes a character next to the piece can too: none of
+	// that is ruled out here, and helpsIn decides.
+	const edges =
+		content.slice(Math.max(0, p.start - 3), p.start) +
+		content.slice(p.end, p.end + 3);
+	if (/[->]/.test(edges)) return false;
+	const next = content.indexOf('-->', p.end);
+	if (next === -1) return true;
+	return /<!--\s*annoteca:store\b/.test(content.slice(p.end, next));
+}
+
 function liftOne(content: string, known?: Stored): string | undefined {
 	const before = damage(content);
 	const helps = helpsIn(content);
+	const storeStartByEnd = new Map(
+		scanStoreEntries(content).map((e) => [e.end, e.start]),
+	);
 	for (const p of suspects(content, known)) {
+		if (runsOnInStore(content, p, storeStartByEnd)) continue;
 		if (!nested(content, p)) continue;
 		for (const out of withouts(content, p)) {
 			const placed = lift(content, p, out);
@@ -631,13 +699,17 @@ function liftOne(content: string, known?: Stored): string | undefined {
 		}
 	}
 	// A rejoin has to mend the store entry it rebuilt, too.
-	const rejoined = rejoinStore(content, known);
-	if (
-		rejoined !== undefined &&
-		damage(rejoined.placed.text) < before &&
-		helps(rejoined.piece, rejoined.placed)
-	)
-		return rejoined.placed.text;
+	// Every way to rejoin that decodes, in order: with several entries split,
+	// the first JSON that fits can be another entry's other half, which the
+	// checks turn down.
+	for (const canonical of [true, false])
+		for (const rejoined of rejoinStore(content, canonical, known))
+			for (const placed of rejoined.placed)
+				if (
+					damage(placed.text) < before &&
+					helps(rejoined.piece, placed)
+				)
+					return placed.text;
 	return undefined;
 }
 

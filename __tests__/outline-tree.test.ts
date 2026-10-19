@@ -228,6 +228,61 @@ describe('buildOutlineTree', () => {
 		]);
 	});
 
+	it("a loose list item's row is its own text, not its children's", () => {
+		// The spans Obsidian reports for this note: an item that continues
+		// after its children covers them. Read live from the metadata cache.
+		const text = '- a\n  - b\n    - c\n\n    more b\n\n  more a\n- d\n';
+		const items: ListItemInput[] = [
+			{ startLine: 0, startCol: 0, endLine: 6, endCol: 8, parent: -1 },
+			{ startLine: 1, startCol: 2, endLine: 4, endCol: 10, parent: 0 },
+			{ startLine: 2, startCol: 4, endLine: 2, endCol: 7, parent: 1 },
+			{ startLine: 7, startCol: 0, endLine: 7, endCol: 3, parent: -1 },
+		];
+		const roots = buildOutlineTree(text, [], items, [], [], true);
+		const a = roots[0]?.children[0];
+		const b = a?.children[0];
+		if (!a || !b) throw new Error('no nodes');
+		expect([a.label, b.label, b.children[0]?.label]).toEqual([
+			'a',
+			'b',
+			'c',
+		]);
+		expect(text.slice(a.textFrom, a.textTo)).toBe('a');
+		expect(text.slice(b.textFrom, b.textTo)).toBe('b');
+	});
+
+	it('a deeply nested loose list reads each item once', () => {
+		// Every item spans all of its descendants, as a loose list does. Each
+		// ancestor reading that whole span made every label hold the subtree
+		// below it, which was quadratic in the nesting depth.
+		const n = 2000;
+		const lines: string[] = [];
+		for (let i = 0; i < n; i++) lines.push(`${' '.repeat(i)}- item ${i}`);
+		for (let i = n - 1; i >= 0; i--) lines.push(`${' '.repeat(i + 2)}tail`);
+		const text = lines.join('\n');
+		const last = lines.length - 1;
+		const items: ListItemInput[] = [];
+		for (let i = 0; i < n; i++)
+			items.push({
+				startLine: i,
+				startCol: i,
+				endLine: last - i,
+				endCol: lines[last - i]?.length ?? 0,
+				parent: i === 0 ? -0 : i - 1,
+			});
+		const labels: string[] = [];
+		let node = buildOutlineTree(text, [], items, [], [], true)[0];
+		for (node = node?.children[0]; node; node = node.children[0])
+			labels.push(node.label);
+		// The innermost item has no children, so its continuation line is its
+		// own.
+		expect(labels).toEqual(
+			lines
+				.slice(0, n)
+				.map((_, i) => (i === n - 1 ? `item ${i} tail` : `item ${i}`)),
+		);
+	});
+
 	it('a comment inside a line limits the selectable span to before it', () => {
 		const text = `- before ${c('', 'x')} after`;
 		const node = tree(text)[0]?.children[0];

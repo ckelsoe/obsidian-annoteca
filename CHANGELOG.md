@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **"Repair comments written inside other comments" could not mend a note with more than one damaged store entry.** When range ends had landed inside several comment-store entries, the repair took one out and ran that entry on into the next, then counted the two as one problem fixed. It now rejoins each entry with its own left-behind half, ends each range where its passage ended, and keeps the ranges nested. Of 5,000 generated notes with up to four such entries, it now mends all but 10 that pile several entries' halves together; those it leaves as they were, as before, and no comment is lost in any of them.
+- **The Outline tab showed a list item's sub-items in its own row.** In a list with blank lines between items, a parent item that continues after its sub-items had their text in its label, and "comment on this line" selected all of them. The row now shows and selects the item's own line. Deeply nested lists like this no longer slow the tab down.
+- **A comment whose text holds many unclosed `annoteca-original` code fences** no longer slows reading the note down.
+
 ## [1.27.3] - 2026-10-18
 
 ### Fixed
