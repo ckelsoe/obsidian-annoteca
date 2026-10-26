@@ -2,12 +2,8 @@
 // (F-233), and format validation (F-235). All pure over file content.
 
 import type { Comment } from './types';
-import {
-	parseAll,
-	findMalformedMarkers,
-	scanClosers,
-	type MalformedMarker,
-} from './parser';
+import { markerProblems } from './html-comments';
+import { parseAll, scanClosers, type MalformedMarker } from './parser';
 import { isLeanMarker, parseDocument } from './document';
 import { parseStore } from './store';
 
@@ -271,6 +267,27 @@ export function detectRangeIssues(
 	return out;
 }
 
+// The diagnostics commands write their findings to notes named with this
+// prefix, at the top of the vault.
+export const REPORT_NOTE_PREFIX = 'Annoteca diagnostics — ';
+
+// Whether `path` is one of those report notes. The scans skip them: a report
+// quotes the markers it found, so the next run would report its own quotes.
+export function isReportNote(path: string): boolean {
+	return !path.includes('/') && path.startsWith(REPORT_NOTE_PREFIX);
+}
+
+// A report's findings as JSON, with every `<!--` and `-->` written as a JSON
+// unicode escape. A finding quotes the marker it is about, and a quoted marker
+// in the report note is a marker: the index counted the report's quotes as
+// comments, and the next validation run reported them. `\u003c` and `\u003e`
+// are plain JSON, so the report still parses to exactly the same values.
+export function reportJson(value: unknown): string {
+	return JSON.stringify(value, null, 2)
+		.replace(/<!--/g, '\\u003c!--')
+		.replace(/-->/g, '--\\u003e');
+}
+
 export interface ValidationFinding extends MalformedMarker {
 	path: string;
 }
@@ -279,7 +296,7 @@ export function validateMarkers(
 	content: string,
 	path: string,
 ): ValidationFinding[] {
-	return findMalformedMarkers(content).map((m) => ({ ...m, path }));
+	return markerProblems(content).map((m) => ({ ...m, path }));
 }
 
 // Decides when marker damage is worth interrupting the user for.

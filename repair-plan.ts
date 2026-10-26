@@ -6,11 +6,8 @@
 // heavily damaged ones are named, and a run shows which note it is on.
 // Pure, so the wording and the choice of notes are testable without Obsidian.
 
-import {
-	damagedPieceCount,
-	hasRepairableNesting,
-	SLOW_REPAIR_PIECES,
-} from './nested-repair';
+import { damagedPieceCount, SLOW_REPAIR_PIECES } from './nested-repair';
+import { hasRepairableDamage } from './quote-repair';
 
 export interface RepairTarget {
 	path: string;
@@ -25,7 +22,7 @@ export function repairTarget(
 	name: string,
 	text: string,
 ): RepairTarget | undefined {
-	if (!hasRepairableNesting(text)) return undefined;
+	if (!hasRepairableDamage(text)) return undefined;
 	return { path, name, slow: damagedPieceCount(text) >= SLOW_REPAIR_PIECES };
 }
 
@@ -45,7 +42,7 @@ export function repairConfirmText(targets: readonly RepairTarget[]): {
 		.map((t) => (t.slow ? `${t.name}: ${SLOW_NOTE}` : t.name));
 	if (n > LISTED) items.push(`and ${n - LISTED} more`);
 	return {
-		description: `Move every comment that was written inside another comment, a range end, the comment store or the note properties to just outside it. The comment that held it gets its text back. A note is changed only when the repair leaves it whole with every comment kept. ${n === 1 ? '1 note needs it' : `${n} notes need it`}:`,
+		description: `Move every comment that was written inside another comment, a range end, the comment store or the note properties to just outside it. The comment that held it gets its text back. An HTML comment copied into a comment's original text is escaped, so the comment reads whole again. A note is changed only when the repair leaves it whole with every comment kept. ${n === 1 ? '1 note needs it' : `${n} notes need it`}:`,
 		items,
 	};
 }

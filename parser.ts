@@ -438,7 +438,7 @@ function reguardOpeners(text: string): string {
 // the other: the terminator escape only ever inserts a backslash before `>` and
 // the opener escape only before `<`, so they commute, and unescaping in the
 // mirror order is exact.
-function escapeMarkerText(text: string): string {
+export function escapeMarkerText(text: string): string {
 	return escapeOpener(escapeTerminator(text));
 }
 
@@ -452,7 +452,7 @@ function unescapeMarkerText(text: string): string {
 // error in JavaScriptCore before iOS 16.4, so one anywhere in the sources stops
 // the whole plugin loading on those devices; scripts/check-submission.mjs fails
 // the build on it. This is the same question asked in a form that ships.
-function backslashRunBefore(text: string, index: number): number {
+export function backslashRunBefore(text: string, index: number): number {
 	let run = 0;
 	while (index - run - 1 >= 0 && text.charAt(index - run - 1) === '\\') run++;
 	return run;

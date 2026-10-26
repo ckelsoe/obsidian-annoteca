@@ -16,7 +16,6 @@
 // editor keeps the in-memory document and disk in sync. The edit composer
 // already used `editor.replaceRange` for the same reason.
 
-import { SpanIndex } from './span-index';
 import { MarkdownView, Notice, TFile } from 'obsidian';
 
 import type AnnotecaPlugin from './main';
@@ -146,17 +145,13 @@ export function markerDamageMessage(finding: MalformedMarker): string {
 // on resolveAndRemoveComment, which is waiting behind resolveComment in the same
 // queue.
 // Moved to forbidden.ts so the pure placement code can share it without an
-// import cycle; re-exported because api.ts, reattach.ts and reading-view.ts
-// import it from here.
-export {
-	enclosingForbidden,
-	forbiddenRanges,
-	insideForbidden,
-} from './forbidden';
-import { forbiddenRanges } from './forbidden';
+// import cycle; re-exported because main.ts and composer.ts import it from
+// here.
+export { enclosingForbidden, insideForbidden } from './forbidden';
+import { passageBlocked } from './forbidden';
 
 export const INSIDE_FORBIDDEN_MESSAGE =
-	"A comment can't start inside another comment's marker, the comment store or the note properties. Move the cursor outside it and try again.";
+	"A comment can't start inside another comment's marker, an HTML comment, the comment store or the note properties. Move the cursor outside it and try again.";
 
 // Vetted before ANY write, so a bad request cannot leave a partial batch the
 // caller cannot reconcile. Every field is checked against the same rules the
@@ -173,7 +168,7 @@ export const INSIDE_FORBIDDEN_MESSAGE =
 function isValidPromoteRequest(
 	value: unknown,
 	docLength: number,
-	forbidden: SpanIndex<{ start: number; end: number }>,
+	blocked: (start: number, end: number) => boolean,
 ): value is PromoteRequest {
 	if (typeof value !== 'object' || value === null) return false;
 	const r = value as Record<string, unknown>;
@@ -206,8 +201,8 @@ function isValidPromoteRequest(
 	// The marker is inserted AT `start`, and the anchor text is captured from
 	// start..end, so both have to be clear of existing syntax. A range that
 	// merely touches a boundary is fine: inserting at the position a marker ends
-	// is inserting after it.
-	return !forbidden.some(start, start) && !forbidden.some(start, end);
+	// is inserting after it. See passageBlocked for other HTML comments.
+	return !blocked(start, end);
 }
 
 // Removes a range comment's closer (#84). Exactly the closer, nothing around it:
@@ -800,11 +795,13 @@ export class CommentService {
 		// comments than it asked for cannot tell which of its findings were
 		// rejected and which were merely already present, and would record a
 		// partial analysis as complete.
-		// Indexed once for the batch: scanning every range for every request
-		// was quadratic in a note with many comments.
-		const forbidden = new SpanIndex(forbiddenRanges(content), (r) => r);
+		// passageBlocked indexes the note once and keeps it for the batch:
+		// scanning every range for every request was quadratic in a note with
+		// many comments.
 		const allValid = requests.every((r) =>
-			isValidPromoteRequest(r, content.length, forbidden),
+			isValidPromoteRequest(r, content.length, (s, e) =>
+				passageBlocked(content, s, e),
+			),
 		);
 		if (!allValid) return [];
 

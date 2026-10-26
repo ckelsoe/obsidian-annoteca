@@ -11,6 +11,9 @@ import {
 	detectOrphans,
 	detectStoreOrphans,
 	detectRangeIssues,
+	isReportNote,
+	REPORT_NOTE_PREFIX,
+	reportJson,
 	validateMarkers,
 	type ConflictFinding,
 } from './diagnostics';
@@ -48,6 +51,7 @@ export class DiagnosticsService {
 		const findings: T[] = [];
 		const files = this.plugin.app.vault.getMarkdownFiles();
 		for (const f of files) {
+			if (isReportNote(f.path)) continue;
 			// Editor text, so every offset a report carries is one the editor,
 			// the index and the hub count in, and a lone-CR note has lines.
 			const content = toEditorText(
@@ -208,7 +212,7 @@ export class DiagnosticsService {
 	): Promise<void> {
 		// Write findings to a vault note so the user can read them without
 		// opening devtools. V2 adds debug-log routing per F-237.
-		const filename = `Annoteca diagnostics — ${label}.md`;
+		const filename = `${REPORT_NOTE_PREFIX}${label}.md`;
 		const lines: string[] = [];
 		lines.push(`# ${label}`);
 		lines.push('');
@@ -218,14 +222,14 @@ export class DiagnosticsService {
 			lines.push('## Summary');
 			lines.push('');
 			lines.push('```json');
-			lines.push(JSON.stringify(summary, null, 2));
+			lines.push(reportJson(summary));
 			lines.push('```');
 			lines.push('');
 			lines.push('## Findings');
 			lines.push('');
 		}
 		lines.push('```json');
-		lines.push(JSON.stringify(findings, null, 2));
+		lines.push(reportJson(findings));
 		lines.push('```');
 		const body = lines.join('\n');
 

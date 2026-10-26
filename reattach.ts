@@ -11,8 +11,7 @@
 //
 // Pure: no Obsidian dependency.
 
-import { SpanIndex } from './span-index';
-import { forbiddenRanges } from './comment-service';
+import { passageBlocked } from './forbidden';
 
 export interface Passage {
 	readonly start: number;
@@ -111,10 +110,11 @@ export function findPassage(
 	near: number,
 ): Passage | undefined {
 	if (quote === undefined || quote.trim() === '') return undefined;
-	// Indexed: a quote that occurs often in a note full of comments made a
-	// scan of every range per occurrence quadratic.
-	const blocked = new SpanIndex(forbiddenRanges(content), (r) => r);
-	const clear = (p: Passage): boolean => !blocked.some(p.start, p.end);
+	// passageBlocked indexes the note once: a quote that occurs often in a
+	// note full of comments made a scan of every range per occurrence
+	// quadratic.
+	const clear = (p: Passage): boolean =>
+		!passageBlocked(content, p.start, p.end);
 	for (const level of ['exact', 'spacing', 'case'] as const) {
 		const found = matchesAt(content, quote, level).filter(clear);
 		if (found.length === 0) continue;

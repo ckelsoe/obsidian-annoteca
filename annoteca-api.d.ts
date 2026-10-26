@@ -149,7 +149,9 @@ export interface AnnotecaApi {
 	// Idempotent on `author:sourceKey`. Above the user's promotion budget it asks
 	// first, and a refusal (or a stale `expected`) returns an empty array rather
 	// than throwing. `expected` is the note's editor text the anchors were
-	// computed against; re-read and call again if it comes back empty.
+	// computed against; re-read and call again if it comes back empty. An anchor
+	// that overlaps comment syntax or the note properties, or starts or ends
+	// inside another HTML comment, makes the whole call return an empty array.
 	promote(
 		path: string,
 		requests: readonly PromoteRequest[],
@@ -166,8 +168,9 @@ export interface AnnotecaApi {
 	// the comment is the user's, with a closing marker covering exactly that
 	// text. Nothing is written until the user saves. Offsets are into the note's
 	// editor text. Resolves false, opening nothing, for a path that is not a
-	// markdown note, or a range that is empty, out of bounds, or starts or ends
-	// inside existing comment syntax or the note properties.
+	// markdown note, or a range that is empty, out of bounds, overlaps existing
+	// comment syntax or the note properties, or starts or ends inside another
+	// HTML comment. A range may contain a whole HTML comment (a citation).
 	compose(path: string, range: ComposeRange): Promise<boolean>;
 
 	// apiVersion >= 7. Resolve or reopen a comment by id, exactly as a click in

@@ -123,7 +123,9 @@ The whole contract. Resolve `api` as above, then:
   text and opens its own comment form, so the comment is the user's, with a closing marker
   covering that text. Nothing is written until the user saves. Resolves `false`, opening
   nothing, for a path that is not a markdown note or a range that is empty, out of bounds,
-  or starts or ends inside existing comment syntax or the note properties. Use it for a
+  overlaps existing comment syntax or the note properties, or starts or ends inside
+  another HTML comment. A range may contain a whole HTML comment, such as a citation:
+  the comment's markers go outside it. Use it for a
   "comment on this" action in your own view (a mind map node, an outline row). Needs
   `apiVersion >= 5`.
 - `resolve(commentId): Promise<ApiWriteResult>` and `reopen(commentId):
@@ -320,6 +322,10 @@ Notes on `promote`:
 - `expected` guards against a stale write. If the note moved on since you read it, the
   call returns an empty array rather than placing a marker in the wrong prose. Re-read
   and call again. A returned `CreatedComment` is the only proof a comment was written.
+- An anchor must not overlap existing comment syntax, the comment store or the note
+  properties, and must not start or end inside another HTML comment. Touching a boundary
+  is fine, and so is an anchor that contains a whole HTML comment. One request that
+  breaks this returns an empty array for the whole call.
 - Range comments (`apiVersion >= 4`). Set `closeRange: true` on a request and Annoteca
   also writes a closing marker, `<!-- /annoteca <id> -->`, after the last non-whitespace
   character before `anchor.end`, so trailing spaces and line breaks in your range stay
