@@ -523,3 +523,32 @@ describe('writeSummaryKeys never takes a key that is not its own', () => {
 		expect(out).not.toContain(line);
 	});
 });
+
+describe('the class tag', () => {
+	it('is decided from the file, not a cache that lags it', async () => {
+		let merged = 0;
+		const app = {
+			// The cache has not seen the tag the file already holds.
+			metadataCache: { getFileCache: () => ({ frontmatter: {} }) },
+			vault: {
+				process: (_f: TFile, fn: (data: string) => string) =>
+					Promise.resolve(fn('---\nfileclass: annoteca\n---\n')),
+			},
+			fileManager: {
+				processFrontMatter: () => {
+					merged += 1;
+					return Promise.resolve();
+				},
+			},
+		} as unknown as App;
+		await applyFrontmatterSummary(
+			app,
+			new TFile(),
+			[mk({ date: '2026-10-01', category: 'tone' })],
+			OPTS,
+			undefined,
+			() => Promise.resolve({ fileclass: 'annoteca' }),
+		);
+		expect(merged).toBe(0);
+	});
+});

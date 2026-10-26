@@ -219,10 +219,14 @@ export async function applyFrontmatterSummary(
 
 	const desired = computeSummary(comments, opts);
 	if (frontmatterMatches(fm, desired, property, writeClassTag)) return false;
+	// What the class-tag decision below reads: the file when it was read, as
+	// the cache can lag it.
+	let current = fm;
 	if (readActual) {
 		const actual = await readActual();
 		if (frontmatterMatches(actual, desired, property, writeClassTag))
 			return false;
+		current = actual;
 	}
 
 	// Bail if the caller (the plugin) has been unloaded since this write was
@@ -241,7 +245,7 @@ export async function applyFrontmatterSummary(
 
 	// The class tag is one value in a property the user may own, so it is
 	// still merged through processFrontMatter, and only when it is missing.
-	if (writeClassTag && mergeFileclass(fm[property]).changed) {
+	if (writeClassTag && mergeFileclass(current[property]).changed) {
 		await app.fileManager.processFrontMatter(
 			file,
 			(front: Record<string, unknown>) => {

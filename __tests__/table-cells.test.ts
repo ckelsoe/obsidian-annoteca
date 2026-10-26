@@ -200,3 +200,65 @@ describe('table rows, more edges', () => {
 		expect(inCell(note, note.indexOf('| c'))).toBe(note.indexOf('c |'));
 	});
 });
+
+describe('tables without outer pipes', () => {
+	const bare = 'a | b\n--- | ---\nc | d\n';
+
+	it('are tables, and a pipe paragraph still is not', () => {
+		expect(inTableRow(bare, bare.indexOf('c'))).toBe(true);
+		expect(inTableRow(bare, 0)).toBe(true);
+		expect(inTableRow('x | y is a paragraph', 0)).toBe(false);
+	});
+
+	it('keep a marker at a row start on the row, at the end of the first cell', () => {
+		const row = bare.indexOf('c');
+		expect(inCell(bare, row)).toBe(row + 1);
+		// Anywhere past the start, the marker stays where it was asked for.
+		expect(inCell(bare, bare.indexOf('d'))).toBe(bare.indexOf('d'));
+	});
+
+	it('get the full marker in a row repaired', () => {
+		const note =
+			'a | b\n--- | ---\nc | <!-- annoteca/note: q\n[id=aaaaaaaa]\n--> d\n';
+		const r = repairTableCellComments(note);
+		expect(r.converted).toBe(1);
+		expect(
+			r.updated.startsWith(
+				`a | b\n--- | ---\nc | ${serializeLeanMarker('note', 'aaaaaaaa')} d\n`,
+			),
+		).toBe(true);
+	});
+});
+
+describe('the end of a table', () => {
+	const table = '| h | i |\n|---|---|\n| a | b |\n';
+
+	it.each(['- item a | b', '# Heading a | b', '> quote a | b'])(
+		'is not continued by %s',
+		(line) => {
+			const note = `${table}${line}\n`;
+			expect(inTableRow(note, note.indexOf(line) + 2)).toBe(false);
+		},
+	);
+
+	it('still reads a quoted table and a `- | -` delimiter', () => {
+		const quoted = '> | h | i |\n> | - | - |\n> | a | b |\n';
+		expect(inTableRow(quoted, quoted.indexOf('a'))).toBe(true);
+	});
+});
+
+describe('the first cell of a row without a leading pipe', () => {
+	const head = 'h | i\n--- | ---\n';
+
+	it('ends at a pipe that is not escaped, in code or not', () => {
+		const escaped = `${head}a \\| b | c\n`;
+		const row = escaped.indexOf('a \\|');
+		expect(inCell(escaped, row)).toBe(escaped.indexOf(' | c'));
+		// GFM splits cells on a pipe inside backticks too.
+		const code = `${head}\`x|y\` | c\n`;
+		expect(inCell(code, code.indexOf('`x'))).toBe(code.indexOf('|y'));
+		// An unclosed backtick does not hide the pipe.
+		const open = `${head}\`a | b\n`;
+		expect(inCell(open, open.indexOf('`a'))).toBe(open.indexOf(' | b'));
+	});
+});
