@@ -150,11 +150,11 @@ export class ComposerForm {
 		};
 	}
 
-	// Put the caret in the body field (#21). Called by the MODAL host only, and
-	// only after the form is in the document: focusing a detached element does
-	// nothing. The side-panel composer deliberately does not call this, because
-	// its whole point is that the editor stays usable while it is open, so
-	// pulling focus out of the document there would be hostile.
+	// Put the caret in the body field (#21). Called only after the form is in
+	// the document: focusing a detached element does nothing. The modal calls
+	// it on open. The side panel calls it only when a new request arrives,
+	// which is always the user asking to comment, and never on its other
+	// renders, so a panel left open does not pull focus out of the editor.
 	//
 	// Caret at the end rather than the start: on the edit path the field opens
 	// with the existing body, and amending text is the expected action.

@@ -310,7 +310,11 @@ export class ComposerPanelView extends AnnotecaBaseView {
 
 	setRequest(request: ComposerRequest): void {
 		this.pendingRequest = request;
-		this.refresh();
+		// A request arrives only when someone asks to comment (the Comment
+		// button, the command, the API), so the caret goes straight into the
+		// body. The other renders (onOpen, and the reset after Save or Cancel)
+		// do not focus, so the panel never takes focus on its own.
+		this.refresh()?.focusBody();
 	}
 
 	onOpen(): Promise<void> {
@@ -318,7 +322,8 @@ export class ComposerPanelView extends AnnotecaBaseView {
 		return Promise.resolve();
 	}
 
-	private refresh(): void {
+	// Returns the form it rendered, or undefined for the empty state.
+	private refresh(): ComposerForm | undefined {
 		const container = this.contentEl;
 		container.empty();
 		container.addClass('annoteca-view-root');
@@ -328,7 +333,7 @@ export class ComposerPanelView extends AnnotecaBaseView {
 				text: 'Trigger the add-comment command from the editor to start a new comment here.',
 				cls: 'annoteca-empty',
 			});
-			return;
+			return undefined;
 		}
 
 		const form = new ComposerForm(this.plugin, this.pendingRequest, {
@@ -341,6 +346,7 @@ export class ComposerPanelView extends AnnotecaBaseView {
 			},
 		});
 		form.render(container);
+		return form;
 	}
 }
 

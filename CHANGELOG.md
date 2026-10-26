@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The side-panel composer now puts the cursor in the comment box.** Clicking "Comment" on a selection, or running an add-comment command, opens the composer in the right panel ready to type, the same as the pop-up composer already did. Before, the cursor stayed in the note and writing the comment cost a click on the box first. The panel still never takes focus on its own: only a new comment request moves the cursor.
+
 ## [1.27.4] - 2026-10-19
 
 ### Changed
