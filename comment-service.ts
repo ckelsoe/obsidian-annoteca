@@ -156,7 +156,7 @@ export {
 import { forbiddenRanges } from './forbidden';
 
 export const INSIDE_FORBIDDEN_MESSAGE =
-	"A comment can't start inside another comment's marker, the comment store or the note properties. Move the cursor outside it and try again.";
+	"A comment can't start inside another comment's marker, an HTML comment, the comment store or the note properties. Move the cursor outside it and try again.";
 
 // Vetted before ANY write, so a bad request cannot leave a partial batch the
 // caller cannot reconcile. Every field is checked against the same rules the

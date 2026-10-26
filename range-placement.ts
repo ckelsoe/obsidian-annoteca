@@ -14,7 +14,7 @@
 // paragraph rather than an indented code block is treated as code.
 
 import { frontmatterEnd } from './frontmatter';
-import { unclosedOpenerRanges } from './parser';
+import { backslashRunBefore, unclosedOpenerRanges } from './parser';
 import { inlineCodeSpans } from './code-spans';
 import { countWhile, SpanIndex } from './span-index';
 import { scanStoreEntries } from './store';
@@ -71,6 +71,12 @@ export function planCloser(
 	if (only !== undefined && !index.some(only.end, only.end)) end = only.end;
 	else if (holding.length > 0)
 		for (const r of occupied) if (end > r.start && end < r.end) end = r.end;
+	// The same for an HTML comment that is not Annoteca's: a closer inside one
+	// would end it early and show the rest of it as text. They never overlap,
+	// so at most one holds `end`.
+	const comment = scanned.htmlCommentIndex.first(end, end);
+	if (comment !== undefined && end > comment.start && end < comment.end)
+		end = comment.end;
 	if (end <= from) return { kind: 'none' };
 
 	if (
@@ -92,6 +98,7 @@ let lastScan:
 			storeStarts: number[];
 			unclosedStarts: number[];
 			unclosedIndex: SpanIndex<MarkerRange>;
+			htmlCommentIndex: SpanIndex<MarkerRange>;
 	  }
 	| undefined;
 function closerScan(content: string): NonNullable<typeof lastScan> {
@@ -107,6 +114,10 @@ function closerScan(content: string): NonNullable<typeof lastScan> {
 			storeStarts: scanStoreEntries(content).map((e) => e.start),
 			unclosedStarts: unclosed.map((r) => r.start),
 			unclosedIndex: new SpanIndex(unclosed, (r) => r),
+			htmlCommentIndex: new SpanIndex(
+				htmlCommentRanges(content),
+				(r) => r,
+			),
 		};
 	}
 	return lastScan;
@@ -148,6 +159,194 @@ export { frontmatterEnd };
 function inFrontmatter(content: string, pos: number): boolean {
 	return pos < frontmatterEnd(content);
 }
+
+// Every HTML comment in the note that is not Annoteca's own, from its `<!--`
+// to the end of the `-->` that closes it: a diagram note, a citation, a
+// hand-written TODO. Comments do not nest, so a marker or closer written inside
+// one ends it at the marker's own `-->`, and the rest of it shows in the note as
+// text. Annoteca's markers, closers and store entries are left out, since
+// forbiddenRanges lists those itself, and so is anything the reader cannot
+// write a comment into by accident:
+//
+//   - an escaped `\<!--` (an odd run of backslashes), which is text;
+//   - one in a code span or a fenced block, which markdown prints as text.
+//     Not an indented block: a list item indented four spaces looks the same,
+//     and a comment there must be protected, while treating a rare indented
+//     code example as a comment only refuses a new comment inside it;
+//   - one in the note properties, which are not rendered as HTML;
+//   - one with no `-->` after it, which hides the rest of the note in reading
+//     view. Claiming everything below it would refuse every comment there over
+//     a stray `<!--` in prose, so that one is left to the reader to see.
+//
+// `<!-->` and `<!--->` are empty comments in HTML, and are skipped as such.
+export function htmlCommentRanges(content: string): MarkerRange[] {
+	if (lastHtmlComments?.content === content) return lastHtmlComments.ranges;
+	const ranges: MarkerRange[] = [];
+	// Read left to right, the way markdown reads inline text: a code span and
+	// an HTML comment each run from where they start, and whichever starts
+	// first holds the other. A backtick inside a comment is not code, and a
+	// `<!--` inside a code span is not a comment, so neither can be asked
+	// about on its own (inInlineCode pairs backticks across comments).
+	//
+	// Fences the same way, with this scan's own fence state rather than the
+	// note-wide one: a fence line inside an HTML comment is not a fence, and
+	// counting it turns everything after it inside out. Lines a comment or a
+	// code span covers do not move the state.
+	let pos = frontmatterEnd(content);
+	let open: OpenFence | undefined;
+	// The next backtick and `<!--` at or after `pos` (Infinity when there are
+	// none left), searched again only once `pos` passes them: searching on
+	// every line was quadratic in a long note with few of either.
+	let tick = -1;
+	let opener = -1;
+	const find = (needle: string): number => {
+		const at = content.indexOf(needle, pos);
+		return at === -1 ? Infinity : at;
+	};
+	const note = noteLines(content);
+	const spanEnds = inlineBlockEnds(note.lines);
+	const runs = new Map<number, Map<number, number[]>>();
+	for (const [i, line] of note.lines.entries()) {
+		if (line.end < pos) continue;
+		if (line.start >= pos) {
+			const step = fenceStep(line.body, open);
+			open = step.open;
+			if (step.fenced) {
+				pos = line.end + 1;
+				continue;
+			}
+		}
+		for (;;) {
+			if (tick < pos) tick = find('`');
+			if (opener < pos) opener = find('<!--');
+			if (Math.min(tick, opener) >= line.end) break;
+			if (tick < opener) {
+				// An escaped backtick is text, and opens nothing.
+				if (backslashRunBefore(content, tick) % 2 === 1) {
+					pos = tick + 1;
+					continue;
+				}
+				const run = runLength(content, tick);
+				const close = closingRun(
+					content,
+					tick + run,
+					run,
+					spanEnds[i] ?? content.length,
+					runs,
+				);
+				pos = close === -1 ? tick + run : close + run;
+				continue;
+			}
+			const after = opener + 4;
+			// An odd run of backslashes escapes it. An even run is escaped
+			// backslashes, and the comment after them is live.
+			if (
+				backslashRunBefore(content, opener) % 2 === 1 ||
+				content.startsWith('>', after) ||
+				content.startsWith('->', after)
+			) {
+				pos = after;
+				continue;
+			}
+			const close = content.indexOf('-->', after);
+			// No `-->`: it hides the rest of the note, and nothing after it
+			// is a comment of its own.
+			if (close === -1) {
+				lastHtmlComments = { content, ranges };
+				return ranges;
+			}
+			pos = close + 3;
+			// One of Annoteca's own is skipped whole, so an older marker
+			// whose text quotes an HTML comment is not read as holding one.
+			if (!ANNOTECA_COMMENT_RE.test(content.slice(after, after + 16)))
+				ranges.push({ start: opener, end: pos });
+		}
+	}
+	lastHtmlComments = { content, ranges };
+	return ranges;
+}
+
+// For each line, where a code span opened on it must close by: the end of the
+// last line before the next blank line or the next line that starts a block
+// (a fence, a heading, a list item), all of which end a paragraph. Ending one
+// too early only reads its backticks as text, so a comment after them is
+// still protected; the other way round hides it. One pass from the end.
+function inlineBlockEnds(lines: readonly Line[]): number[] {
+	const ends: number[] = new Array<number>(lines.length).fill(0);
+	for (let i = lines.length - 1; i >= 0; i--) {
+		const line = lines[i];
+		if (line === undefined) continue;
+		const next = lines[i + 1];
+		// A heading is one line long, so a span opened in it ends with it.
+		ends[i] =
+			next === undefined ||
+			startsBlock(next.body) ||
+			HEADING_RE.test(line.body)
+				? line.end
+				: (ends[i + 1] ?? line.end);
+	}
+	return ends;
+}
+
+const HEADING_RE = /^ {0,3}#{1,6}(?:[ \t]|$)/;
+
+const BLOCK_START_RE =
+	/^ {0,3}(?:#{1,6}(?:[ \t]|$)|[-*+][ \t]|\d{1,9}[.)][ \t])/;
+
+function startsBlock(body: string): boolean {
+	return (
+		isBlank(body) || FENCE_LINE_RE.test(body) || BLOCK_START_RE.test(body)
+	);
+}
+
+// Where the backtick run of exactly `run` that closes a code span opened just
+// before `from` starts, or -1. The search stops at `end`, where the paragraph
+// ends (see inlineBlockEnds; lines are read without their quote markers, so a
+// bare `>` line in a quote is blank).
+//
+// Each paragraph's backtick runs are collected once, by length, into `runs`:
+// a paragraph full of unmatched backticks searched to its end once per run
+// otherwise.
+function closingRun(
+	content: string,
+	from: number,
+	run: number,
+	end: number,
+	runs: Map<number, Map<number, number[]>>,
+): number {
+	let byLength = runs.get(end);
+	if (byLength === undefined) {
+		byLength = new Map();
+		// From the first span opened in the paragraph: every later one in it
+		// opens after that, so the runs before it are never asked for.
+		for (let at = content.indexOf('`', from); at !== -1 && at < end;) {
+			const len = runLength(content, at);
+			const list = byLength.get(len);
+			if (list) list.push(at);
+			else byLength.set(len, [at]);
+			at = content.indexOf('`', at + len);
+		}
+		runs.set(end, byLength);
+	}
+	const list = byLength.get(run) ?? [];
+	const lo = countWhile(list.length, (mid) => (list[mid] ?? Infinity) < from);
+	return list[lo] ?? -1;
+}
+
+// The length of the backtick run starting at `at`.
+function runLength(text: string, at: number): number {
+	let n = 0;
+	while (text.charAt(at + n) === '`') n += 1;
+	return n;
+}
+
+// What follows `<!--` in Annoteca's own comments: a marker
+// (`annoteca/<category>:`), a closer (`/annoteca <id>`) or a store entry
+// (`annoteca:store`), with any spacing the parser allows before it. Not
+// `annoteca` alone: `<!-- annoteca notes: ... -->` is an ordinary comment.
+const ANNOTECA_COMMENT_RE = /^\s*(?:annoteca\/|\/annoteca\s|annoteca:store)/i;
+
+let lastHtmlComments: { content: string; ranges: MarkerRange[] } | undefined;
 
 // Any code context markdown would print a closer in: a fenced block (also one
 // inside a blockquote), an indented code block, or an inline code span.
@@ -229,33 +428,52 @@ interface NoteLines {
 	// [open, close + run) note offsets. Filled as runs are asked about.
 	spans: Map<string, [number, number][]>;
 }
+// The fence a fenced block was opened with.
+interface OpenFence {
+	char: string;
+	len: number;
+}
+
+// One line through the fence state: whether the line is fenced (inside a
+// block, or one of its fence lines), and the state after it.
+function fenceStep(
+	body: string,
+	open: OpenFence | undefined,
+): { fenced: boolean; open: OpenFence | undefined } {
+	const match = FENCE_LINE_RE.exec(body);
+	const fence = match?.[1];
+	// An opening fence may carry an info string (```js), but a closing one
+	// may carry nothing but whitespace, as CommonMark has it. Without that
+	// rule a ```js line inside an open block would close it, and the rest
+	// of the block would read as prose.
+	const closes = match !== null && body.slice(match[0].length).trim() === '';
+	const isDelimiter =
+		fence !== undefined &&
+		(open === undefined ||
+			(closes &&
+				fence.startsWith(open.char) &&
+				fence.length >= open.len));
+	const fenced = open !== undefined || isDelimiter;
+	if (fence === undefined || !isDelimiter) return { fenced, open };
+	return {
+		fenced,
+		open:
+			open === undefined
+				? { char: fence.charAt(0), len: fence.length }
+				: undefined,
+	};
+}
+
 let lastLines: NoteLines | undefined;
 function noteLines(content: string): NoteLines {
 	if (lastLines?.content === content) return lastLines;
 	const lines = linesOf(content);
 	const fenced: boolean[] = [];
-	let open: { char: string; len: number } | undefined;
+	let open: OpenFence | undefined;
 	for (const line of lines) {
-		const match = FENCE_LINE_RE.exec(line.body);
-		const fence = match?.[1];
-		// An opening fence may carry an info string (```js), but a closing one
-		// may carry nothing but whitespace, as CommonMark has it. Without that
-		// rule a ```js line inside an open block would close it, and the rest
-		// of the block would read as prose.
-		const closes =
-			match !== null && line.body.slice(match[0].length).trim() === '';
-		const isDelimiter =
-			fence !== undefined &&
-			(open === undefined ||
-				(closes &&
-					fence.startsWith(open.char) &&
-					fence.length >= open.len));
-		fenced.push(open !== undefined || isDelimiter);
-		if (fence !== undefined && isDelimiter)
-			open =
-				open === undefined
-					? { char: fence.charAt(0), len: fence.length }
-					: undefined;
+		const step = fenceStep(line.body, open);
+		fenced.push(step.fenced);
+		open = step.open;
 	}
 	const blank = lines.map((l) => isBlank(l.body));
 	const up: number[] = [];

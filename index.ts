@@ -2,7 +2,8 @@
 // Owners call rebuild(path, content) on file events; queries are read-only.
 
 import type { Comment, LocatedComment } from './types';
-import { findMalformedMarkers, type MalformedMarker } from './parser';
+import type { MalformedMarker } from './parser';
+import { markerProblems } from './html-comments';
 import { toEditorText } from './note-text';
 import { parseDocument } from './document';
 
@@ -65,7 +66,7 @@ export class CommentIndex {
 			// A file with no store entries parses identically to parseAll, so
 			// inline notes are unaffected.
 			comments: parseDocument(content).comments,
-			malformed: findMalformedMarkers(content),
+			malformed: markerProblems(content),
 			parsedAt: Date.now(),
 		};
 		this.files.set(path, idx);

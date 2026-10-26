@@ -841,7 +841,8 @@ function protectedRanges(content: string): ProtectedRange[] {
 	// a stored body converted into a marker writes a `-->` that ends the
 	// entry early), range closers, and the note properties (a marker inside
 	// the YAML breaks it).
-	for (const r of forbiddenRanges(content))
+	// Not other HTML comments: those are what the HTML pass converts.
+	for (const r of forbiddenRanges(content, { htmlComments: false }))
 		out.push({ from: r.start, to: r.end });
 
 	return out;

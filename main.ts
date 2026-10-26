@@ -32,7 +32,7 @@ import {
 import { EventJournal } from './event-journal';
 import { noteText, spliceRaw, toEditorText } from './note-text';
 import { repairMarkerPlacement } from './marker-placement';
-import { hasRepairableNesting, repairNestedMarkers } from './nested-repair';
+import { hasRepairableDamage, repairComments } from './quote-repair';
 import {
 	REPAIR_SCOPE_TEXT,
 	repairConfirmText,
@@ -1480,7 +1480,7 @@ export default class AnnotecaPlugin extends Plugin {
 			file.path,
 			file.basename,
 			idx.malformed,
-			() => hasRepairableNesting(content),
+			() => hasRepairableDamage(content),
 		);
 		if (notice !== undefined) new Notice(notice);
 		this.events.trigger('index-changed', { path: file.path });
@@ -3484,7 +3484,7 @@ export default class AnnotecaPlugin extends Plugin {
 			fixed = await this.comments.convertFileComments(
 				file.path,
 				file,
-				repairNestedMarkers,
+				repairComments,
 				() => !this.unloaded,
 			);
 		} finally {
@@ -3564,7 +3564,7 @@ export default class AnnotecaPlugin extends Plugin {
 				const n = await this.comments.convertFileComments(
 					file.path,
 					file,
-					repairNestedMarkers,
+					repairComments,
 					() => !this.unloaded,
 				);
 				if (n === 0) continue;

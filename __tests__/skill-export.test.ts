@@ -363,10 +363,6 @@ describe('skill v12: the vault review queue', () => {
 	const off = buildSkillMarkdown(CATEGORIES, undefined);
 	const on = buildSkillMarkdown(CATEGORIES, undefined, true);
 
-	it('is schema version 12', () => {
-		expect(SKILL_SCHEMA_VERSION).toBe(12);
-	});
-
 	it('never treats a .base file as the list', () => {
 		for (const skill of [off, on]) {
 			expect(skill).toContain(
@@ -399,5 +395,21 @@ describe('skill v12: the vault review queue', () => {
 			);
 			expect(skill).toMatch(/Never write `annoteca_open`/);
 		}
+	});
+});
+
+describe('skill v13: an HTML comment inside replaced prose', () => {
+	const skill = buildSkillMarkdown(CATEGORIES, undefined);
+
+	it('is schema version 13', () => {
+		expect(SKILL_SCHEMA_VERSION).toBe(13);
+	});
+
+	it('shows a citation escaped inside the original fence', () => {
+		// An assistant copied `<!-- c:09-82 -->` into the fence as it was, so
+		// the marker ended at the citation's `-->` and the rest of it showed in
+		// the note. The opener rule covered it in general; this names the case.
+		expect(skill).toContain('`\\<!-- c:01-8 --\\>`');
+		expect(skill).toMatch(/annoteca-original` fence: prose you replace/);
 	});
 });

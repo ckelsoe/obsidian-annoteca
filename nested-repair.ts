@@ -27,6 +27,11 @@ import { countWhile } from './span-index';
 import { detectRangeIssues } from './diagnostics';
 import { isLeanMarker } from './document';
 import { enclosingForbidden } from './forbidden';
+
+// The repair reasons only about Annoteca's own markers, closers, store and
+// properties. A split marker opener (`<!-- a` left behind when a comment was
+// written into it) is not another HTML comment to it.
+const ANNOTECA_ONLY = { htmlComments: false } as const;
 import type { ImportResult } from './imports';
 import {
 	layoutMarker,
@@ -205,7 +210,8 @@ function withouts(content: string, p: Piece): { text: string; at: number }[] {
 // properties until that line goes too.
 function nested(content: string, p: Piece): boolean {
 	return withouts(content, p).some(
-		(out) => enclosingForbidden(out.text, out.at) !== undefined,
+		(out) =>
+			enclosingForbidden(out.text, out.at, ANNOTECA_ONLY) !== undefined,
 	);
 }
 
@@ -356,7 +362,7 @@ function lift(
 	out: { text: string; at: number },
 ): Placed | undefined {
 	const piece = content.slice(p.start, p.end);
-	const around = enclosingForbidden(out.text, out.at);
+	const around = enclosingForbidden(out.text, out.at, ANNOTECA_ONLY);
 	if (around === undefined) return undefined;
 	const intoStore = scanStoreEntries(out.text).some(
 		(e) => e.start === around.start,
