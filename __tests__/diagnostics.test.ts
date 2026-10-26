@@ -218,7 +218,7 @@ describe('MarkerDamageReporter', () => {
 			[damage('Opener has no close.')],
 			() => true,
 		);
-		expect(notice).toContain('written inside another comment in A');
+		expect(notice).toContain('found a damaged comment in A');
 		expect(notice).toContain(
 			'Repair comments written inside other comments in this note',
 		);

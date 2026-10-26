@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A comment in a table cell no longer breaks the table.** A comment used to be written into a cell as a full marker, which spans several lines, and a table row is one line, so the table ended there and the rest of it showed as text. When Obsidian's table editor later turned those line breaks into `<br>`, the table came back but the comment lost its id, author, range and replies, which then read as part of its text. A comment in a table cell is now always a one-line marker in the cell, with its text and thread at the end of the note, in every note. That also lets an assistant's edit in a cell be accepted, revised or rejected, because the original text is kept with the comment. Converting a note to inline storage leaves these comments as they are.
+- **"Repair comments written inside other comments" mends comments already written into a table row,** in both shapes, and gets back the id, author, range and replies of one whose lines became `<br>`. "Validate marker format" and the notice when you open the note report them.
+- **Updating the comment summary in a note's properties no longer rewrites the other properties.** Annoteca used to save the whole properties block again, which dropped quotes it did not need, so a script reading `date: "2026-10-26"` as text could read a date instead. It now changes only its own `annoteca_*` lines, keeps the note's line endings, and still writes nothing into properties that do not parse.
+
+### Changed
+
+- **The assistant skill lists where a comment may not go** (inside another HTML comment, in a table row as a full marker, in code, in the properties), says a table cell's comment is a one-line marker with its text at the end of the note, and gives both forms of the range flag in the end-of-file store.
+
 ## [1.28.0] - 2026-10-26
 
 ### Fixed

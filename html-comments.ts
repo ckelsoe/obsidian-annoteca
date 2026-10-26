@@ -22,6 +22,7 @@ import {
 	type MalformedMarker,
 } from './parser';
 import { htmlCommentRanges } from './range-placement';
+import { tableCellProblems } from './table-cells';
 import { SpanIndex } from './span-index';
 
 const REASON =
@@ -53,12 +54,14 @@ export function markersInsideHtmlComments(content: string): MalformedMarker[] {
 	return out;
 }
 
-// Every marker problem in a note: what findMalformedMarkers reports, and the
-// comments sitting inside an HTML comment, in document order. What the index
+// Every marker problem in a note: what findMalformedMarkers reports, the
+// comments sitting inside an HTML comment, and full markers in table rows
+// (table-cells.ts), in document order. What the index
 // keeps for the open/save notice, and what "Validate marker format" lists.
 export function markerProblems(content: string): MalformedMarker[] {
 	return [
 		...findMalformedMarkers(content),
 		...markersInsideHtmlComments(content),
+		...tableCellProblems(content),
 	].sort((a, b) => a.start - b.start);
 }

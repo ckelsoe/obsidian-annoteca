@@ -3,6 +3,7 @@ import { TFile } from 'obsidian';
 import type { App } from 'obsidian';
 import {
 	applyFrontmatterSummary,
+	writeSummaryKeys,
 	computeSummary,
 	mergeFileclass,
 	fileclassHasAnnoteca,
@@ -318,20 +319,22 @@ describe('isManagedNote', () => {
 describe('applyFrontmatterSummary against a lagging cache', () => {
 	const opts: FrontmatterSummaryOptions = { ...OPTS, writeClassTag: false };
 	const comments = [mk({ date: '2026-10-01', category: 'tone' })];
+	const summary = {
+		annoteca_open: 1,
+		annoteca_oldest_open: '2026-10-01',
+		annoteca_categories: ['tone'],
+	};
 
 	function fakeApp(cached: Record<string, unknown>) {
-		const writes: Record<string, unknown>[] = [];
+		const writes: string[] = [];
+		let raw = '---\ntitle: T\n---\nBody.\n';
 		const app = {
 			metadataCache: { getFileCache: () => ({ frontmatter: cached }) },
-			fileManager: {
-				processFrontMatter: (
-					_f: TFile,
-					fn: (front: Record<string, unknown>) => void,
-				) => {
-					const front: Record<string, unknown> = {};
-					fn(front);
-					writes.push(front);
-					return Promise.resolve();
+			vault: {
+				process: (_f: TFile, fn: (data: string) => string) => {
+					raw = fn(raw);
+					writes.push(raw);
+					return Promise.resolve(raw);
 				},
 			},
 		} as unknown as App;
@@ -348,7 +351,7 @@ describe('applyFrontmatterSummary against a lagging cache', () => {
 				opts,
 			),
 		).toBe(true);
-		const written = first.writes[0] ?? {};
+		expect(first.writes[0]).toContain('annoteca_open: 1');
 
 		// The cache still shows the note before that write; the file has it.
 		const second = fakeApp({});
@@ -358,7 +361,7 @@ describe('applyFrontmatterSummary against a lagging cache', () => {
 			comments,
 			opts,
 			undefined,
-			() => Promise.resolve(written),
+			() => Promise.resolve(summary),
 		);
 		expect(wrote).toBe(false);
 		expect(second.writes).toHaveLength(0);
@@ -376,5 +379,176 @@ describe('applyFrontmatterSummary against a lagging cache', () => {
 		);
 		expect(wrote).toBe(true);
 		expect(writes).toHaveLength(1);
+	});
+
+	it('does not write into frontmatter that does not parse', async () => {
+		const { app, writes } = fakeApp({});
+		await expect(
+			applyFrontmatterSummary(
+				app,
+				new TFile(),
+				comments,
+				opts,
+				undefined,
+				undefined,
+				() => {
+					throw new Error('bad yaml');
+				},
+			),
+		).rejects.toThrow('bad yaml');
+		expect(writes).toHaveLength(0);
+	});
+});
+
+describe('writeSummaryKeys', () => {
+	const desired = {
+		open: 2,
+		oldestOpen: '2026-10-26',
+		categories: ['clarify', 'decision-needed'],
+	};
+
+	it('changes only the summary keys, quotes and all', () => {
+		const raw = [
+			'---',
+			'title: "Reading guide"',
+			'document: "rg"',
+			"date: '2026-10-26'",
+			'answers: []',
+			'annoteca_open: 1',
+			'annoteca_categories:',
+			'  - clarify',
+			'status: draft',
+			'---',
+			'Body.',
+		].join('\n');
+		expect(writeSummaryKeys(raw, desired)).toBe(
+			[
+				'---',
+				'title: "Reading guide"',
+				'document: "rg"',
+				"date: '2026-10-26'",
+				'answers: []',
+				'annoteca_open: 2',
+				'annoteca_oldest_open: 2026-10-26',
+				'annoteca_categories:',
+				'  - clarify',
+				'  - decision-needed',
+				'status: draft',
+				'---',
+				'Body.',
+			].join('\n'),
+		);
+	});
+
+	it('removes a key the summary no longer has, with its list items', () => {
+		const raw =
+			'---\na: 1\nannoteca_open: 3\nannoteca_categories:\n- tone\n- x\nb: 2\n---\n';
+		expect(writeSummaryKeys(raw, { open: 0 })).toBe(
+			'---\na: 1\nannoteca_open: 0\nb: 2\n---\n',
+		);
+	});
+
+	it('adds the keys at the end of the block, and a block to a note with none', () => {
+		expect(writeSummaryKeys('---\na: 1\n---\nx', { open: 1 })).toBe(
+			'---\na: 1\nannoteca_open: 1\n---\nx',
+		);
+		expect(writeSummaryKeys('x', { open: 1 })).toBe(
+			'---\nannoteca_open: 1\n---\nx',
+		);
+	});
+
+	it('keeps Windows line endings', () => {
+		const raw = '---\r\na: "1"\r\n---\r\nx';
+		expect(writeSummaryKeys(raw, { open: 1 })).toBe(
+			'---\r\na: "1"\r\nannoteca_open: 1\r\n---\r\nx',
+		);
+	});
+
+	it('quotes a category YAML would read as something else', () => {
+		const out = writeSummaryKeys('---\n---\n', {
+			open: 1,
+			categories: ['123', 'yes', 'ok'],
+		});
+		expect(out).toContain('  - "123"\n  - "yes"\n  - ok');
+	});
+});
+
+describe('writeSummaryKeys, at the edges', () => {
+	it('replaces a quoted summary key rather than adding a second one', () => {
+		const out = writeSummaryKeys('---\n"annoteca_open": 5\n---\n', {
+			open: 1,
+		});
+		expect(out).toBe('---\nannoteca_open: 1\n---\n');
+	});
+
+	it('removes a block value with blank lines in it whole', () => {
+		const raw =
+			'---\nannoteca_categories: |\n  first\n\n  second\ntitle: ok\n---\n';
+		expect(writeSummaryKeys(raw, { open: 1 })).toBe(
+			'---\nannoteca_open: 1\ntitle: ok\n---\n',
+		);
+	});
+
+	it('refuses properties with no closing ---', () => {
+		expect(() =>
+			writeSummaryKeys('---\ntitle: x\nBody', { open: 1 }),
+		).toThrow();
+	});
+});
+
+describe('writeSummaryKeys, comments and flow values', () => {
+	it('removes a list with a comment line among its items', () => {
+		const raw = '---\nannoteca_categories:\n- a\n# c\n- b\ntitle: x\n---\n';
+		expect(writeSummaryKeys(raw, { open: 1 })).toBe(
+			'---\nannoteca_open: 1\ntitle: x\n---\n',
+		);
+	});
+
+	it('removes a flow list that runs over lines', () => {
+		const raw = '---\nannoteca_categories: [a,\nb]\ntitle: x\n---\n';
+		expect(writeSummaryKeys(raw, { open: 1 })).toBe(
+			'---\nannoteca_open: 1\ntitle: x\n---\n',
+		);
+	});
+});
+
+describe('writeSummaryKeys never takes a key that is not its own', () => {
+	it.each([
+		['a quote inside a flow item', "annoteca_categories: [it's, x]"],
+		['a bracket in a plain value', 'annoteca_oldest_open: a[b'],
+	])('with %s', (_, line) => {
+		const raw = `---\n${line}\ntitle: x\nauthor: y\n---\n`;
+		const out = writeSummaryKeys(raw, { open: 1 });
+		expect(out).toContain('title: x\nauthor: y');
+		expect(out).not.toContain(line);
+	});
+});
+
+describe('the class tag', () => {
+	it('is decided from the file, not a cache that lags it', async () => {
+		let merged = 0;
+		const app = {
+			// The cache has not seen the tag the file already holds.
+			metadataCache: { getFileCache: () => ({ frontmatter: {} }) },
+			vault: {
+				process: (_f: TFile, fn: (data: string) => string) =>
+					Promise.resolve(fn('---\nfileclass: annoteca\n---\n')),
+			},
+			fileManager: {
+				processFrontMatter: () => {
+					merged += 1;
+					return Promise.resolve();
+				},
+			},
+		} as unknown as App;
+		await applyFrontmatterSummary(
+			app,
+			new TFile(),
+			[mk({ date: '2026-10-01', category: 'tone' })],
+			OPTS,
+			undefined,
+			() => Promise.resolve({ fileclass: 'annoteca' }),
+		);
+		expect(merged).toBe(0);
 	});
 });

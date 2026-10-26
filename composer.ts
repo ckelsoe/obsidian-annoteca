@@ -38,6 +38,8 @@ import {
 	storeEntriesWith,
 } from './document';
 import { diffToSplice, parseStore, toStored, writeStoreRegion } from './store';
+import { inCell, inTableRow } from './table-row';
+import { cellRewrite } from './table-cells';
 import {
 	INSIDE_FORBIDDEN_MESSAGE,
 	VANISHED_MESSAGE,
@@ -677,6 +679,29 @@ export class ComposerForm {
 				return;
 			}
 
+			// In a table row the full marker would break the row: the comment
+			// moves to the store and the cell keeps a lean marker
+			// (table-cells.ts). Store first, as above, then the marker.
+			const cell = cellRewrite(content, fresh.marker.start, {
+				...fresh,
+				category,
+				body: finalBody,
+			});
+			if (cell) {
+				this.applyEditorDiff(
+					editor,
+					content,
+					writeStoreRegion(content, cell.entries),
+				);
+				editor.replaceRange(
+					cell.marker,
+					editor.offsetToPos(fresh.marker.start),
+					editor.offsetToPos(fresh.marker.end),
+				);
+				this.finish(before, fresh.marker.start);
+				return;
+			}
+
 			// Every tail field is listed rather than spread, because the defect
 			// here was an omitted one and a list is checkable against the format.
 			const serialized = serialize({
@@ -744,9 +769,12 @@ export class ComposerForm {
 			new Notice(INSIDE_FORBIDDEN_MESSAGE);
 			return;
 		}
+		// A comment in a table row is lean in every note: a full marker's line
+		// breaks would end the row and break the table (table-cells.ts).
+		const lean = mode === 'eof' || inTableRow(editor.getValue(), requested);
 		const plan =
 			selection.length > 0 && id !== undefined
-				? this.closerPlan(editor, fromOffset, mode !== 'eof')
+				? this.closerPlan(editor, fromOffset, !lean)
 				: ({ kind: 'none' } as const);
 		const comment: Comment =
 			plan.kind === 'range' ? { ...created, range: 'closed' } : created;
@@ -755,7 +783,7 @@ export class ComposerForm {
 		// marker whose body/thread move to the eof store below. The id guard is
 		// belt-and-braces (buildCommentForCreate always assigns one); without an id
 		// there is no join key, so such a comment can only be stored inline.
-		const eof = mode === 'eof' && id !== undefined;
+		const eof = lean && id !== undefined;
 		const text = eof
 			? serializeLeanMarker(comment.category, id)
 			: serialize({
@@ -773,9 +801,12 @@ export class ComposerForm {
 		// Safe placement: moving the marker off the start of its block can
 		// carry it into a multi-line marker above, and it goes just before that
 		// marker instead. The requested spot itself was checked above.
+		// In a table row, never before the row's leading pipe: a marker there
+		// goes on a line of its own and ends the table (table-row.ts).
+		const value = editor.getValue();
 		const place = planSafeMarkerInsert(
-			editor.getValue(),
-			requested,
+			value,
+			inTableRow(value, requested) ? inCell(value, requested) : requested,
 			text.includes('\n'),
 		);
 		if (place === undefined) {

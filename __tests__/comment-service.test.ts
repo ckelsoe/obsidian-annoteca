@@ -2318,6 +2318,29 @@ describe('promote', () => {
 		...over,
 	});
 
+	// Issue report 2026-10-26: a full marker in a cell broke the table.
+	it('writes a lean marker in a table cell, even in an inline note', async () => {
+		const table =
+			'| A | B |\n| --- | --- |\n| one | two |\n| three | four |\n';
+		const h = makeHarnessWith(table, false);
+		const cell = table.indexOf('two');
+		const made = await h.service.promote(
+			'note.md',
+			[req({ anchor: { start: cell, end: cell + 3 } })],
+			h.content,
+		);
+		expect(made).toHaveLength(1);
+		const rows = h.content.slice(0, h.content.indexOf('\n\n'));
+		for (const line of rows.split('\n'))
+			expect(line.startsWith('|')).toBe(true);
+		expect(rows).toContain(
+			serializeLeanMarker('prose-check', made[0]?.id ?? ''),
+		);
+		expect(parseDocument(h.content).comments[0]?.body).toBe(
+			'Flagged register.',
+		);
+	});
+
 	it('creates a comment carrying author and provenance', async () => {
 		const h = makeHarnessWith(PLAIN, false);
 		const made = await h.service.promote('note.md', [req()], h.content);
@@ -3257,5 +3280,75 @@ describe('promote: placement never lands inside another marker', () => {
 		expect(h.content).toContain(
 			'<!-- annoteca/clarify: first\n# heading -->',
 		);
+	});
+});
+
+// Issue report 2026-10-26: writes to comments in table cells.
+describe('comments in table cells', () => {
+	const HEAD = '| A | B |\n| --- | --- |\n';
+
+	it('moves a one-line cell comment to the store on its first reply', async () => {
+		const note = `${HEAD}| one | <!-- annoteca/note: imported --> two |\n`;
+		const h = makeHarnessWith(note);
+		const wrote = await h.service.appendReply(
+			'note.md',
+			firstComment(h.content),
+			{
+				author: 'claude',
+				date: '2026-10-26T10:00:00',
+				body: 'a reply',
+			},
+		);
+		expect(wrote).toBe(true);
+		const rows = h.content.slice(0, h.content.indexOf('\n\n'));
+		for (const line of rows.split('\n'))
+			expect(line.startsWith('|')).toBe(true);
+		const [c] = parseDocument(h.content).comments;
+		expect(c?.body).toBe('imported');
+		expect(c?.replies.map((r) => r.body)).toEqual(['a reply']);
+		expect(rows).toContain(serializeLeanMarker('note', c?.id ?? ''));
+	});
+
+	it('restores an ordinary comment inline in an inline note with a cell store', async () => {
+		const lean = serializeLeanMarker('clarify', 'cccccccc');
+		const inline = serialize({
+			id: 'dddddddd',
+			category: 'note',
+			body: 'inline one',
+			author: 'a',
+		});
+		const initial = writeStoreRegion(
+			`Para ${inline} here.\n\nSecond paragraph.\n\n${HEAD}| one | ${lean} two |\n`,
+			[
+				{
+					id: 'cccccccc',
+					category: 'clarify',
+					body: 'in a cell',
+					replies: [],
+				},
+			],
+		);
+		const h = makeHarnessWith(initial);
+		const lost = at(
+			parseAll(
+				serialize({
+					id: 'eeeeeeee',
+					category: 'tone',
+					body: 'lost one',
+				}),
+			),
+			0,
+		);
+		const ok = await h.service.restoreComment(
+			'note.md',
+			lost,
+			initial.indexOf('Second'),
+		);
+		expect(ok).toBe(true);
+		const restored = parseAll(h.content).find((c) => c.id === 'eeeeeeee');
+		expect(restored?.body).toBe('lost one');
+		expect(parseStore(h.content).map((e) => e.comment.id)).toEqual([
+			'cccccccc',
+		]);
 	});
 });

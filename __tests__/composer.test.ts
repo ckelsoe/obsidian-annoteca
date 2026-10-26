@@ -1022,6 +1022,37 @@ describe('composer create: never inside another marker', () => {
 	const markerStart = NOTE.indexOf('<!--');
 	const markerEnd = NOTE.indexOf('-->') + 3;
 
+	// Issue report 2026-10-26: a full marker in a table cell broke the table.
+	it('writes a lean marker in a table cell, with its text in the store', async () => {
+		const table = '| A | B |\n| --- | --- |\n| one | two |\n';
+		const host = makeEditor(table, 'note.md', '', table.indexOf('two'));
+		const { form, closed } = openCreate(host);
+		form.state.selectedCategory = 'clarify';
+		form.state.body = 'a question about two';
+		await form.submit();
+
+		expect(closed()).toBe(true);
+		const rows = host.content.slice(0, host.content.indexOf('\n\n'));
+		for (const line of rows.split('\n'))
+			expect(line.startsWith('|')).toBe(true);
+		const [c] = parseDocument(host.content).comments;
+		expect(c?.body).toBe('a question about two');
+		expect(rows).toContain(serializeLeanMarker('clarify', c?.id ?? ''));
+	});
+
+	it('refuses with the cursor inside another HTML comment', async () => {
+		const note = 'A <!-- diagram: status: draft --> B';
+		const host = makeEditor(note, 'note.md', '', note.indexOf('draft'));
+		const { form, closed } = openCreate(host);
+		form.state.selectedCategory = 'clarify';
+		form.state.body = 'would break the diagram note';
+		await form.submit();
+
+		expect(host.content).toBe(note);
+		expect(noticeLog.join('\n')).toContain('an HTML comment');
+		expect(closed()).toBe(false);
+	});
+
 	it('refuses with the cursor inside a marker, writing nothing', async () => {
 		const host = makeEditor(NOTE, 'note.md', '', markerStart + 8);
 		const { form, closed } = openCreate(host);
