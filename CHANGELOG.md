@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.29.0] - 2026-10-26
+
 ### Fixed
 
 - **A comment in a table cell no longer breaks the table.** A comment used to be written into a cell as a full marker, which spans several lines, and a table row is one line, so the table ended there and the rest of it showed as text. When Obsidian's table editor later turned those line breaks into `<br>`, the table came back but the comment lost its id, author, range and replies, which then read as part of its text. A comment in a table cell is now always a one-line marker in the cell, with its text and thread at the end of the note, in every note. That also lets an assistant's edit in a cell be accepted, revised or rejected, because the original text is kept with the comment. Converting a note to inline storage leaves these comments as they are.
