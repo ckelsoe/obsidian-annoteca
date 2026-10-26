@@ -339,10 +339,12 @@ export class MarkerDamageReporter {
 		}
 		if (this.warned.has(path)) return undefined;
 		this.warned.add(path);
-		// The usual cause before 1.27.2, and one with a repair that needs no
-		// hand-editing, so it is named instead of the generic finding.
+		// Damage the repair command fixes with no hand-editing (a comment
+		// written inside another one, an HTML comment copied unescaped into
+		// one, a full marker in a table row), so it is named instead of the
+		// generic finding.
 		if (repairable())
-			return `Annoteca found a comment written inside another comment in ${displayName}. Run "Repair comments written inside other comments in this note" to move it out. Every comment is kept.`;
+			return `Annoteca found a damaged comment in ${displayName}. Run "Repair comments written inside other comments in this note" to fix it. Every comment is kept.`;
 		// The finding's own reason, not a second phrasing of it. The report note
 		// and this notice describe the same problem, and two copies drift.
 		const more =

@@ -185,8 +185,16 @@ export function classTagFor(opts: FrontmatterSummaryOptions): {
 }
 
 // Write the summary into the note's frontmatter, only when something changed.
-// Preserves every other frontmatter key via processFrontMatter. A no-op when the
-// note is not managed or already matches. Resolves to whether it wrote.
+// A no-op when the note is not managed or already matches. Resolves to whether
+// it wrote.
+//
+// The summary's own keys are edited as text (writeSummaryKeys) rather than
+// through processFrontMatter. That re-serializes the whole block, so every
+// key the user owns came back in Obsidian's style: quotes it did not need were
+// dropped, and a script reading `date: "2026-10-26"` as a string got a date
+// once it lost its quotes. Text that does not parse as YAML is not written to:
+// `parse` (Obsidian's parseYaml) throws on it, and the write is abandoned, as
+// processFrontMatter abandoned it.
 //
 // `readActual`, when given, returns the frontmatter as the file holds it now.
 // The metadata cache catches up with a write a moment after it lands, so a
@@ -201,6 +209,7 @@ export async function applyFrontmatterSummary(
 	opts: FrontmatterSummaryOptions,
 	shouldContinue?: () => boolean,
 	readActual?: () => Promise<Record<string, unknown>>,
+	parse: (yaml: string) => unknown = () => undefined,
 ): Promise<boolean> {
 	const { property, writeClassTag } = classTagFor(opts);
 	const cache = app.metadataCache.getFileCache(file);
@@ -220,28 +229,147 @@ export async function applyFrontmatterSummary(
 	// scheduled; do not mutate a note after teardown.
 	if (shouldContinue && !shouldContinue()) return false;
 
-	await app.fileManager.processFrontMatter(
-		file,
-		(front: Record<string, unknown>) => {
-			front[FM_OPEN] = desired.open;
+	await app.vault.process(file, (raw) => {
+		const block = frontmatterText(raw);
+		if (block !== undefined) parse(block);
+		const updated = writeSummaryKeys(raw, desired);
+		// And the result: an edit that left the YAML broken is not written.
+		const written = frontmatterText(updated);
+		if (written !== undefined) parse(written);
+		return updated;
+	});
 
-			if (desired.oldestOpen !== undefined) {
-				front[FM_OLDEST_OPEN] = desired.oldestOpen;
-			} else {
-				delete front[FM_OLDEST_OPEN];
-			}
-
-			if (desired.categories !== undefined) {
-				front[FM_CATEGORIES] = desired.categories;
-			} else {
-				delete front[FM_CATEGORIES];
-			}
-
-			if (writeClassTag) {
+	// The class tag is one value in a property the user may own, so it is
+	// still merged through processFrontMatter, and only when it is missing.
+	if (writeClassTag && mergeFileclass(fm[property]).changed) {
+		await app.fileManager.processFrontMatter(
+			file,
+			(front: Record<string, unknown>) => {
 				const merged = mergeFileclass(front[property]);
 				if (merged.changed) front[property] = merged.value;
-			}
-		},
-	);
+			},
+		);
+	}
 	return true;
+}
+
+// A summary key at the start of a line, bare or quoted.
+const SUMMARY_KEY_RE = new RegExp(
+	`^(["']?)(?:${FM_OPEN}|${FM_OLDEST_OPEN}|${FM_CATEGORIES})\\1[ \t]*:`,
+);
+
+// How far a line of a flow value opens brackets (`[`, `{`) net of the ones
+// it closes. A quote counts only where a flow item starts (after `[`, `{`,
+// `,`, `:` or a space, or at the start of the line); elsewhere `'` and `"`
+// are ordinary characters, as in `it's`.
+function bracketDepth(line: string): number {
+	let depth = 0;
+	let quote = '';
+	let prev = ' ';
+	for (const ch of line) {
+		if (quote !== '') {
+			if (ch === quote) quote = '';
+		} else if ((ch === '"' || ch === "'") && '[{,: \t'.includes(prev))
+			quote = ch;
+		else if (ch === '#' && ' \t'.includes(prev)) break;
+		else if (ch === '[' || ch === '{') depth += 1;
+		else if (ch === ']' || ch === '}') depth -= 1;
+		prev = ch;
+	}
+	return depth;
+}
+
+// A line that belongs to the value of the key above it: indented, or an item
+// of a block list written at the key's own indent.
+const VALUE_LINE_RE = /^(?:[ \t]|-[ \t]|-\r?$)/;
+
+// A value written bare when YAML would read it back as this same string, and
+// quoted otherwise: a number, a boolean, a null or anything with punctuation.
+function scalar(value: string): string {
+	return /^[a-z][a-z0-9-]*$/.test(value) &&
+		!/^(?:true|false|yes|no|on|off|null|y|n)$/.test(value)
+		? value
+		: JSON.stringify(value);
+}
+
+function summaryLines(desired: DesiredSummary): string[] {
+	const out = [`${FM_OPEN}: ${desired.open}`];
+	if (desired.oldestOpen !== undefined)
+		out.push(`${FM_OLDEST_OPEN}: ${desired.oldestOpen}`);
+	if (desired.categories !== undefined) {
+		if (desired.categories.length === 0) out.push(`${FM_CATEGORIES}: []`);
+		else {
+			out.push(`${FM_CATEGORIES}:`);
+			for (const c of desired.categories) out.push(`  - ${scalar(c)}`);
+		}
+	}
+	return out;
+}
+
+// The frontmatter's YAML, without its `---` lines, or undefined when the note
+// has none.
+function frontmatterText(raw: string): string | undefined {
+	const lines = raw.split('\n');
+	if (lines[0]?.replace(/\r$/, '') !== '---') return undefined;
+	const close = lines.findIndex(
+		(l, i) => i > 0 && /^(?:---|\.\.\.)\r?$/.test(l),
+	);
+	if (close === -1) return undefined;
+	return lines.slice(1, close).join('\n');
+}
+
+// `raw` with the summary keys set to `desired` and nothing else changed. A key
+// the summary no longer has is removed. The keys keep their place: they go
+// where the first of them was, or at the end of the block when none was there.
+// A note with no frontmatter gets one holding just the summary.
+export function writeSummaryKeys(raw: string, desired: DesiredSummary): string {
+	const crlf = raw.includes('\r\n');
+	const end = crlf ? '\r' : '';
+	const fresh = summaryLines(desired).map((l) => l + end);
+	const lines = raw.split('\n');
+	const close =
+		lines[0]?.replace(/\r$/, '') === '---'
+			? lines.findIndex((l, i) => i > 0 && /^(?:---|\.\.\.)\r?$/.test(l))
+			: -1;
+	if (close === -1) {
+		// An opening `---` with no close is properties that do not parse;
+		// adding a block above it would only make that worse.
+		if (lines[0]?.replace(/\r$/, '') === '---')
+			throw new Error('The note properties have no closing ---');
+		return [`---${end}`, ...fresh, `---${end}`, ...lines].join('\n');
+	}
+	const kept: string[] = [];
+	let at = -1;
+	for (let i = 1; i < close; i++) {
+		const line = lines[i] ?? '';
+		if (!SUMMARY_KEY_RE.test(line)) {
+			kept.push(line);
+			continue;
+		}
+		if (at === -1) at = kept.length;
+		// A flow value (`[a,` / `{a: 1,`) runs on until its brackets close.
+		// Only a value that starts with one: in a plain value a bracket is
+		// an ordinary character.
+		const value = line.slice(line.indexOf(':') + 1).trim();
+		let depth = /^[[{]/.test(value) ? bracketDepth(value) : 0;
+		while (depth > 0 && i + 1 < close) {
+			i += 1;
+			depth += bracketDepth(lines[i] ?? '');
+		}
+		// The key's own value lines, and the blank and `#` comment lines
+		// among them: those belong to the value when a value line follows
+		// (a block scalar can hold blank lines, a list can hold comments).
+		for (let j = i + 1; j < close; j++) {
+			const next = lines[j] ?? '';
+			if (VALUE_LINE_RE.test(next)) {
+				i = j;
+				continue;
+			}
+			const trimmed = next.trim();
+			if (trimmed !== '' && !trimmed.startsWith('#')) break;
+		}
+	}
+	if (at === -1) at = kept.length;
+	kept.splice(at, 0, ...fresh);
+	return [lines[0] ?? '---', ...kept, ...lines.slice(close)].join('\n');
 }

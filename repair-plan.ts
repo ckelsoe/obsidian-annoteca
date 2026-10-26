@@ -42,7 +42,7 @@ export function repairConfirmText(targets: readonly RepairTarget[]): {
 		.map((t) => (t.slow ? `${t.name}: ${SLOW_NOTE}` : t.name));
 	if (n > LISTED) items.push(`and ${n - LISTED} more`);
 	return {
-		description: `Move every comment that was written inside another comment, a range end, the comment store or the note properties to just outside it. The comment that held it gets its text back. An HTML comment copied into a comment's original text is escaped, so the comment reads whole again. A note is changed only when the repair leaves it whole with every comment kept. ${n === 1 ? '1 note needs it' : `${n} notes need it`}:`,
+		description: `Move every comment that was written inside another comment, a range end, the comment store or the note properties to just outside it. The comment that held it gets its text back. An HTML comment copied into a comment's original text is escaped, so the comment reads whole again. A full comment written into a table row becomes a one-line marker in the cell, with its text at the end of the note. A note is changed only when the repair leaves it whole with every comment kept. ${n === 1 ? '1 note needs it' : `${n} notes need it`}:`,
 		items,
 	};
 }

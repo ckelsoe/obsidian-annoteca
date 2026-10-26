@@ -20,6 +20,7 @@
 
 import type { Comment, StorageMode } from './types';
 import { parseAll, serialize, serializeLeanMarker, generateId } from './parser';
+import { inTableRow } from './table-row';
 import {
 	parseStore,
 	toStored,
@@ -205,8 +206,14 @@ type NoteStorageState = 'inline' | 'eof' | 'empty';
 // a degenerate empty-bodied inline marker, left to the inline path until
 // diagnostics adopts it. With no markers at all, the note has no comments, so the
 // desired mode is free to apply even if stranded store entries remain.
+//
+// A lean marker in a table row does not count either way: a comment in a cell
+// is lean in every note (table-cells.ts), so it says nothing about how the
+// note keeps the rest of its comments.
 function classifyNoteStorage(content: string): NoteStorageState {
-	const markers = parseAll(content);
+	const markers = parseAll(content).filter(
+		(m) => !(isLeanMarker(m) && inTableRow(content, m.marker.start)),
+	);
 	if (markers.length === 0) return 'empty';
 	const storeIds = new Set(parseStore(content).map((e) => e.comment.id));
 	const hasEof = markers.some(
@@ -341,6 +348,9 @@ export function convertFileToInline(content: string): StorageConvertResult {
 	const edits: ConvertEdit[] = [];
 	for (const m of markers) {
 		if (!isLeanMarker(m) || m.id === undefined) continue;
+		// A comment in a table row stays lean: a full marker's line breaks
+		// would end the row (table-cells.ts). Its entry stays in the store.
+		if (inTableRow(content, m.marker.start)) continue;
 		const stored = storeById.get(m.id);
 		if (stored === undefined) continue; // dangling lean marker: leave as-is
 		consumed.add(stored);

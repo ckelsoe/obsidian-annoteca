@@ -401,15 +401,36 @@ describe('skill v12: the vault review queue', () => {
 describe('skill v13: an HTML comment inside replaced prose', () => {
 	const skill = buildSkillMarkdown(CATEGORIES, undefined);
 
-	it('is schema version 13', () => {
-		expect(SKILL_SCHEMA_VERSION).toBe(13);
-	});
-
 	it('shows a citation escaped inside the original fence', () => {
 		// An assistant copied `<!-- c:09-82 -->` into the fence as it was, so
 		// the marker ended at the citation's `-->` and the rest of it showed in
 		// the note. The opener rule covered it in general; this names the case.
 		expect(skill).toContain('`\\<!-- c:01-8 --\\>`');
 		expect(skill).toMatch(/annoteca-original` fence: prose you replace/);
+	});
+});
+
+describe('skill v14: where a marker may not go', () => {
+	const skill = buildSkillMarkdown(CATEGORIES, undefined);
+
+	it('is schema version 14', () => {
+		expect(SKILL_SCHEMA_VERSION).toBe(14);
+	});
+
+	it('lists the places a marker breaks something', () => {
+		expect(skill).toContain('### Where a marker may not go');
+		expect(skill).toContain('inside another HTML comment');
+		expect(skill).toContain('as a full marker in a table row');
+	});
+
+	it('makes a table cell comment lean, with the original in the store', () => {
+		expect(skill).toContain('### Comments in table cells');
+		expect(skill).toContain('`addressed.original`');
+		expect(skill).toContain('Do not write line breaks or `<br>`');
+	});
+
+	it('gives the range flag in both store forms', () => {
+		expect(skill).toContain('`"range": "closed"`');
+		expect(skill).toContain('`"[range=closed]"`');
 	});
 });

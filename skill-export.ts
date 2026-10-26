@@ -75,7 +75,13 @@ export type SkillExportTarget = 'claude' | 'agent' | 'both';
 // fence unescaped, so the marker ended at the citation's `-->` and its fence
 // and closing `-->` showed in the note. The opener rule already covered the
 // fence; v13 names that case and its escaped form.
-export const SKILL_SCHEMA_VERSION = 13;
+// 14 = where a marker may not go, and table cells. A comment written into a
+// table row as a full marker broke the table, and once its line breaks became
+// `<br>` its id and thread were lost; one written inside a diagram note broke
+// that note. v14 lists where markers may not go, says a cell's comment is a
+// lean marker with a store entry, and gives the store's range flag in both
+// forms the plugin reads.
+export const SKILL_SCHEMA_VERSION = 14;
 
 const SKILL_VERSION_RE = /^annoteca-skill-version:\s*(\d+)\s*$/m;
 
@@ -277,6 +283,20 @@ The Q3 forecast assumes a hiring freeze through December.
 
 Structured lines sit at the END of the comment, after all body text, one per line, in this order: \`[id=]\`, \`[date=]\`, \`[author=]\`, \`[source=]\`, \`[anchor=]\`, \`[range=closed]\`, then \`[reply ...]\` lines oldest first, then at most one \`[addressed ...]\` line (with its optional \`annoteca-original\` fence), then at most one \`[resolved ...]\` line.
 
+### Where a marker may not go
+
+A marker is an HTML comment, so it only works where markdown reads HTML and where it does not end something else. Never put a marker or a closer:
+
+- **inside another HTML comment**, such as a diagram note \`<!-- diagram: ... -->\` or a citation \`<!-- c:01-8 -->\`. Comments do not nest: the marker's \`-->\` ends the outer comment early, and the rest of it shows in the note as text. Put the comment beside the HTML comment, or on the visible thing it describes (the embedded diagram, the sentence the citation supports). A passage may contain a whole HTML comment.
+- **inside another marker, a closer or the comment store**.
+- **in a code block or inline code**, where it would show as text.
+- **in the note's frontmatter properties**, where it breaks the YAML.
+- **as a full marker in a table row.** A table row is one line, and a full marker's lines end the row and break the table. See the next section.
+
+### Comments in table cells
+
+A comment in a table row is always a **lean marker** (\`<!-- annoteca/<category>: [id=<id>] -->\`, one line) in the cell, with its body, thread and state in a store entry at the end of the file (see "End-of-file storage" below), in every note, including notes that keep their other comments inline. Create the store if the note has none. Do not write line breaks or \`<br>\` into a cell's marker. Because the entry is JSON, the addressed flow works in a cell: put the replaced text in \`addressed.original\` and Reject restores it. A range closer in a cell is fine, since it is one line.
+
 ### Range comments: the closing marker
 
 A comment can say exactly where its passage ends. The opening marker sits at the start of the passage as usual, and a closing marker carrying the same id sits straight after the passage's last character:
@@ -299,7 +319,7 @@ Rules for closers:
 - **When you address a range comment by replacement**, the \`annoteca-original\` fence holds exactly the old text that was between the two markers, nothing more. Reject restores that text between them.
 - **Never add a closer to an existing comment that has none**, and never move one. A comment without a closer marks only where its passage starts, and that is a valid comment. Closers are written when a comment is created.
 - **Write \`[range=closed]\` with every closer you create, and never remove it.** It is how a lost closer gets noticed.
-- **Storage mode does not matter**: a lean marker (see "End-of-file storage" below) takes the same closer, straight after its passage, and the closer never goes in the store. The flag does go in the store, as \`"range": "closed"\`.
+- **Storage mode does not matter**: a lean marker (see "End-of-file storage" below) takes the same closer, straight after its passage, and the closer never goes in the store. The flag does go in the store: write it as \`"range": "closed"\`. Annoteca itself keeps it as the line \`"[range=closed]"\` in the entry's \`unknownLines\`, so that older versions carry it, and it reads both forms.
 - **A closer goes only where HTML is invisible**: never inside a code block, inline code, or the note's frontmatter properties.
 - **Deleting a comment deletes its closer too**, and only when the user explicitly asks to delete that comment. Exactly one closer per id; a second one makes the range ambiguous and the plugin ignores both.
 

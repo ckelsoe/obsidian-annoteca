@@ -1526,6 +1526,7 @@ export default class AnnotecaPlugin extends Plugin {
 				opts,
 				() => !this.unloaded,
 				() => this.readFrontmatter(file),
+				parseYaml,
 			)
 				.then((written) => {
 					this.frontmatterFailedPaths.delete(file.path);
@@ -1570,8 +1571,8 @@ export default class AnnotecaPlugin extends Plugin {
 
 	// The note's frontmatter as the file holds it, for the summary writer to
 	// check before it writes (see applyFrontmatterSummary). Unparseable YAML
-	// reads as empty, which never matches, so the writer goes on to the same
-	// processFrontMatter call that reports it.
+	// reads as empty, which never matches, so the writer goes on to the write,
+	// whose parseYaml check refuses it and reports it.
 	private async readFrontmatter(
 		file: TFile,
 	): Promise<Record<string, unknown>> {

@@ -149,6 +149,8 @@ export function markerDamageMessage(finding: MalformedMarker): string {
 // here.
 export { enclosingForbidden, insideForbidden } from './forbidden';
 import { passageBlocked } from './forbidden';
+import { inCell, inTableRow } from './table-row';
+import { cellRewrite } from './table-cells';
 
 export const INSIDE_FORBIDDEN_MESSAGE =
 	"A comment can't start inside another comment's marker, an HTML comment, the comment store or the note properties. Move the cursor outside it and try again.";
@@ -878,6 +880,9 @@ export class CommentService {
 		const taken = new Set(parseDocument(content).comments.map((c) => c.id));
 		for (const r of valid) {
 			const id = freshId(taken);
+			// A comment in a table row is lean in every note: a full marker's
+			// line breaks would end the row (table-cells.ts).
+			const reqMode = inTableRow(content, r.anchor.start) ? 'eof' : mode;
 			const anchorText = buildAnchorFromSelection(
 				content.slice(r.anchor.start, r.anchor.end),
 			);
@@ -888,7 +893,7 @@ export class CommentService {
 			// On a heading a multi-line marker goes above it, so the range
 			// covers the whole heading (see headingTextEnd).
 			const rangeEnd =
-				mode !== 'eof'
+				reqMode !== 'eof'
 					? headingRangeEnd(content, r.anchor.start, r.anchor.end)
 					: r.anchor.end;
 			const plan = r.closeRange
@@ -906,10 +911,10 @@ export class CommentService {
 				...(closeAt !== undefined ? { range: 'closed' as const } : {}),
 			};
 			const text =
-				mode === 'eof'
+				reqMode === 'eof'
 					? serializeLeanMarker(comment.category, id)
 					: serialize(comment);
-			if (mode === 'eof') {
+			if (reqMode === 'eof') {
 				stored.push({
 					id,
 					category: comment.category,
@@ -930,9 +935,13 @@ export class CommentService {
 			// marker off the start of its block can carry it into a multi-line
 			// marker above (a heading line inside one). All or nothing, so a
 			// request with no safe spot writes nothing for the whole batch.
+			// In a table row, never before the row's leading pipe: a marker
+			// there goes on a line of its own and ends the table.
 			const place = planSafeMarkerInsert(
 				content,
-				r.anchor.start,
+				inTableRow(content, r.anchor.start)
+					? inCell(content, r.anchor.start)
+					: r.anchor.start,
 				text.includes('\n'),
 			);
 			if (place === undefined) return [];
@@ -1113,7 +1122,15 @@ export class CommentService {
 		const id = comment.id;
 		if (!id) return false;
 		const markers = parseAll(base).map((c) => c.marker);
-		const eof = parseStore(base).length > 0;
+		// Lean when the note keeps its comments at the end, when this
+		// comment's own entry is still in the store, and in a table row in any
+		// note (table-cells.ts). Not merely because the note has a store: an
+		// inline note can hold one for its table-cell comments alone.
+		const eof =
+			inTableRow(base, at) ||
+			parseStore(base).some((e) => e.comment.id === id) ||
+			resolveStorageModeForNewComment(base, undefined, 'inline') ===
+				'eof';
 		const passageEnd = passage
 			? !eof
 				? headingRangeEnd(base, passage.start, passage.end)
@@ -1138,7 +1155,11 @@ export class CommentService {
 		// multi-line marker, so it can land in another comment. Safe placement
 		// moves it just before whatever it landed in, which splits nothing;
 		// refusing would lose the comment this is restoring.
-		const place = planSafeMarkerInsert(base, at, text.includes('\n'));
+		const place = planSafeMarkerInsert(
+			base,
+			inTableRow(base, at) ? inCell(base, at) : at,
+			text.includes('\n'),
+		);
 		if (place === undefined) return false;
 		const prose: SpliceRange[] = [
 			...(closeAt !== undefined
@@ -1347,6 +1368,24 @@ export class CommentService {
 
 		const next = apply(current);
 		if (!next) return 'declined';
+		// In a table row the full marker would break the row: the comment
+		// moves to the store and the cell keeps a lean marker (table-cells.ts).
+		const cell = cellRewrite(content, current.marker.start, next);
+		if (cell) {
+			const splices = withStoreRewrite(
+				content,
+				[
+					{
+						from: current.marker.start,
+						to: current.marker.end,
+						insert: cell.marker,
+					},
+				],
+				cell.entries,
+			);
+			const wrote = await this.applySplices(path, file, splices, note);
+			return wrote ? 'written' : 'missing';
+		}
 		const serialized = serialize({
 			id: next.id,
 			category: next.category,

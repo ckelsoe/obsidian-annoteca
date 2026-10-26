@@ -25,6 +25,7 @@
 
 import type { ImportResult } from './imports';
 import { hasRepairableNesting, repairNestedMarkers } from './nested-repair';
+import { hasRepairableTableCell, repairTableCellComments } from './table-cells';
 import {
 	backslashRunBefore,
 	escapeMarkerText,
@@ -223,16 +224,22 @@ export function hasRepairableQuote(content: string): boolean {
 
 // What "Repair comments written inside other comments" runs: the quotes
 // first, since an unescaped quote can make a marker look like it holds
-// another one, then the nested comments.
+// another one, then the nested comments, then full markers in table rows,
+// which need every marker readable to be moved whole.
 export function repairComments(content: string): ImportResult {
 	const quotes = repairQuotedOriginals(content);
 	const nested = repairNestedMarkers(quotes.updated);
+	const cells = repairTableCellComments(nested.updated);
 	return {
-		updated: nested.updated,
-		converted: quotes.converted + nested.converted,
+		updated: cells.updated,
+		converted: quotes.converted + nested.converted + cells.converted,
 	};
 }
 
 export function hasRepairableDamage(content: string): boolean {
-	return hasRepairableQuote(content) || hasRepairableNesting(content);
+	return (
+		hasRepairableQuote(content) ||
+		hasRepairableNesting(content) ||
+		hasRepairableTableCell(content)
+	);
 }
