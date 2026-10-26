@@ -9,7 +9,8 @@ import {
 	resolveAnchorRangeInWindows,
 } from './view-utils';
 import { resolveSettingsCategories } from './settings';
-import { forbiddenRanges, type WriteOutcome } from './comment-service';
+import { type WriteOutcome } from './comment-service';
+import { passageBlocked } from './forbidden';
 import { parseAll, scanClosers } from './parser';
 import { planCloser } from './range-placement';
 import type { CommentEvent } from './comment-events';
@@ -420,13 +421,9 @@ export function createApi(plugin: AnnotecaPlugin): AnnotecaApi {
 			// No overlap at all with existing comment syntax, a store block or
 			// the properties. Checking only the two ends let a range that
 			// ENCLOSES one through, and the new comment then covered marker
-			// or YAML text. Touching a boundary is fine.
-			if (
-				forbiddenRanges(text).some(
-					(f) => f.start < end && f.end > start,
-				)
-			)
-				return false;
+			// or YAML text. Touching a boundary is fine, and so is enclosing
+			// another HTML comment whole (see passageBlocked).
+			if (passageBlocked(text, start, end)) return false;
 			// The composer writes a closer only where it can place one exactly
 			// (not in code, not in properties). If it would not, the comment
 			// would quietly cover less than asked, so refuse up front.

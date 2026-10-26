@@ -17,6 +17,7 @@ import {
 	forbiddenRanges,
 	enclosingForbidden,
 	insideForbidden,
+	passageBlocked,
 } from '../forbidden';
 import { htmlCommentRanges, planCloser } from '../range-placement';
 import { markerProblems, markersInsideHtmlComments } from '../html-comments';
@@ -346,4 +347,25 @@ describe('a code span stops where its paragraph does', () => {
 it('ends a code span opened in a heading with the heading', () => {
 	const note = '# A `heading\n<!-- real comment --> `';
 	expect(insideForbidden(note, note.indexOf('real'))).toBe(true);
+});
+
+describe('a passage that holds another HTML comment', () => {
+	const note = 'Groups map to roles. <!-- c:01-8 --> Next sentence.';
+	const citation = note.indexOf('<!--');
+	const after = note.indexOf('-->') + 3;
+
+	it('may contain the whole comment', () => {
+		expect(passageBlocked(note, 0, after)).toBe(false);
+		expect(passageBlocked(note, citation, after)).toBe(false);
+	});
+
+	it('may not start or end inside it', () => {
+		expect(passageBlocked(note, 0, citation + 6)).toBe(true);
+		expect(passageBlocked(note, citation + 6, note.length)).toBe(true);
+	});
+
+	it('still may not overlap Annoteca’s own syntax', () => {
+		const own = 'A <!-- annoteca/note: x --> B';
+		expect(passageBlocked(own, 0, own.length)).toBe(true);
+	});
 });

@@ -10,7 +10,7 @@ import type AnnotecaPlugin from './main';
 import { parseDocument } from './document';
 import { toEditorText } from './note-text';
 import type { Comment } from './types';
-import { forbiddenRanges } from './comment-service';
+import { passageBlocked } from './forbidden';
 import {
 	collapseWhitespace,
 	locateInSource,
@@ -270,9 +270,9 @@ export function readingSelectionRange(
 		};
 	const from = sectionStart + found.start;
 	const to = sectionStart + found.end;
-	if (forbiddenRanges(text).some((f) => f.start < to && f.end > from))
+	if (passageBlocked(text, from, to))
 		return {
-			error: "That text includes another comment's marker or the note properties. Select text beside it.",
+			error: "That text includes another comment's marker or the note properties, or starts or ends inside an HTML comment. Select text beside it.",
 		};
 	return { from, to, text };
 }

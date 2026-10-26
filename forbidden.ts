@@ -113,6 +113,27 @@ export function enclosingForbidden(
 	return undefined;
 }
 
+// Whether [start, end) cannot be a commented passage: it overlaps Annoteca's
+// own syntax or the properties (a comment covering marker or YAML text), or
+// either end falls strictly inside another HTML comment (the marker or the
+// range's closer would be written into it). A passage may hold a whole HTML
+// comment, such as a citation at the end of a sentence: its marker goes before
+// it and its closer after it, both outside. Touching a boundary is fine.
+export function passageBlocked(
+	content: string,
+	start: number,
+	end: number,
+): boolean {
+	for (const [kind, index] of forbiddenIndexes(content).entries()) {
+		const hit =
+			kind === HTML_KIND
+				? index.some(start, start) || index.some(end, end)
+				: index.some(start, end);
+		if (hit) return true;
+	}
+	return false;
+}
+
 type Range = { start: number; end: number };
 let lastIndexes: { content: string; indexes: SpanIndex<Range>[] } | undefined;
 function forbiddenIndexes(content: string): SpanIndex<Range>[] {
