@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.28.0] - 2026-10-26
+
 ### Fixed
 
 - **A comment can no longer be written inside another HTML comment.** Selecting a word inside a note such as `<!-- diagram: ... -->` and adding a comment used to put the comment's marker inside it. HTML comments do not nest, so the marker ended the outer comment early, and the rest of it, with its closing `-->`, showed in the note as text. Annoteca now refuses to start a comment there, and a commented range that would end inside one ends after it instead. A selection that contains a whole HTML comment, such as a citation at the end of a sentence, is still fine.
