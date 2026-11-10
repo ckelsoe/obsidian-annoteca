@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Settings are easier to scan.** Editor indicators is split into **Editor appearance** and **Hover and click**. AI integration is split into **AI assistant**, with the Export AI skill button first, and **Other plugins and tools**, for the comment limit and the event journal. Reading view and Panel and navigation are one group, **Navigation and reading view**. No setting changed or moved out of its stored place, so nothing needs redoing.
+- **Settings that do nothing right now are hidden**: the hover preview delay while the hover preview is off, resolved brightness while resolved comments are hidden, and the frontmatter extras while the summary is off.
+
+### Fixed
+
+- **The move up and move down arrows on each category show again.** A newer Obsidian button style squeezed them to nothing, leaving empty boxes.
+- **The Export AI skill and Add category rows line up with the rows around them** instead of sitting indented.
+- **Annoteca works in the main window when a pop-out window is focused at startup.** It now names the main window explicitly rather than relying on the global document.
+
 ## [1.30.0] - 2026-11-10
 
 ### Added

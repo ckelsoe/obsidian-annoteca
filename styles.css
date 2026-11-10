@@ -1950,7 +1950,9 @@ settings:
 	flex: 0 0 auto;
 }
 
-.annoteca-category-move {
+/* Qualified by its container: Obsidian's `button:not(.clickable-icon)` padding
+   outranks a single class and squeezed the arrow icon to zero width. */
+.annoteca-category-reorder .annoteca-category-move {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
@@ -2178,6 +2180,12 @@ settings:
    DOM stacks full width instead of being squeezed into the right control rail. */
 .setting-item.annoteca-custom-block {
 	display: block;
+}
+
+/* A Setting drawn inside a custom block already sits in the block's padding,
+   so it takes none of its own and lines up with the rows around it. */
+.setting-item.annoteca-custom-block > .setting-item {
+	padding: 0;
 }
 
 /* Preset browser ---------------------------------------------------------- */
@@ -2480,7 +2488,7 @@ settings:
 	/* Reorder controls become the primary way to reorder here, because the
 	   drag handle is not rendered without drag-and-drop support. Give them a
 	   target that a thumb can actually hit. */
-	.annoteca-category-move {
+	.annoteca-category-reorder .annoteca-category-move {
 		width: 32px;
 		height: 32px;
 	}

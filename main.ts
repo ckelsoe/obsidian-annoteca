@@ -434,7 +434,8 @@ export default class AnnotecaPlugin extends Plugin {
 				this.registerReadingMenu(win.document);
 			}),
 		);
-		this.registerReadingMenu(document);
+		// The main window; popouts are handled by 'window-open' above.
+		this.registerReadingMenu(this.app.workspace.containerEl.ownerDocument);
 
 		this.app.workspace.onLayoutReady(() => {
 			this.refreshActiveFileIndex();
@@ -601,7 +602,8 @@ export default class AnnotecaPlugin extends Plugin {
 			seen.add(doc);
 			fn(doc.body);
 		};
-		visit(document);
+		// The main window, then every popout through its leaves.
+		visit(this.app.workspace.containerEl.ownerDocument);
 		// Every open leaf, not just markdown ones: the hub panel can sit in a
 		// popout too, and its cards draw the same marker chrome.
 		this.app.workspace.iterateAllLeaves((leaf) => {
