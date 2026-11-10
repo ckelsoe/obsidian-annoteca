@@ -441,5 +441,7 @@ describe('skill v16: --!> ends a comment too', () => {
 		const skill = buildSkillMarkdown(CATEGORIES, undefined);
 		expect(skill).toContain('`--!>` ends an HTML comment too');
 		expect(skill).toContain('write `--!\\>`');
+		// The store's own rule: JSON, so the `>` is \u003e, not a backslash.
+		expect(skill).toContain('`--!\\u003e`');
 	});
 });
