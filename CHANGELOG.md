@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.30.0] - 2026-11-10
+
 ### Added
 
 - **Tasks.** Mark a comment, or any reply in its thread, as a task to ask an AI agent to do the work it describes, which can be outside the note. Tick **Task** when you write the comment or reply, or use **Mark as task** on one already in the thread. The agent replies with a plan and waits for you. Approve it with **Approve task** in the panel, the "Approve task here" command, or a reply that starts with a trigger word. The agent then does the work, replies with what it changed and marks the task done. A newer task replaces an unfinished older one, so only the latest is acted on. Each marked message shows its state as a badge. Annoteca runs nothing itself: what the agent can do depends on the agent and its access.
