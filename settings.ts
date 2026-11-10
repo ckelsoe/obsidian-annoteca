@@ -805,7 +805,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			},
 			{
 				type: 'group',
-				heading: 'Editor indicators',
+				heading: 'Editor appearance',
 				items: [
 					{
 						name: 'Indicator style',
@@ -835,6 +835,56 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 						},
 					},
 					{
+						name: 'Anchor underline style',
+						desc: 'Visual character of the underline drawn over commented text. Applies to every category.',
+						control: {
+							type: 'dropdown',
+							key: 'anchorStyle',
+							options: {
+								solid: 'Solid',
+								dotted: 'Dotted',
+								dashed: 'Dashed',
+							},
+						},
+					},
+					{
+						name: 'Anchor underline thickness',
+						desc: 'Baseline thickness for categories on the normal tier. Subtle always renders thin, strong always renders thick, regardless of this setting.',
+						control: {
+							type: 'dropdown',
+							key: 'anchorThickness',
+							options: {
+								thin: 'Thin',
+								medium: 'Medium',
+								thick: 'Thick',
+							},
+						},
+					},
+					{
+						name: 'Reply count on markers',
+						desc: 'Show how many replies a thread has next to its marker icon in the editor. Markers with no replies are unchanged.',
+						control: { type: 'toggle', key: 'markerReplyCount' },
+					},
+					{
+						name: 'Default visibility on file open',
+						desc: 'Whether comments are visible when a file opens.',
+						control: {
+							type: 'dropdown',
+							key: 'defaultVisibility',
+							options: {
+								show: 'Show',
+								hide: 'Hide',
+								last: 'Last state',
+							},
+						},
+					},
+				],
+			},
+			{
+				type: 'group',
+				heading: 'Hover and click',
+				items: [
+					{
 						name: 'Marker hover preview',
 						desc: 'Show a preview of the comment and its thread when you hover a marker or its underline in the editor. Turn off to rely on clicking the marker to open the side panel.',
 						control: { type: 'toggle', key: 'hoverPreview' },
@@ -842,6 +892,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 					{
 						name: 'Hover preview delay',
 						desc: 'How long to hover before the preview appears. Takes effect after reloading the plugin.',
+						visible: () => this.plugin.settings.hoverPreview,
 						control: {
 							type: 'dropdown',
 							key: 'hoverDelay',
@@ -873,50 +924,6 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 							key: 'renderMarkdownBodies',
 						},
 					},
-					{
-						name: 'Reply count on markers',
-						desc: 'Show how many replies a thread has next to its marker icon in the editor. Markers with no replies are unchanged.',
-						control: { type: 'toggle', key: 'markerReplyCount' },
-					},
-					{
-						name: 'Anchor underline style',
-						desc: 'Visual character of the underline drawn over commented text. Applies to every category.',
-						control: {
-							type: 'dropdown',
-							key: 'anchorStyle',
-							options: {
-								solid: 'Solid',
-								dotted: 'Dotted',
-								dashed: 'Dashed',
-							},
-						},
-					},
-					{
-						name: 'Anchor underline thickness',
-						desc: 'Baseline thickness for categories on the normal tier. Subtle always renders thin, strong always renders thick, regardless of this setting.',
-						control: {
-							type: 'dropdown',
-							key: 'anchorThickness',
-							options: {
-								thin: 'Thin',
-								medium: 'Medium',
-								thick: 'Thick',
-							},
-						},
-					},
-					{
-						name: 'Default visibility on file open',
-						desc: 'Whether comments are visible when a file opens.',
-						control: {
-							type: 'dropdown',
-							key: 'defaultVisibility',
-							options: {
-								show: 'Show',
-								hide: 'Hide',
-								last: 'Last state',
-							},
-						},
-					},
 				],
 			},
 			{
@@ -940,6 +947,8 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 					{
 						name: 'Resolved brightness',
 						desc: 'How aggressively resolved comments are dimmed. Normal works well in light themes; bright keeps resolved content legible against dark backgrounds where the base text is already muted.',
+						visible: () =>
+							this.plugin.settings.resolvedDisplay === 'dim',
 						control: {
 							type: 'dropdown',
 							key: 'resolvedBrightness',
@@ -989,27 +998,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			},
 			{
 				type: 'group',
-				heading: 'Reading view',
-				items: [
-					{
-						name: 'Reading view indicator',
-						desc: 'Comments are invisible in reading view (markers are HTML comments). Show a note-level banner with totals, a badge on each section that has comments, or both. Click an indicator to open the comment panel. Counts are threads; replies are not counted.',
-						control: {
-							type: 'dropdown',
-							key: 'readingViewIndicator',
-							options: {
-								off: 'Off',
-								banner: 'Note banner',
-								'per-section': 'Per-section badges',
-								both: 'Banner and badges',
-							},
-						},
-					},
-				],
-			},
-			{
-				type: 'group',
-				heading: 'Panel and navigation',
+				heading: 'Navigation and reading view',
 				items: [
 					{
 						name: 'Auto-collapse other files in scope',
@@ -1029,6 +1018,20 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 								top: 'Top of pane',
 								center: 'Center',
 								minimal: "Minimal (don't move if visible)",
+							},
+						},
+					},
+					{
+						name: 'Reading view indicator',
+						desc: 'Comments are invisible in reading view (markers are HTML comments). Show a note-level banner with totals, a badge on each section that has comments, or both. Click an indicator to open the comment panel. Counts are threads; replies are not counted.',
+						control: {
+							type: 'dropdown',
+							key: 'readingViewIndicator',
+							options: {
+								off: 'Off',
+								banner: 'Note banner',
+								'per-section': 'Per-section badges',
+								both: 'Banner and badges',
 							},
 						},
 					},
@@ -1185,8 +1188,9 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			},
 			{
 				type: 'group',
-				heading: 'AI integration',
+				heading: 'AI assistant',
 				items: [
+					this.customBlock((host) => this.renderSkillExport(host)),
 					{
 						name: 'Skill export destination',
 						desc: 'Vault folder the exported skill file is written to. Claude Code reads .claude/skills; some other assistants read a .agent folder.',
@@ -1200,6 +1204,25 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 							},
 						},
 					},
+					this.customBlock((host) => this.renderTaskTriggers(host)),
+					{
+						name: 'Tasks in Skip categories',
+						desc: 'What an AI assistant does with a task marked on a comment whose category is set to Skip.',
+						control: {
+							type: 'dropdown',
+							key: 'taskInSkipCategory',
+							options: {
+								act: 'Plan it like any other task',
+								skip: 'Leave it alone',
+							},
+						},
+					},
+				],
+			},
+			{
+				type: 'group',
+				heading: 'Other plugins and tools',
+				items: [
 					{
 						name: 'Ask before adding this many comments',
 						desc: 'When another plugin adds comments to a note through Annoteca, you are asked first if it wants to add more than this many at once. Lower asks more often. At 1 you are asked whenever a plugin adds more than one comment; a single comment is never confirmed.',
@@ -1215,20 +1238,6 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 						desc: 'Add a line to events.jsonl in the plugin folder each time a comment is created, replied to, addressed, resolved, reopened, moved or deleted, so a tool outside Obsidian can follow along. Records comment IDs, categories, authors and dates, never comment text. Stays on this device. Off by default.',
 						control: { type: 'toggle', key: 'eventJournal' },
 					},
-					this.customBlock((host) => this.renderTaskTriggers(host)),
-					{
-						name: 'Tasks in Skip categories',
-						desc: 'What an AI assistant does with a task marked on a comment whose category is set to Skip.',
-						control: {
-							type: 'dropdown',
-							key: 'taskInSkipCategory',
-							options: {
-								act: 'Plan it like any other task',
-								skip: 'Leave it alone',
-							},
-						},
-					},
-					this.customBlock((host) => this.renderSkillExport(host)),
 				],
 			},
 			{
@@ -1246,6 +1255,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 					{
 						name: 'Include oldest-open date',
 						desc: 'Also write annoteca_oldest_open, the date of the oldest open comment, so a Base can sort by staleness.',
+						visible: () => this.plugin.settings.frontmatterSummary,
 						control: {
 							type: 'toggle',
 							key: 'frontmatterOldestOpen',
@@ -1254,6 +1264,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 					{
 						name: 'Include open categories',
 						desc: 'Also write annoteca_categories, the categories present among the open comments, so a Base can filter by category.',
+						visible: () => this.plugin.settings.frontmatterSummary,
 						control: {
 							type: 'toggle',
 							key: 'frontmatterOpenCategories',
@@ -1262,6 +1273,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 					{
 						name: 'Tag notes with a class property',
 						desc: 'Also write a property that classes each note as an Annoteca note. Off by default; the Base dashboard does not need it. Mainly useful with the Fileclass or Metadata Menu plugin.',
+						visible: () => this.plugin.settings.frontmatterSummary,
 						control: {
 							type: 'toggle',
 							key: 'frontmatterClassTag',
@@ -1270,6 +1282,9 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 					{
 						name: 'Class property name',
 						desc: 'Property used by the class tag above. Defaults to fileclass, the property the Fileclass plugin and Metadata Menu read. Change it only if your setup uses a different alias. The value annoteca is merged in without removing values you already have.',
+						visible: () =>
+							this.plugin.settings.frontmatterSummary &&
+							this.plugin.settings.frontmatterClassTag,
 						control: {
 							type: 'text',
 							key: 'frontmatterFileclassProperty',
@@ -1520,8 +1535,13 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 				this.plugin.logDebugStart();
 				repaint = true;
 				break;
+			// The last four are parents of settings shown only while they apply.
 			case 'enableIndexEntryPreset':
 			case 'enableAuthorTag':
+			case 'hoverPreview':
+			case 'resolvedDisplay':
+			case 'frontmatterSummary':
+			case 'frontmatterClassTag':
 				repaint = true;
 				break;
 			case 'eventJournal':

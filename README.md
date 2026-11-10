@@ -128,18 +128,19 @@ Annoteca has a public, versioned API for other plugins. A companion plugin can a
 
 ## Settings overview
 
-Settings are grouped in the order they appear in the tab:
+Settings are grouped in the order they appear in the tab. A setting that only matters when another is on, such as the hover delay or the frontmatter extras, shows only then.
 
 - **Categories**: edit the category list, browse and save presets, and set each category's icon, color, underline tier, default text and agent handling (act on it, reply only, or skip). Pick the default category, and turn on the index-entry preset for print indexing.
 - **Comment storage**: where new comments keep their body, replies and history: inline in the marker, or at the end of the note.
-- **Editor indicators**: how comments look in the editor. Indicator style (icon, underline, both, or hidden) and size; the hover preview and its delay; what a click or tap does (open the side panel or a popover); whether bodies render as Markdown; the reply count on markers; underline style and thickness; and whether comments show when a file opens.
+- **Editor appearance**: how comments look in the editor. Indicator style (icon, underline, both, or hidden) and size; underline style and thickness; the reply count on markers; and whether comments show when a file opens.
+- **Hover and click**: the hover preview and its delay; what a click or tap does (open the side panel or a popover); and whether bodies render as Markdown.
 - **Resolved comments**: whether resolved comments are dimmed or hidden, how strongly they dim, and whether resolving deletes the marker instead of keeping it as history.
 - **Composer**: where the comment form opens (modal or side panel), whether Enter sends or adds a line break, whether the panel opens after each comment you send, and the floating comment button on selected text.
-- **Reading view**: the indicator that stands in for comments where markers are invisible: a note banner, per-section badges, both, or off.
-- **Panel and navigation**: whether the hub collapses files you are not editing, and where a marker lands when you jump to a comment (top, center, or minimal scroll).
+- **Navigation and reading view**: whether the hub collapses files you are not editing, where a marker lands when you jump to a comment (top, center, or minimal scroll), and the indicator that stands in for comments in reading view, where markers are invisible: a note banner, per-section badges, both, or off.
 - **Authors**: your author tag, plus collaborators each with a color so a multi-party thread is easy to scan.
 - **Reply alerts**: the popup (off, in Obsidian, system notification, or both) and the sound (none, the system notification sound, a vault audio file, or a built-in tone) for comments and replies from anyone but you, with volume, a sound preview and a test alert. Off by default. Turning alerts on indexes the whole vault once each session.
-- **AI integration**: where the exported skill file is written, the task trigger words and what each tells the agent, whether a task on a comment in a Skip category is planned or left alone, the export button, the out-of-date indicator that appears after an update changes the guidance, how many comments another plugin may add at once before you are asked (default 10), and the optional event journal, a file a tool outside Obsidian can watch to follow comment changes (off by default; ids and metadata only, never comment text).
+- **AI assistant**: the Export AI skill button and its out-of-date indicator, where the skill file is written, the task trigger words and what each tells the agent, and whether a task on a comment in a Skip category is planned or left alone.
+- **Other plugins and tools**: how many comments another plugin may add at once before you are asked (default 10), and the optional event journal, a file a tool outside Obsidian can watch to follow comment changes (off by default; ids and metadata only, never comment text).
 - **Frontmatter summary (Bases)**: maintain a Bases-friendly summary of each note's open comments in its frontmatter, choose whether to include the oldest-open date and the open categories, and an optional class tag (off by default, mainly for Fileclass or Metadata Menu users) with its property name.
 - **Diagnostics**: debug logging and where the log is written, and the known comment namespaces: other tools' comment prefixes (such as `plumbline`) that the marker-conflict check should not report.
 
