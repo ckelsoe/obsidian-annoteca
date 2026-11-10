@@ -434,3 +434,14 @@ describe('skill v14: where a marker may not go', () => {
 		expect(skill).toContain('`"[range=closed]"`');
 	});
 });
+
+describe('skill v16: --!> ends a comment too', () => {
+	it('is schema version 16 and teaches the escape', () => {
+		expect(SKILL_SCHEMA_VERSION).toBe(16);
+		const skill = buildSkillMarkdown(CATEGORIES, undefined);
+		expect(skill).toContain('`--!>` ends an HTML comment too');
+		expect(skill).toContain('write `--!\\>`');
+		// The store's own rule: JSON, so the `>` is \u003e, not a backslash.
+		expect(skill).toContain('`--!\\u003e`');
+	});
+});

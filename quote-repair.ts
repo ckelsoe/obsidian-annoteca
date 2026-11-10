@@ -52,8 +52,9 @@ function escapeQuotes(text: string): string {
 	const openers = text.replace(/<!--/g, (match: string, at: number) =>
 		backslashRunBefore(text, at) === 0 ? `\\${match}` : match,
 	);
-	// `--\>` does not match, so every `-->` left is a live terminator.
-	return openers.replace(/-->/g, '--\\>');
+	// `--\>` does not match, so every `-->` (or `--!>`, which also ends an
+	// HTML comment) left is a live terminator.
+	return openers.replace(/--(!?)>/g, '--$1\\>');
 }
 
 function hasUnescapedOpener(text: string): boolean {

@@ -67,6 +67,7 @@ const BODIES: readonly string[] = [
 	'   ',
 	'multi\nline\nbody',
 	'holds an arrow --> here',
+	'holds a bang terminator --!> here, and an escaped one --!\\> too',
 	'ends with a code block\n```\ncode\n```',
 	'quotes the fence\n```annoteca-original\nfake\n```',
 	'trailing mimic\n[id=deadbeef]',

@@ -285,7 +285,7 @@ export function isReportNote(path: string): boolean {
 export function reportJson(value: unknown): string {
 	return JSON.stringify(value, null, 2)
 		.replace(/<!--/g, '\\u003c!--')
-		.replace(/-->/g, '--\\u003e');
+		.replace(/--(!?)>/g, '--$1\\u003e');
 }
 
 export interface ValidationFinding extends MalformedMarker {
