@@ -128,7 +128,7 @@ Annoteca has a public, versioned API for other plugins. A companion plugin can a
 
 ## Settings overview
 
-Settings are grouped in the order they appear in the tab. A setting that only matters when another is on, such as the hover delay or the frontmatter extras, shows only then.
+Settings are grouped in the order they appear in the tab. A setting that only matters when another is on, such as the hover delay or the frontmatter extras, shows only then. Obsidian's "Search settings" box finds every Annoteca setting and section by name.
 
 - **Categories**: edit the category list, browse and save presets, and set each category's icon, color, underline tier, default text and agent handling (act on it, reply only, or skip). Pick the default category, and turn on the index-entry preset for print indexing.
 - **Comment storage**: where new comments keep their body, replies and history: inline in the marker, or at the end of the note.

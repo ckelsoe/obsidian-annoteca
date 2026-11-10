@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Settings search finds every Annoteca section.** Obsidian's "Search settings" box could not find the category list, Add category, the category presets, collaborators and author colors, task trigger words, Export AI skill or the known comment namespaces, because those sections are drawn by hand and were left out of search. Each now has a name, a description and a few extra search words, so typing "export", "trigger" or "category" finds it.
+
 ## [1.31.1] - 2026-11-10
 
 ### Fixed
