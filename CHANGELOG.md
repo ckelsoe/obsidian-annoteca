@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.31.1] - 2026-11-10
+
 ### Fixed
 
 - **A comment containing `--!>` no longer spills into the note.** Browsers end an HTML comment at `--!>` as well as `-->`, so a comment holding it was cut short in reading view and in exports, and the rest showed as text. Annoteca now escapes `--!>` the same way it escapes `-->`, in the comment, its replies and notes, and the original text of an addressed edit. A comment already holding one is fixed the next time it is changed. The AI skill (version 16) tells assistants to do the same.
