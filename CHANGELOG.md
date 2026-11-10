@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.31.0] - 2026-11-10
+
 ### Changed
 
 - **Settings are easier to scan.** Editor indicators is split into **Editor appearance** and **Hover and click**. AI integration is split into **AI assistant**, with the Export AI skill button first, and **Other plugins and tools**, for the comment limit and the event journal. Reading view and Panel and navigation are one group, **Navigation and reading view**. No setting changed or moved out of its stored place, so nothing needs redoing.
