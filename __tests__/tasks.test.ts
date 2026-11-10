@@ -464,6 +464,7 @@ describe('trigger settings', () => {
 				{ word: '/GO', description: 'dup' },
 				{ word: 'go', description: 'no slash' },
 				{ word: '/has space', description: 'x' },
+				{ word: '/blank', description: '  ' },
 			],
 		});
 		expect(s.taskTriggers).toEqual([

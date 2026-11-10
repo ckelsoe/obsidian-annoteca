@@ -51,6 +51,11 @@ export function isAmbiguousReply(c: Comment, target: TaskTarget): boolean {
 
 const UNFINISHED: readonly TaskState[] = ['open', 'planned', 'approved'];
 
+// Still waiting on someone: marking it again would only restart it.
+export function isUnfinished(t: TaskMark | undefined): boolean {
+	return t !== undefined && UNFINISHED.includes(t.state);
+}
+
 // The thread with `target` marked as a new open task. An unfinished earlier
 // task is replaced, so only the newest is live. Marking a message again starts
 // its task over and moves it to the end.

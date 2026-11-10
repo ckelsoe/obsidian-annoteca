@@ -520,8 +520,10 @@ function validTaskTrigger(raw: unknown): TaskTrigger | undefined {
 	const description = str(raw.description);
 	if (word === undefined || !TASK_TRIGGER_WORD_RE.test(word))
 		return undefined;
-	if (description === undefined) return undefined;
-	return { word, description: description.replace(/\s+/g, ' ').trim() };
+	// The description is the assistant's only instruction for the word.
+	const text = description?.replace(/\s+/g, ' ').trim() ?? '';
+	if (text === '') return undefined;
+	return { word, description: text };
 }
 
 const validTaskTriggers: SettingValidator<'taskTriggers'> = (raw) => {
@@ -2337,7 +2339,17 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			});
 			desc.value = trigger.description;
 			desc.addEventListener('change', () => {
-				trigger.description = desc.value.replace(/\s+/g, ' ').trim();
+				const next = desc.value.replace(/\s+/g, ' ').trim();
+				// The description is the only instruction the assistant gets
+				// for this word, so it cannot be cleared.
+				if (next === '') {
+					new Notice(
+						'Describe what the assistant does for this word.',
+					);
+					desc.value = trigger.description;
+					return;
+				}
+				trigger.description = next;
 				void this.plugin.saveSettings();
 			});
 			const remove = row.createEl('button', {
@@ -2395,10 +2407,12 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 				new Notice('That trigger word is already set.');
 				return;
 			}
-			this.plugin.settings.taskTriggers.push({
-				word: w,
-				description: description.value.replace(/\s+/g, ' ').trim(),
-			});
+			const d = description.value.replace(/\s+/g, ' ').trim();
+			if (d === '') {
+				new Notice('Describe what the assistant does for this word.');
+				return;
+			}
+			this.plugin.settings.taskTriggers.push({ word: w, description: d });
 			void this.plugin.saveSettings();
 			this.rerender();
 		});

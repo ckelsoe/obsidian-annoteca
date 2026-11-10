@@ -513,6 +513,10 @@ export class CommentService {
 						: withTaskMarked(current, target),
 			);
 			if (outcome === 'written') new Notice('Marked as a task.');
+			else if (outcome === 'declined')
+				new Notice(
+					'Two replies share this author and time, so this one cannot be marked as a task.',
+				);
 			return outcome === 'written';
 		});
 	}

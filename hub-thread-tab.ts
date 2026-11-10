@@ -31,7 +31,7 @@ import {
 	renderTaskBadge,
 	createTaskToggle,
 } from './ui-helpers';
-import { liveTask, rootTarget, taskFor } from './tasks';
+import { isUnfinished, liveTask, rootTarget, taskFor } from './tasks';
 import { ROOT_TASK_AUTHOR } from './types';
 import {
 	renderCommentMarkdown,
@@ -1157,10 +1157,10 @@ export class ThreadTabRenderer {
 					host,
 					mark,
 				);
-				// Turn an earlier reply into the task, once the thread has
-				// settled on what to do. Not on the live task itself.
+				// Turn a reply into the task, once the thread has settled on
+				// what to do. Not while it is the live task and unfinished.
 				const live = liveTask(c);
-				if (!c.resolution && (live === undefined || mark !== live)) {
+				if (!c.resolution && !(mark === live && isUnfinished(live))) {
 					const btn = meta.createEl('button', {
 						cls: 'annoteca-task-mark clickable-icon',
 						attr: {
@@ -1446,7 +1446,10 @@ export class ThreadTabRenderer {
 					void this.plugin.resolveAndRemoveComment(path, c);
 				},
 			);
-			if (liveTask(c)?.author !== ROOT_TASK_AUTHOR)
+			const liveNow = liveTask(c);
+			if (!(
+				liveNow?.author === ROOT_TASK_AUTHOR && isUnfinished(liveNow)
+			))
 				this.createActionButton(
 					actions,
 					'Mark as task',
