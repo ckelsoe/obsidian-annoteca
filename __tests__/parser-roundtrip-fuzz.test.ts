@@ -34,13 +34,14 @@
 
 import {
 	parseAll,
+	sanitizeAuthorToken,
 	serialize,
 	serializeLeanMarker,
 	type SerializeInput,
 } from '../parser';
 import { parseDocument } from '../document';
 import { parseStore, toStored, writeStoreRegion } from '../store';
-import type { AnchorText, Comment, Reply } from '../types';
+import type { AnchorText, Comment, Reply, TaskMark } from '../types';
 
 // mulberry32. Small, fast, and good enough to shuffle pool choices; this is a
 // coverage generator, not a source of cryptographic randomness.
@@ -224,6 +225,29 @@ function generate(rand: () => number): SerializeInput {
 			note: pick(rand, NOTES),
 		};
 	}
+	if (rand() < 0.4) {
+		const states = [
+			'open',
+			'planned',
+			'approved',
+			'done',
+			'replaced',
+		] as const;
+		const marks = Math.floor(rand() * 3) + 1;
+		const tasks: TaskMark[] = [];
+		for (let k = 0; k < marks; k++)
+			tasks.push({
+				// A mark names a reply as its line does, so its author is
+				// already a token.
+				author:
+					rand() < 0.3
+						? '@comment'
+						: sanitizeAuthorToken(pick(rand, AUTHORS)),
+				date: pick(rand, STAMPS),
+				state: pick(rand, states),
+			});
+		input.tasks = tasks;
+	}
 	return input;
 }
 
@@ -237,6 +261,7 @@ function toInput(c: Comment): SerializeInput {
 		anchor: c.anchor,
 		source: c.source,
 		replies: c.replies,
+		tasks: c.tasks,
 		addressed: c.addressed,
 		resolution: c.resolution,
 	};
@@ -336,6 +361,18 @@ describe('parser: serialize/parse round trip (seeded fuzz)', () => {
 			)
 				throw new Error(context(`resolution lost: ${first}`));
 
+			// Task marks are exact: the author token is already in the
+			// grammar, so nothing about them is transformed.
+			const want = (input.tasks ?? []).map(
+				(t) =>
+					`${t.author === '@comment' ? t.author : sanitizeAuthorToken(t.author)} ${t.date} ${t.state}`,
+			);
+			const got = (parsed.tasks ?? []).map(
+				(t) => `${t.author} ${t.date} ${t.state}`,
+			);
+			if (JSON.stringify(want) !== JSON.stringify(got))
+				throw new Error(context(`tasks changed: ${first}`));
+
 			// Provenance is EXACT, not merely present. Every other field here
 			// tolerates a lossy transform the grammar documents; this one has
 			// none, because a source whose key changed is worse than one that
@@ -424,6 +461,7 @@ describe('store: lossless fold (seeded fuzz)', () => {
 			// would make the source assertion below compare undefined to
 			// undefined on every one of the 5,000 iterations and never fail.
 			source: input.source,
+			...(input.tasks ? { tasks: input.tasks } : {}),
 			marker: { start: 0, end: 0 },
 		};
 	}

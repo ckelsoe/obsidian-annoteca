@@ -28,6 +28,7 @@ import { Notice, setIcon, editorInfoField, type App } from 'obsidian';
 
 import {
 	renderReplyRow as renderSharedReplyRow,
+	createTaskToggle,
 	renderCategoryBadge,
 	renderStarButton,
 } from './ui-helpers';
@@ -37,7 +38,8 @@ import {
 	type MarkdownRenderHost,
 } from './markdown-render';
 
-import type { Comment } from './types';
+import type { Comment, TaskMark } from './types';
+import { taskFor } from './tasks';
 import type { AnnotecaSettings, CategoryDefinition } from './types';
 import { parseAll } from './parser';
 import { parseDocument } from './document';
@@ -105,6 +107,8 @@ export interface DecorationContext {
 		// The file THIS editor holds. A popover in a non-active split pane must
 		// write to its own note, not to whatever is focused.
 		sourcePath: string,
+		// Mark this reply as a task.
+		task?: boolean,
 	): Promise<boolean>;
 	getAuthorTag(): string;
 	getAuthorOptions(): string[];
@@ -820,6 +824,7 @@ function renderReplyRow(
 	parent: HTMLElement,
 	ctx: DecorationContext,
 	host: MarkdownRenderHost,
+	task?: TaskMark,
 ): void {
 	renderSharedReplyRow(
 		parent,
@@ -827,6 +832,7 @@ function renderReplyRow(
 		HOVER_REPLY_CLASSES,
 		(el, tag) => applyAuthorColor(el, tag, ctx),
 		host,
+		task,
 	);
 }
 
@@ -1148,7 +1154,8 @@ function buildCommentPopover(
 				ctx.openInReviewer(ref.current, sourcePath, view.dom);
 			});
 		}
-		for (const r of shown) renderReplyRow(r, repliesBlock, ctx, host);
+		for (const r of shown)
+			renderReplyRow(r, repliesBlock, ctx, host, taskFor(m, r));
 	}
 
 	// F-270/F-271/F-272: the addressed note, plus the verbatim original
@@ -1695,6 +1702,8 @@ function buildReplyComposerDom(
 	for (const tag of optionTags)
 		authorSelect.createEl('option', { value: tag, text: tag });
 	authorSelect.value = defaultAuthor;
+	// Marks the reply being sent as a task, as in the panel's reply box.
+	const taskBox = createTaskToggle(head, 'annoteca-reply-composer-task');
 
 	const textarea = dom.createEl('textarea', {
 		cls: 'annoteca-reply-composer-textarea',
@@ -1843,6 +1852,7 @@ function buildReplyComposerDom(
 				body,
 				authorSelect.value,
 				sourcePathFor(ctx, view),
+				taskBox.isOn(),
 			)
 			.then((wrote) => {
 				if (!wrote) {

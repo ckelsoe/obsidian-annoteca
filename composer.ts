@@ -19,6 +19,7 @@ import {
 } from './marker-placement';
 import { toEditorText } from './note-text';
 import type { AnchorText, Comment, StorageMode } from './types';
+import { ROOT_TASK_AUTHOR } from './types';
 import {
 	buildAnchorFromSelection,
 	generateId,
@@ -96,6 +97,8 @@ interface ComposerState {
 	body: string;
 	scratchpad: boolean;
 	templateValues: Record<string, string>;
+	// Mark the new comment as a task.
+	task: boolean;
 }
 
 export class ComposerForm {
@@ -149,6 +152,7 @@ export class ComposerForm {
 			body: request.editing?.comment.body ?? '',
 			scratchpad: !!request.scratchpad,
 			templateValues: {},
+			task: false,
 		};
 	}
 
@@ -236,6 +240,21 @@ export class ComposerForm {
 						}),
 					);
 			}
+		}
+
+		// A new comment can be a task from the start: an AI assistant plans it
+		// and waits for approval before doing the work.
+		if (!this.request.editing) {
+			new Setting(container)
+				.setName('Task')
+				.setDesc(
+					'Ask an AI assistant to plan this and wait for your approval before doing it.',
+				)
+				.addToggle((t) =>
+					t.setValue(this.state.task).onChange((value) => {
+						this.state.task = value;
+					}),
+				);
 		}
 
 		const template = !this.request.editing
@@ -414,6 +433,17 @@ export class ComposerForm {
 			resolution: undefined,
 			unknownLines: [],
 			marker: { start: 0, end: 0 },
+			...(this.state.task
+				? {
+						tasks: [
+							{
+								author: ROOT_TASK_AUTHOR,
+								date,
+								state: 'open' as const,
+							},
+						],
+					}
+				: {}),
 		};
 	}
 
@@ -724,6 +754,7 @@ export class ComposerForm {
 				// comment reads as human-created to every consumer.
 				source: fresh.source,
 				replies: fresh.replies,
+				tasks: fresh.tasks,
 				addressed: fresh.addressed,
 				resolution: fresh.resolution,
 				unknownLines: fresh.unknownLines,
@@ -794,6 +825,7 @@ export class ComposerForm {
 					author: comment.author,
 					anchor: comment.anchor,
 					range: comment.range,
+					tasks: comment.tasks,
 				});
 
 		// Where the marker goes: at the passage, moved off the start of a block

@@ -9,7 +9,10 @@ import type {
 	MarkerRange,
 	Reply,
 	Resolution,
+	TaskMark,
+	TaskState,
 } from './types';
+import { ROOT_TASK_AUTHOR } from './types';
 import { countWhile, SpanIndex } from './span-index';
 
 // Canonical regex from data-format.md "greppable regex" section. Matches the
@@ -75,6 +78,7 @@ const ID_LINE_RE = /^\s*\[id=([a-z0-9]{1,32})\]\s*$/;
 // below from drifting apart.
 const STAMP_SRC = '\\d{4}-\\d{2}-\\d{2}(?:T\\d{2}:\\d{2}(?::\\d{2})?)?';
 const DATE_LINE_RE = new RegExp(`^\\s*\\[date=(${STAMP_SRC})\\]\\s*$`);
+const STAMP_RE = new RegExp(`^${STAMP_SRC}$`);
 // The author-token class, shared the same way STAMP_SRC is. It appeared in five
 // patterns here and three more in settings.ts, and eight copies of a grammar is
 // eight chances for one of them to drift from the format.
@@ -141,6 +145,15 @@ const ADDRESSED_LINE_RE = new RegExp(
 );
 const RESOLVED_LINE_RE = new RegExp(
 	`^\\s*\\[resolved\\s+(${AUTHOR_SRC})\\s+(${STAMP_SRC})\\]:\\s?([\\s\\S]*)$`,
+);
+// A message marked as a task, and its state. Repeated: one per marked message.
+// The state sits AFTER `]:` on purpose: that keeps the line inside
+// UNKNOWN_STAMPED_LINE_RE, so a build that predates tasks carries it as an
+// unknown line instead of reading it as body text and losing every trailing
+// line above it. Only the five states match; any other value is kept as an
+// unknown line rather than dropped.
+const TASK_LINE_RE = new RegExp(
+	`^\\s*\\[task\\s+(${AUTHOR_SRC})\\s+(${STAMP_SRC})\\]:\\s?(open|planned|approved|done|replaced)\\s*$`,
 );
 
 // Forward-compatibility shapes for trailing lines this version does not know
@@ -268,6 +281,9 @@ export function authorTokenOrEmpty(raw: string): string {
 		.trim()
 		.replace(/\s+/g, '-')
 		.replace(/[\]<>]/g, '');
+	// Reserved: a task line uses it to mean the comment itself, so a person
+	// with this tag would make their replies' tasks point at the wrong message.
+	if (token === ROOT_TASK_AUTHOR) return 'comment';
 	return capCodeUnits(token, AUTHOR_MAX_CHARS);
 }
 
@@ -519,9 +535,29 @@ const KNOWN_LINE_RES = [
 	RANGE_LINE_RE,
 	SOURCE_LINE_RE,
 	REPLY_LINE_RE,
+	TASK_LINE_RE,
 	ADDRESSED_LINE_RE,
 	RESOLVED_LINE_RE,
 ];
+
+// One task mark as its trailing line, or undefined when its date is not a stamp
+// (such a line would read back as body text). Shared with the end-of-file store,
+// which carries the same lines so an older build keeps them.
+export function taskLine(t: TaskMark): string | undefined {
+	if (!STAMP_RE.test(t.date)) return undefined;
+	const author =
+		t.author === ROOT_TASK_AUTHOR
+			? ROOT_TASK_AUTHOR
+			: sanitizeAuthorToken(t.author);
+	return `[task ${author} ${t.date}]: ${t.state}`;
+}
+
+export function parseTaskLine(line: string): TaskMark | undefined {
+	const m = TASK_LINE_RE.exec(line);
+	if (!m || m[1] === undefined || m[2] === undefined || m[3] === undefined)
+		return undefined;
+	return { author: m[1], date: m[2], state: m[3] as TaskState };
+}
 
 // Both halves valid, checked before a write. Exported because the API's promote
 // path (AN-C2) has to reject a bad source before it reaches a note, not after.
@@ -721,6 +757,7 @@ interface ParsedTail {
 	unknownLines: string[];
 	source: CommentSource | undefined;
 	range: 'closed' | undefined;
+	tasks: TaskMark[];
 }
 
 interface FenceBlock {
@@ -982,6 +1019,7 @@ function walkTrailingLines(
 	let anchor: AnchorText | undefined;
 	let range: 'closed' | undefined;
 	const replies: Reply[] = [];
+	const tasks: TaskMark[] = [];
 	let addressed: Addressed | undefined;
 	let resolution: Resolution | undefined;
 	const unknownLines: string[] = [];
@@ -1095,6 +1133,13 @@ function walkTrailingLines(
 			continue;
 		}
 
+		const task = parseTaskLine(line);
+		if (task) {
+			tasks.push(task);
+			bodyEndExclusive = i;
+			continue;
+		}
+
 		const addressedMatch = ADDRESSED_LINE_RE.exec(line);
 		if (
 			addressedMatch &&
@@ -1157,6 +1202,8 @@ function walkTrailingLines(
 	const body = unescapeBody(bodyRaw.trim());
 	// The walk ran bottom-up, so these came off the file in reverse.
 	unknownLines.reverse();
+	// File order is the order they were marked, which decides the live one.
+	tasks.reverse();
 
 	replies.reverse();
 	// Stable-sort by timestamp so a thread reads oldest-first even if its
@@ -1179,6 +1226,7 @@ function walkTrailingLines(
 		unknownLines,
 		source,
 		range,
+		tasks,
 	};
 }
 
@@ -1274,6 +1322,7 @@ export function parseAll(content: string): Comment[] {
 			source: tail.source,
 			marker: { start: raw.start, end: raw.end },
 			...(tail.range ? { range: tail.range } : {}),
+			...(tail.tasks.length > 0 ? { tasks: tail.tasks } : {}),
 		});
 	}
 	pairClosers(
@@ -1322,6 +1371,7 @@ export function parseAt(content: string, start: number): Comment | undefined {
 		marker: { start: match.index, end: match.index + match[0].length },
 		...(closer ? { closer } : {}),
 		...(tail.range ? { range: tail.range } : {}),
+		...(tail.tasks.length > 0 ? { tasks: tail.tasks } : {}),
 	};
 }
 
@@ -1335,6 +1385,7 @@ export interface SerializeInput {
 	anchor?: AnchorText;
 	range?: 'closed';
 	replies?: readonly Reply[];
+	tasks?: readonly TaskMark[];
 	addressed?: Addressed;
 	resolution?: Resolution;
 	// Trailing lines this version does not understand, carried through from the
@@ -1384,7 +1435,8 @@ export function serialize(c: SerializeInput): string {
 		c.source !== undefined ||
 		c.anchor !== undefined ||
 		c.range !== undefined;
-	const hasReplies = (c.replies?.length ?? 0) > 0;
+	const hasReplies =
+		(c.replies?.length ?? 0) > 0 || (c.tasks?.length ?? 0) > 0;
 	const hasAddressed = c.addressed !== undefined;
 	const hasResolution = c.resolution !== undefined;
 	const bodyMultiline = body.includes('\n');
@@ -1442,6 +1494,12 @@ export function serialize(c: SerializeInput): string {
 		lines.push(
 			`[reply ${sanitizeAuthorToken(r.author)} ${r.date}]: ${escapeInline(r.body)}`,
 		);
+	}
+	// After the replies they point at. A mark whose date is not a stamp would
+	// read back as body text, so it is not written at all.
+	for (const t of c.tasks ?? []) {
+		const line = taskLine(t);
+		if (line !== undefined) lines.push(line);
 	}
 	if (c.addressed) {
 		const rawNote = escapeInline(c.addressed.note);

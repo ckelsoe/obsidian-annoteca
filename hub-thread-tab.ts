@@ -28,7 +28,11 @@ import {
 	renderReplyRow,
 	renderCategoryBadge,
 	renderStarButton,
+	renderTaskBadge,
+	createTaskToggle,
 } from './ui-helpers';
+import { isUnfinished, liveTask, rootTarget, taskFor } from './tasks';
+import { ROOT_TASK_AUTHOR } from './types';
 import {
 	renderCommentMarkdown,
 	cycleLifetime,
@@ -1012,6 +1016,9 @@ export class ThreadTabRenderer {
 				cls: 'annoteca-reviewer-state annoteca-reviewer-state-addressed',
 				text: 'addressed',
 			});
+		// The live task: the one an assistant would act on next.
+		const live = liveTask(c);
+		if (live && !c.resolution) renderTaskBadge(compact, live.state);
 		if (c.date)
 			compact.createSpan({
 				cls: 'annoteca-reviewer-meta',
@@ -1078,6 +1085,9 @@ export class ThreadTabRenderer {
 		});
 		renderCommentMarkdown(bodyEl, c.body, host);
 		this.makeBodyJumpTarget(bodyEl, path, c);
+		// The comment itself marked as a task.
+		const rootTask = c.tasks?.find((t) => t.author === ROOT_TASK_AUTHOR);
+		if (rootTask) renderTaskBadge(expandedSection, rootTask.state);
 
 		if (c.resolution) {
 			const res = expandedSection.createDiv({
@@ -1138,13 +1148,31 @@ export class ThreadTabRenderer {
 			});
 			thread.createEl('h5', { text: 'Replies' });
 			for (const r of c.replies) {
-				renderReplyRow(
+				const mark = taskFor(c, r);
+				const meta = renderReplyRow(
 					thread,
 					r,
 					THREAD_REPLY_CLASSES,
 					(el, tag) => this.applyAuthorColor(el, tag),
 					host,
+					mark,
 				);
+				// Turn a reply into the task, once the thread has settled on
+				// what to do. Not while it is the live task and unfinished.
+				const live = liveTask(c);
+				if (!c.resolution && !(mark === live && isUnfinished(live))) {
+					const btn = meta.createEl('button', {
+						cls: 'annoteca-task-mark clickable-icon',
+						attr: {
+							type: 'button',
+							'aria-label': 'Mark this reply as a task',
+						},
+					});
+					setIcon(btn, 'list-todo');
+					btn.addEventListener('click', () => {
+						void this.plugin.markTask(path, c, r);
+					});
+				}
 			}
 		}
 
@@ -1260,6 +1288,10 @@ export class ThreadTabRenderer {
 			authorSelect.createEl('option', { value: tag, text: tag });
 		authorSelect.value = defaultAuthor;
 
+		// Marks the reply being sent as a task. Off by default and cleared after
+		// each send, so nothing becomes a task by accident.
+		const taskBox = createTaskToggle(controls, 'annoteca-reply-task');
+
 		const submitBtn = controls.createEl('button', {
 			cls: 'annoteca-reply-submit',
 			text: 'Reply',
@@ -1330,7 +1362,12 @@ export class ThreadTabRenderer {
 				textarea.readOnly = false;
 			};
 			void this.plugin
-				.appendReply(path, c, { author, date: nowISO(), body })
+				.appendReply(
+					path,
+					c,
+					{ author, date: nowISO(), body },
+					{ task: taskBox.isOn() },
+				)
 				.then((wrote) => {
 					// Keep what the user typed when the write was refused. A
 					// refusal returns before applySplices, so no re-render has
@@ -1341,6 +1378,7 @@ export class ThreadTabRenderer {
 						return;
 					}
 					textarea.value = '';
+					taskBox.set(false);
 					release();
 				})
 				.catch(() => {
@@ -1393,6 +1431,10 @@ export class ThreadTabRenderer {
 				void this.plugin.rejectAddressedFromPanel(path, c);
 			});
 		} else {
+			if (liveTask(c)?.state === 'planned')
+				this.createActionButton(actions, 'Approve task', 'play', () => {
+					void this.plugin.approveTask(path, c);
+				});
 			this.createActionButton(actions, 'Resolve', 'check', () => {
 				void this.plugin.resolveComment(path, c);
 			});
@@ -1404,6 +1446,22 @@ export class ThreadTabRenderer {
 					void this.plugin.resolveAndRemoveComment(path, c);
 				},
 			);
+			const liveNow = liveTask(c);
+			if (!(
+				liveNow?.author === ROOT_TASK_AUTHOR && isUnfinished(liveNow)
+			))
+				this.createActionButton(
+					actions,
+					'Mark as task',
+					'list-todo',
+					() => {
+						void this.plugin.markTask(
+							path,
+							c,
+							rootTarget(nowISO()),
+						);
+					},
+				);
 		}
 		// #83. A comment with an id can have a tab of its own. Not from inside
 		// that tab, not for an id-less comment, which has nothing a saved tab

@@ -65,6 +65,8 @@ export function isLeanMarker(c: Comment): boolean {
 		// The range flag (#84) too, for the same reason: it is inline content,
 		// and a lean classification would let a store entry's merge drop it.
 		c.range === undefined &&
+		// Task marks are inline content as well.
+		(c.tasks?.length ?? 0) === 0 &&
 		c.unknownLines.length === 0
 	);
 }
@@ -86,6 +88,7 @@ function merge(marker: Comment, stored: StoredComment): Comment {
 		author: stored.author,
 		anchor: stored.anchor,
 		...(stored.range ? { range: stored.range } : {}),
+		...(stored.tasks ? { tasks: stored.tasks.slice() } : {}),
 		replies: stored.replies.slice(),
 		addressed: stored.addressed,
 		resolution: stored.resolution,

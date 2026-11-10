@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Tasks.** Mark a comment, or any reply in its thread, as a task to ask an AI agent to do the work it describes, which can be outside the note. Tick **Task** when you write the comment or reply, or use **Mark as task** on one already in the thread. The agent replies with a plan and waits for you. Approve it with **Approve task** in the panel, the "Approve task here" command, or a reply that starts with a trigger word. The agent then does the work, replies with what it changed and marks the task done. A newer task replaces an unfinished older one, so only the latest is acted on. Each marked message shows its state as a badge. Annoteca runs nothing itself: what the agent can do depends on the agent and its access.
+- **Task trigger words** in Settings > AI integration, each with a description the agent reads. `/go` and `/build` ship by default. Words after the trigger are extra instructions for that task.
+- **Tasks in Skip categories** setting: a task on a comment in a Skip category is planned like any other (the default), or left alone.
+
+### Changed
+
+- **The exported AI skill updates itself.** Once it has been exported, changing the categories, agent handling, author tag, frontmatter summary or task settings rewrites it a moment later. The "export again" reminders are gone. A plugin update still flags it as out of date.
+- **The AI skill is version 15.** It teaches the `[task ...]` line, the task states, the latest-task rule and this vault's trigger words.
+
 ## [1.29.0] - 2026-10-26
 
 ### Fixed

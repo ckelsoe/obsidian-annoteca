@@ -6,7 +6,7 @@
 
 import { App, Modal, setIcon, getIconIds } from 'obsidian';
 
-import type { CategoryDefinition } from './types';
+import type { CategoryDefinition, TaskMark, TaskState } from './types';
 import { formatStamp } from './view-utils';
 import {
 	renderCommentMarkdown,
@@ -118,13 +118,17 @@ export interface ReplyRowClasses {
 //
 // `host` is optional so callers with no App to hand (or with markdown rendering
 // off) still get the plain-text row they always did.
+//
+// `task` is the reply's task mark, if it has one, shown as a badge. Returns the
+// meta line so a surface can add its own controls there.
 export function renderReplyRow(
 	parent: HTMLElement,
 	reply: { author: string; date: string; body: string },
 	classes: ReplyRowClasses,
 	colorAuthor: (el: HTMLElement, author: string) => void,
 	host?: MarkdownRenderHost,
-): void {
+	task?: TaskMark,
+): HTMLElement {
 	const row = parent.createDiv({ cls: classes.row });
 	const meta = row.createDiv({ cls: classes.meta });
 	const authorEl = classes.author
@@ -134,11 +138,61 @@ export function renderReplyRow(
 	if (classes.date)
 		meta.createSpan({ cls: classes.date, text: formatStamp(reply.date) });
 	else meta.createSpan({ text: formatStamp(reply.date) });
+	if (task) renderTaskBadge(meta, task.state);
 	renderCommentMarkdown(
 		row.createDiv({ cls: classes.body }),
 		reply.body,
 		host,
 	);
+	return meta;
+}
+
+// The "Task" switch in a reply box: a pressed/unpressed button rather than a
+// checkbox, so it sits in a row of buttons and reads its state to a screen
+// reader through aria-pressed.
+export function createTaskToggle(
+	parent: HTMLElement,
+	cls: string,
+): { isOn: () => boolean; set: (on: boolean) => void } {
+	const btn = parent.createEl('button', {
+		cls: `annoteca-task-toggle ${cls}`,
+		text: 'Task',
+		attr: {
+			type: 'button',
+			'aria-pressed': 'false',
+			'aria-label': 'Mark this reply as a task',
+		},
+	});
+	let on = false;
+	const set = (next: boolean): void => {
+		on = next;
+		btn.setAttribute('aria-pressed', String(on));
+		btn.toggleClass('is-active', on);
+	};
+	btn.addEventListener('click', (e) => {
+		e.preventDefault();
+		set(!on);
+	});
+	return { isOn: () => on, set };
+}
+
+const TASK_BADGE_TEXT: Record<TaskState, string> = {
+	open: 'Task',
+	planned: 'Task planned',
+	approved: 'Task approved',
+	done: 'Task done',
+	replaced: 'Task replaced',
+};
+
+// A task's state as a small badge. Shared by the panel and the hover popup.
+export function renderTaskBadge(
+	parent: HTMLElement,
+	state: TaskState,
+): HTMLElement {
+	return parent.createSpan({
+		cls: `annoteca-task-badge annoteca-task-${state}`,
+		text: TASK_BADGE_TEXT[state],
+	});
 }
 
 export interface StackedRowOpts {

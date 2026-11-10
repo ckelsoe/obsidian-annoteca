@@ -1038,6 +1038,45 @@ settings:
 	margin-top: 4px;
 }
 
+/* Task badges. Blue while a task is waiting on someone, green when done,
+   muted once replaced. */
+.annoteca-task-badge {
+	display: inline-block;
+	margin-left: 6px;
+	padding: 0 6px;
+	border-radius: var(--radius-s);
+	font-size: var(--font-smallest);
+	font-weight: var(--font-semibold);
+	white-space: nowrap;
+	color: var(--color-blue);
+	border: 1px solid var(--color-blue);
+}
+
+.annoteca-task-done {
+	color: var(--color-green);
+	border-color: var(--color-green);
+}
+
+.annoteca-task-replaced {
+	color: var(--text-muted);
+	border-color: var(--background-modifier-border);
+	font-weight: var(--font-normal);
+}
+
+.annoteca-task-mark {
+	margin-left: 4px;
+	vertical-align: middle;
+}
+
+.annoteca-task-toggle {
+	font-size: var(--font-smaller);
+}
+
+.annoteca-task-toggle.is-active {
+	color: var(--text-on-accent);
+	background-color: var(--interactive-accent);
+}
+
 /* F-270 addressed state in the panel. Orange rather than the resolution green,
    matching the marker's addressed outline, because this is a pending decision
    and not a finished one. */
@@ -2369,6 +2408,29 @@ settings:
 
 .annoteca-author-style-input {
 	flex: 1;
+}
+
+/* Task trigger words: word, editable description, remove. */
+.annoteca-task-trigger-row {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+	padding: 4px 0;
+}
+
+.annoteca-task-trigger-word {
+	min-width: 5em;
+	font-family: var(--font-monospace);
+	font-weight: var(--font-semibold);
+}
+
+.annoteca-task-trigger-word-input {
+	width: 7em;
+}
+
+.annoteca-task-trigger-desc {
+	flex: 1;
+	min-width: 0;
 }
 
 /* Marker-conflict namespace allowlist (F-285). Full width inside its stacked

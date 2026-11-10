@@ -27,6 +27,25 @@ export interface Addressed {
 	original?: string; // verbatim replaced text from the annoteca-original fence
 }
 
+// A message in a thread marked as a task (the comment itself or one reply), and
+// where that task stands. A person marks it `open`; an agent replies with a
+// plan and sets `planned`; a person approves (`approved`); the agent does the
+// work and sets `done`. Marking a newer task sets an unfinished older one to
+// `replaced`, so only the last task in a thread is ever live.
+export type TaskState = 'open' | 'planned' | 'approved' | 'done' | 'replaced';
+
+// The author token a task line uses for the comment itself, as opposed to one
+// of its replies. sanitizeAuthorToken keeps a real author from taking it.
+export const ROOT_TASK_AUTHOR = '@comment';
+
+export interface TaskMark {
+	// The marked message: a reply's author and date, or ROOT_TASK_AUTHOR (the
+	// date is then only the time it was marked, and is not matched).
+	author: string;
+	date: string;
+	state: TaskState;
+}
+
 export interface MarkerRange {
 	start: number; // offset of leading `<` of `<!--` in the parsed text (editor text in the index)
 	end: number; // offset one past the trailing `>` of `-->`
@@ -70,6 +89,9 @@ export interface Comment {
 	// identity for the finding, so it can tell whether it already promoted this
 	// one without keeping a side index.
 	source: CommentSource | undefined;
+	// Messages in this thread marked as tasks, in the order they were marked.
+	// Written as `[task <author> <date>]: <state>` lines. Absent when none.
+	tasks?: readonly TaskMark[];
 }
 
 // One comment another plugin is asking Annoteca to create (F-281).
@@ -387,6 +409,20 @@ export interface AnnotecaSettings {
 	// Optional extras written alongside the always-on open count.
 	frontmatterOldestOpen: boolean;
 	frontmatterOpenCategories: boolean;
+
+	// Words that approve a planned task when a person's reply starts with one,
+	// each with what the agent should do on it. Written into the exported AI
+	// skill. Defaults: /go and /build.
+	taskTriggers: TaskTrigger[];
+	// What an agent does with a task marked on a comment in a Skip category:
+	// 'act' plans it like any other (marking a task is an explicit request),
+	// 'skip' leaves it alone.
+	taskInSkipCategory: 'act' | 'skip';
+}
+
+export interface TaskTrigger {
+	word: string; // starts with `/`, no spaces, e.g. `/go`
+	description: string; // what the agent does when a reply starts with it
 }
 
 // Discriminated union for scope shapes. The shape determines what set of

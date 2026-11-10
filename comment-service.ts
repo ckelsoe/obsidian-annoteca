@@ -29,6 +29,14 @@ import type {
 	Reply,
 } from './types';
 import { ConfirmPromotionModal } from './confirm-modal';
+import {
+	isAmbiguousReply,
+	triggerWordOf,
+	uniqueReplyDate,
+	withLiveTaskApproved,
+	withTaskMarked,
+	type TaskTarget,
+} from './tasks';
 import { frontmatterEnd, planCloser } from './range-placement';
 import {
 	findRemovalBlocker,
@@ -435,10 +443,11 @@ export class CommentService {
 		path: string,
 		comment: Comment,
 		reply: Reply,
+		opts?: { task?: boolean },
 	): Promise<boolean> {
 		if (!path) return false;
 		return this.enqueue(path, () =>
-			this.appendReplyUnqueued(path, comment, reply),
+			this.appendReplyUnqueued(path, comment, reply, opts?.task === true),
 		);
 	}
 
@@ -446,16 +455,85 @@ export class CommentService {
 		path: string,
 		comment: Comment,
 		reply: Reply,
+		task: boolean,
 	): Promise<boolean> {
+		const words = (this.plugin.settings.taskTriggers ?? []).map(
+			(t) => t.word,
+		);
 		const outcome = await this.replaceMarkerUnqueued(
 			path,
 			comment,
-			(current) => ({
-				...current,
-				replies: [...current.replies, reply],
-			}),
+			(current) => {
+				// Every reply is the only one by its author at its second, or a
+				// task line (on it, or on the reply it would share a stamp with)
+				// could not say which reply it means.
+				const landed = {
+					...reply,
+					date: uniqueReplyDate(current, reply),
+				};
+				const next = {
+					...current,
+					replies: [...current.replies, landed],
+				};
+				if (task) return withTaskMarked(next, landed);
+				// A reply starting with a trigger word approves a planned task.
+				// Replies through Annoteca are a person's; an agent writes the
+				// file directly. Anything else is an ordinary reply.
+				if (triggerWordOf(reply.body, words) !== undefined)
+					return withLiveTaskApproved(next) ?? next;
+				return next;
+			},
 		);
 		return outcome === 'written';
+	}
+
+	// ---- Tasks -----------------------------------------------------------
+	// open ──agent plans──▶ planned ──person approves──▶ approved ──agent──▶ done
+	// Marking a newer task sets an unfinished older one to replaced.
+
+	// Mark one message in the thread (the comment, or a reply) as a new task.
+	async markTask(
+		path: string,
+		comment: Comment,
+		target: TaskTarget,
+	): Promise<boolean> {
+		return this.enqueue(path, async () => {
+			if (isAmbiguousReply(comment, target)) {
+				new Notice(
+					'Two replies share this author and time, so this one cannot be marked as a task.',
+				);
+				return false;
+			}
+			const outcome = await this.replaceMarkerUnqueued(
+				path,
+				comment,
+				(current) =>
+					isAmbiguousReply(current, target)
+						? undefined
+						: withTaskMarked(current, target),
+			);
+			if (outcome === 'written') new Notice('Marked as a task.');
+			else if (outcome === 'declined')
+				new Notice(
+					'Two replies share this author and time, so this one cannot be marked as a task.',
+				);
+			return outcome === 'written';
+		});
+	}
+
+	// Approve the live task once the agent has posted its plan.
+	async approveTask(path: string, comment: Comment): Promise<boolean> {
+		return this.enqueue(path, async () => {
+			const outcome = await this.replaceMarkerUnqueued(
+				path,
+				comment,
+				(current) => withLiveTaskApproved(current),
+			);
+			if (outcome === 'written') new Notice('Task approved.');
+			else if (outcome === 'declined')
+				new Notice('There is no planned task waiting for approval.');
+			return outcome === 'written';
+		});
 	}
 
 	// ---- Addressed-state transitions (F-270) ---------------------------------
@@ -696,6 +774,7 @@ export class CommentService {
 				range: reopened.range,
 				source: reopened.source,
 				replies: reopened.replies,
+				tasks: reopened.tasks,
 				resolution: reopened.resolution,
 				unknownLines: reopened.unknownLines,
 			});
@@ -1396,6 +1475,7 @@ export class CommentService {
 			range: next.range,
 			source: next.source,
 			replies: next.replies,
+			tasks: next.tasks,
 			addressed: next.addressed,
 			resolution: next.resolution,
 			unknownLines: next.unknownLines,
