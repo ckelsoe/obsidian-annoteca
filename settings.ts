@@ -16,6 +16,7 @@ import type {
 	ScopeShape,
 	ScopeState,
 	UserPreset,
+	TaskTrigger,
 } from './types';
 import {
 	DEFAULT_CATEGORIES,
@@ -127,6 +128,19 @@ export const DEFAULT_SETTINGS: AnnotecaSettings = {
 	frontmatterFileclassProperty: 'fileclass',
 	frontmatterOldestOpen: true,
 	frontmatterOpenCategories: true,
+
+	taskTriggers: [
+		{
+			word: '/go',
+			description: 'Approve the plan and carry out the task.',
+		},
+		{
+			word: '/build',
+			description:
+				'Approve the plan, carry out the task, then run the project build and tests and report the result.',
+		},
+	],
+	taskInSkipCategory: 'act',
 };
 
 // data.json is user-editable, and it also arrives over sync and out of a
@@ -496,6 +510,36 @@ const validNamespaceAllowlist: SettingValidator<
 	return [...new Set(values)];
 };
 
+// A trigger word: `/` then up to 31 characters with no spaces and none of the
+// characters that would break the skill's table. Matched ignoring case.
+export const TASK_TRIGGER_WORD_RE = /^\/[^\s|`\][<>]{1,31}$/;
+
+function validTaskTrigger(raw: unknown): TaskTrigger | undefined {
+	if (!isRecord(raw)) return undefined;
+	const word = str(raw.word)?.trim();
+	const description = str(raw.description);
+	if (word === undefined || !TASK_TRIGGER_WORD_RE.test(word))
+		return undefined;
+	if (description === undefined) return undefined;
+	return { word, description: description.replace(/\s+/g, ' ').trim() };
+}
+
+const validTaskTriggers: SettingValidator<'taskTriggers'> = (raw) => {
+	const values = arrayOf(validTaskTrigger)(raw);
+	if (values === undefined) return undefined;
+	// Same rule as the namespace allowlist: a list that arrived with entries and
+	// lost all of them is unreadable, not "no triggers".
+	if (values.length === 0 && Array.isArray(raw) && raw.length > 0)
+		return undefined;
+	const seen = new Set<string>();
+	return values.filter((t) => {
+		const key = t.word.toLowerCase();
+		if (seen.has(key)) return false;
+		seen.add(key);
+		return true;
+	});
+};
+
 const validAuthorTag: SettingValidator<'authorTag'> = (raw) => {
 	if (typeof raw !== 'string') return undefined;
 	return repairAuthorTag(raw);
@@ -578,6 +622,8 @@ const SETTING_VALIDATORS: {
 	},
 	frontmatterOldestOpen: bool,
 	frontmatterOpenCategories: bool,
+	taskTriggers: validTaskTriggers,
+	taskInSkipCategory: oneOf('act', 'skip'),
 };
 
 // The single ingress for anything read out of data.json or a backup file.
@@ -1167,6 +1213,19 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 						desc: 'Add a line to events.jsonl in the plugin folder each time a comment is created, replied to, addressed, resolved, reopened, moved or deleted, so a tool outside Obsidian can follow along. Records comment IDs, categories, authors and dates, never comment text. Stays on this device. Off by default.',
 						control: { type: 'toggle', key: 'eventJournal' },
 					},
+					this.customBlock((host) => this.renderTaskTriggers(host)),
+					{
+						name: 'Tasks in Skip categories',
+						desc: 'What an AI assistant does with a task marked on a comment whose category is set to Skip.',
+						control: {
+							type: 'dropdown',
+							key: 'taskInSkipCategory',
+							options: {
+								act: 'Plan it like any other task',
+								skip: 'Leave it alone',
+							},
+						},
+					},
 					this.customBlock((host) => this.renderSkillExport(host)),
 				],
 			},
@@ -1463,16 +1522,6 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			case 'enableAuthorTag':
 				repaint = true;
 				break;
-			case 'frontmatterSummary':
-				// The exported skill tells an assistant whether to trust the
-				// summary as its queue, so it is only right after an export.
-				new Notice(
-					'Export the AI skill again so your assistant knows the summary is ' +
-						(this.plugin.settings.frontmatterSummary
-							? 'on.'
-							: 'off.'),
-				);
-				break;
 			case 'eventJournal':
 				if (this.plugin.settings.eventJournal)
 					this.plugin.onEventJournalEnabled();
@@ -1521,7 +1570,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		const setting = new Setting(container)
 			.setName('Export AI skill')
 			.setDesc(
-				"Write a skill file into the vault that teaches an AI assistant this vault's comment format and categories. Re-export after changing categories or updating the plugin.",
+				"Write a skill file into the vault that teaches an AI assistant this vault's comment format, categories and tasks. Once exported, it updates itself when those settings change. Re-export after updating the plugin.",
 			);
 
 		// Live staleness indicator (F-277): reads the on-disk skill and reports
@@ -2181,8 +2230,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 		});
 
 		// Agent handling: how an AI agent treats this category's comments,
-		// as written into the exported skill. The agent only learns a change
-		// from a re-export, so the change says so.
+		// as written into the exported skill, which updates itself on save.
 		const agentWrap = controls.createDiv({
 			cls: 'annoteca-category-control',
 		});
@@ -2213,11 +2261,7 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 			if (next === 'reply' || next === 'skip') cat.agent = next;
 			else delete cat.agent;
 			this.plugin.saveSettings().then(
-				() => {
-					new Notice(
-						'Export the AI skill again so your assistant follows this.',
-					);
-				},
+				() => {},
 				(err: unknown) => {
 					console.error(
 						'Annoteca: saving agent handling failed',
@@ -2268,6 +2312,98 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 	// Author/collaborator styling (F-274/F-275). Each row is a tag plus an
 	// optional color; the tag list feeds the reply composer's author picker and
 	// the color tints that author's name and replies in the thread and hover.
+	// Words that approve a planned task when a reply starts with one, each with
+	// what the assistant should do. Written into the exported skill.
+	private renderTaskTriggers(host: HTMLElement): void {
+		const { content } = createStackedRow(host, {
+			name: 'Task trigger words',
+			description:
+				'A reply that starts with one of these words approves the task an AI assistant has planned. The description tells the assistant what to do. Words after the trigger are extra instructions.',
+		});
+
+		const list = content.createDiv({ cls: 'annoteca-task-trigger-list' });
+		for (const trigger of this.plugin.settings.taskTriggers) {
+			const row = list.createDiv({ cls: 'annoteca-task-trigger-row' });
+			row.createSpan({
+				cls: 'annoteca-task-trigger-word',
+				text: trigger.word,
+			});
+			const desc = row.createEl('input', {
+				cls: 'annoteca-task-trigger-desc',
+				attr: {
+					type: 'text',
+					'aria-label': `What ${trigger.word} tells the assistant`,
+				},
+			});
+			desc.value = trigger.description;
+			desc.addEventListener('change', () => {
+				trigger.description = desc.value.replace(/\s+/g, ' ').trim();
+				void this.plugin.saveSettings();
+			});
+			const remove = row.createEl('button', {
+				text: 'Remove',
+				attr: {
+					type: 'button',
+					'aria-label': `Remove ${trigger.word}`,
+				},
+			});
+			remove.addEventListener('click', () => {
+				this.plugin.settings.taskTriggers =
+					this.plugin.settings.taskTriggers.filter(
+						(t) => t !== trigger,
+					);
+				void this.plugin.saveSettings();
+				this.rerender();
+			});
+		}
+
+		const addRow = content.createDiv({ cls: 'annoteca-task-trigger-row' });
+		const word = addRow.createEl('input', {
+			cls: 'annoteca-task-trigger-word-input',
+			attr: {
+				type: 'text',
+				placeholder: '/word',
+				'aria-label': 'New trigger word',
+			},
+		});
+		const description = addRow.createEl('input', {
+			cls: 'annoteca-task-trigger-desc',
+			attr: {
+				type: 'text',
+				placeholder: 'What the assistant does',
+				'aria-label': 'What the new trigger word tells the assistant',
+			},
+		});
+		const addBtn = addRow.createEl('button', {
+			cls: 'mod-cta',
+			text: 'Add trigger',
+			attr: { type: 'button' },
+		});
+		addBtn.addEventListener('click', () => {
+			const w = word.value.trim();
+			if (!TASK_TRIGGER_WORD_RE.test(w)) {
+				new Notice(
+					'Start the trigger with / and use no spaces (max 32 characters).',
+				);
+				return;
+			}
+			if (
+				this.plugin.settings.taskTriggers.some(
+					(t) => t.word.toLowerCase() === w.toLowerCase(),
+				)
+			) {
+				new Notice('That trigger word is already set.');
+				return;
+			}
+			this.plugin.settings.taskTriggers.push({
+				word: w,
+				description: description.value.replace(/\s+/g, ' ').trim(),
+			});
+			void this.plugin.saveSettings();
+			this.rerender();
+		});
+	}
+
 	private renderAuthorStyles(host: HTMLElement): void {
 		const { content } = createStackedRow(host, {
 			name: 'Collaborators and author colors',

@@ -46,10 +46,14 @@ import type {
 	Comment,
 	Reply,
 	Resolution,
+	TaskMark,
+	TaskState,
 } from './types';
 import {
 	isCommentSource,
+	parseTaskLine,
 	RANGE_CLOSED_LINE,
+	taskLine,
 	unclosedOpenerRanges,
 } from './parser';
 import { frontmatterEnd } from './frontmatter';
@@ -101,6 +105,9 @@ export interface StoredComment {
 	// Set when the comment was created with a closer (#84). Carried for the same
 	// reason as source: a fold between storage modes must not drop it.
 	range?: 'closed';
+	// Task marks, carried for the same reason. Written as their marker lines in
+	// unknownLines, which an older build keeps.
+	tasks?: readonly TaskMark[];
 }
 
 export interface RawStoreEntry {
@@ -187,6 +194,8 @@ function buildPayload(c: StoredComment): Record<string, unknown> {
 		...(c.unknownLines ?? []),
 		...(sourceLine !== undefined ? [sourceLine] : []),
 		...(c.range === 'closed' ? [RANGE_CLOSED_LINE] : []),
+		// Task marks too, as their marker lines, for the same reason.
+		...(c.tasks ?? []).flatMap((t) => taskLine(t) ?? []),
 	];
 	if (carried.length > 0) {
 		out.unknownLines = carried;
@@ -201,6 +210,38 @@ function buildPayload(c: StoredComment): Record<string, unknown> {
 export function encodeStoreEntry(c: StoredComment): string {
 	const json = JSON.stringify(buildPayload(c), null, 2);
 	return `${STORE_OPENER}\n${neutralizeAngles(json)}\n${STORE_TERMINATOR}`;
+}
+
+const TASK_STATES: readonly TaskState[] = [
+	'open',
+	'planned',
+	'approved',
+	'done',
+	'replaced',
+];
+
+// An explicit `tasks` array, vetted like every other field: one bad mark fails
+// the entry rather than being half-trusted.
+function coerceTasks(value: unknown): TaskMark[] | undefined {
+	if (!Array.isArray(value)) return undefined;
+	const out: TaskMark[] = [];
+	for (const raw of value as unknown[]) {
+		if (typeof raw !== 'object' || raw === null) return undefined;
+		const r = raw as Record<string, unknown>;
+		const state = TASK_STATES.find((s) => s === r.state);
+		if (
+			typeof r.author !== 'string' ||
+			typeof r.date !== 'string' ||
+			state === undefined
+		)
+			return undefined;
+		const mark: TaskMark = { author: r.author, date: r.date, state };
+		// Only a mark that survives as a line is kept, so the store and the
+		// marker never disagree about it.
+		if (taskLine(mark) === undefined) return undefined;
+		out.push(mark);
+	}
+	return out;
 }
 
 // A non-empty string, or undefined. The JSON is user-reachable (hand edits, sync,
@@ -411,7 +452,20 @@ export function decodeStoreEntry(json: string): StoredComment | undefined {
 	const rangeLine = lifted.rest.some((l) => l.trim() === RANGE_CLOSED_LINE);
 	const range: 'closed' | undefined =
 		obj.range === 'closed' || rangeLine ? 'closed' : undefined;
-	const carried = lifted.rest.filter((l) => l.trim() !== RANGE_CLOSED_LINE);
+	// Task marks come back out of the carried lines the same way. An explicit
+	// `tasks` array is accepted too (a hand edit); it wins when present.
+	const lineTasks: TaskMark[] = [];
+	const carried = lifted.rest.filter((l) => {
+		if (l.trim() === RANGE_CLOSED_LINE) return false;
+		const task = parseTaskLine(l);
+		if (task) lineTasks.push(task);
+		return task === undefined;
+	});
+	const explicitTasks =
+		obj.tasks === undefined ? undefined : coerceTasks(obj.tasks);
+	if (obj.tasks !== undefined && explicitTasks === undefined)
+		return undefined;
+	const tasks = explicitTasks ?? lineTasks;
 
 	const out: StoredComment = { id, category, body, replies };
 	const date = optString(obj.date);
@@ -421,6 +475,7 @@ export function decodeStoreEntry(json: string): StoredComment | undefined {
 	if (source !== undefined) out.source = source;
 	if (anchor !== undefined) out.anchor = anchor;
 	if (range !== undefined) out.range = range;
+	if (tasks.length > 0) out.tasks = tasks;
 	if (addressed !== null) out.addressed = addressed;
 	if (resolution !== null) out.resolution = resolution;
 	if (carried.length > 0) {
@@ -572,6 +627,7 @@ export function toStored(id: string, c: Comment): StoredComment {
 		// has nowhere to put it, so the loss is permanent and silent.
 		source: c.source,
 		...(c.range ? { range: c.range } : {}),
+		...(c.tasks && c.tasks.length > 0 ? { tasks: c.tasks } : {}),
 	};
 }
 

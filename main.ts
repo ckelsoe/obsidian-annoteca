@@ -127,6 +127,7 @@ import {
 } from './views';
 import type { ComposerRequest } from './composer';
 import { nowISO, parseAll, scanClosers } from './parser';
+import { rootTarget, type TaskTarget } from './tasks';
 import { sentenceAt } from './sentence';
 import {
 	convertAllComments,
@@ -360,8 +361,14 @@ export default class AnnotecaPlugin extends Plugin {
 				copyText: (m, win) => {
 					void this.copyCommentText(m, win);
 				},
-				submitReply: (m, body, author, sourcePath) =>
-					this.submitReplyFromPopup(m, body, author, sourcePath),
+				submitReply: (m, body, author, sourcePath, task) =>
+					this.submitReplyFromPopup(
+						m,
+						body,
+						author,
+						sourcePath,
+						task,
+					),
 				getAuthorTag: () => this.comments.resolvedAuthor(),
 				getAuthorOptions: () => this.authorPickerOptions([]),
 				authorColor: (tag) => this.authorColor(tag),
@@ -649,6 +656,8 @@ export default class AnnotecaPlugin extends Plugin {
 		for (const timer of this.frontmatterTimers.values()) {
 			window.clearTimeout(timer);
 		}
+		if (this.skillSyncTimer !== undefined)
+			window.clearTimeout(this.skillSyncTimer);
 		this.frontmatterTimers.clear();
 		this.frontmatterInFlight.clear();
 		this.frontmatterFailedPaths.clear();
@@ -700,6 +709,9 @@ export default class AnnotecaPlugin extends Plugin {
 		) {
 			this.settings.markerScrollAlign = 'center';
 		}
+		// What the skill on disk was last built from, so a later save can tell
+		// whether a setting it is built from changed.
+		this.lastSkillBody = this.skillBody();
 	}
 
 	async saveSettings(): Promise<void> {
@@ -709,6 +721,56 @@ export default class AnnotecaPlugin extends Plugin {
 		// keeps drawing the old one until the next click or keystroke.
 		refreshDecorationsEverywhere();
 		this.events.trigger('settings-changed');
+		this.scheduleSkillSync();
+	}
+
+	// The skill text the current settings produce.
+	private skillBody(): string {
+		return buildSkillMarkdown(
+			resolveSettingsCategories(this.settings),
+			this.settings.enableAuthorTag ? this.settings.authorTag : undefined,
+			this.settings.frontmatterSummary,
+			{
+				triggers: this.settings.taskTriggers,
+				inSkip: this.settings.taskInSkipCategory,
+			},
+		);
+	}
+
+	private lastSkillBody = '';
+	private skillSyncTimer: number | undefined;
+
+	// Keep an exported skill in step with the settings it is built from
+	// (categories, agent handling, author tag, summary, task triggers). Only when
+	// that text changed, only into skill files that already exist, and a second
+	// after the last save so typing in a field writes once. A plugin update
+	// alone does not write: the staleness notice covers that.
+	private scheduleSkillSync(): void {
+		const body = this.skillBody();
+		if (body === this.lastSkillBody) return;
+		this.lastSkillBody = body;
+		if (this.skillSyncTimer !== undefined)
+			window.clearTimeout(this.skillSyncTimer);
+		this.skillSyncTimer = window.setTimeout(() => {
+			this.skillSyncTimer = undefined;
+			if (this.unloaded) return;
+			this.runGuarded('Skill update', async () => {
+				const adapter = this.app.vault.adapter;
+				const current = this.skillBody();
+				let wrote = false;
+				for (const filePath of skillTargetPaths('both')) {
+					const p = normalizePath(filePath);
+					if (!(await adapter.exists(p))) continue;
+					if ((await adapter.read(p)) === current) continue;
+					await adapter.write(p, current);
+					wrote = true;
+				}
+				if (!wrote) return;
+				this.settings.exportedSkillVersion = SKILL_SCHEMA_VERSION;
+				await this.saveData(this.settings);
+				new Notice('AI skill updated to match your settings.');
+			});
+		}, 1000);
 	}
 
 	private registerFileEvents(): void {
@@ -1057,6 +1119,26 @@ export default class AnnotecaPlugin extends Plugin {
 			editorCallback: (editor: Editor, view: MarkdownFileInfo) => {
 				this.withAddressedCommentAtCursor(editor, view, (path, c) => {
 					void this.rejectAddressedFromPanel(path, c);
+				});
+			},
+		});
+		// Tasks: mark the comment at the cursor as a task, or approve its
+		// planned task, with no pointer.
+		this.addCommand({
+			id: 'mark-task-here',
+			name: 'Mark comment as task here',
+			editorCallback: (editor: Editor, view: MarkdownFileInfo) => {
+				this.withCommentAtCursor(editor, view, (path, c) => {
+					void this.markTask(path, c, rootTarget(nowISO()));
+				});
+			},
+		});
+		this.addCommand({
+			id: 'approve-task-here',
+			name: 'Approve task here',
+			editorCallback: (editor: Editor, view: MarkdownFileInfo) => {
+				this.withCommentAtCursor(editor, view, (path, c) => {
+					void this.approveTask(path, c);
 				});
 			},
 		});
@@ -2076,8 +2158,21 @@ export default class AnnotecaPlugin extends Plugin {
 		path: string,
 		comment: Comment,
 		reply: Reply,
+		opts?: { task?: boolean },
 	): Promise<boolean> {
-		return this.comments.appendReply(path, comment, reply);
+		return this.comments.appendReply(path, comment, reply, opts);
+	}
+
+	async markTask(
+		path: string,
+		comment: Comment,
+		target: TaskTarget,
+	): Promise<boolean> {
+		return this.comments.markTask(path, comment, target);
+	}
+
+	async approveTask(path: string, comment: Comment): Promise<boolean> {
+		return this.comments.approveTask(path, comment);
 	}
 
 	// The note a popover action must act on (#22). Every one of these used to
@@ -2187,6 +2282,7 @@ export default class AnnotecaPlugin extends Plugin {
 		// only when the editor cannot say, which is the same rule the popover
 		// uses to resolve links in a rendered body.
 		sourcePath?: string,
+		task?: boolean,
 	): Promise<boolean> {
 		const trimmed = body.trim();
 		if (trimmed.length === 0) return false;
@@ -2215,7 +2311,9 @@ export default class AnnotecaPlugin extends Plugin {
 			);
 			return false;
 		}
-		const wrote = await this.comments.appendReply(path, comment, reply);
+		const wrote = await this.comments.appendReply(path, comment, reply, {
+			task,
+		});
 		if (wrote) new Notice('Reply added.');
 		return wrote;
 	}
@@ -3186,13 +3284,8 @@ export default class AnnotecaPlugin extends Plugin {
 	// invisible to the Vault file index, so this writes through the DataAdapter.
 	exportAiSkill(): void {
 		this.runGuarded('Skill export', async () => {
-			const body = buildSkillMarkdown(
-				resolveSettingsCategories(this.settings),
-				this.settings.enableAuthorTag
-					? this.settings.authorTag
-					: undefined,
-				this.settings.frontmatterSummary,
-			);
+			const body = this.skillBody();
+			this.lastSkillBody = body;
 			const adapter = this.app.vault.adapter;
 			const paths = skillTargetPaths(this.settings.skillExportTarget);
 			for (const filePath of paths) {

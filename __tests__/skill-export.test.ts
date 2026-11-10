@@ -413,8 +413,8 @@ describe('skill v13: an HTML comment inside replaced prose', () => {
 describe('skill v14: where a marker may not go', () => {
 	const skill = buildSkillMarkdown(CATEGORIES, undefined);
 
-	it('is schema version 14', () => {
-		expect(SKILL_SCHEMA_VERSION).toBe(14);
+	it('is at least schema version 14', () => {
+		expect(SKILL_SCHEMA_VERSION).toBeGreaterThanOrEqual(14);
 	});
 
 	it('lists the places a marker breaks something', () => {

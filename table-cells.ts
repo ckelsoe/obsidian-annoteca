@@ -44,7 +44,7 @@ import type { Comment } from './types';
 // a marker's lines was: right before a trailing line, or before the marker's
 // closing `-->`. A `<br>` anywhere else is the comment's own text and stays.
 const BR_SEPARATOR_RE =
-	/<br\s*\/?>(?=\s*(?:\[(?:id|date|author|source|anchor|range|reply|addressed|resolved)[\s=]|-->))/gi;
+	/<br\s*\/?>(?=\s*(?:\[(?:id|date|author|source|anchor|range|reply|task|addressed|resolved)[\s=]|-->))/gi;
 
 // Whether a full marker in a row damages it: its lines end the row, or they
 // became `<br>` and its trailing lines read as text.

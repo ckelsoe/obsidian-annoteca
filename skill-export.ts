@@ -4,7 +4,7 @@
 // narrative contract lives in the (private) data-format spec; this file is the
 // distilled, assistant-facing version that ships into a user's vault.
 
-import type { AgentHandling, CategoryDefinition } from './types';
+import type { AgentHandling, CategoryDefinition, TaskTrigger } from './types';
 
 export type SkillExportTarget = 'claude' | 'agent' | 'both';
 
@@ -81,7 +81,13 @@ export type SkillExportTarget = 'claude' | 'agent' | 'both';
 // that note. v14 lists where markers may not go, says a cell's comment is a
 // lean marker with a store entry, and gives the store's range flag in both
 // forms the plugin reads.
-export const SKILL_SCHEMA_VERSION = 14;
+// 15 = tasks. A person can mark a message in a thread as a task: plan it,
+// wait for approval (a button, or a reply starting with a trigger word such as
+// /go), then do it and report. An assistant on a v14 skill only ever edits the
+// note's prose, so it refuses the work, and it would read `[task ...]` lines as
+// unknown fields. v15 teaches the line, the states, the live-task rule and the
+// trigger words configured in this vault.
+export const SKILL_SCHEMA_VERSION = 15;
 
 const SKILL_VERSION_RE = /^annoteca-skill-version:\s*(\d+)\s*$/m;
 
@@ -218,6 +224,63 @@ The first lists the notes the summary counts as open. The second lists notes tha
 ${after}`;
 }
 
+// What the task section needs from settings.
+export interface TaskSkillOptions {
+	triggers: readonly TaskTrigger[];
+	inSkip: 'act' | 'skip';
+}
+
+function triggerSection(triggers: readonly TaskTrigger[]): string {
+	if (triggers.length === 0)
+		return 'No trigger words are set in this vault, so a task is approved only when its state is `approved`.';
+	const rows = triggers.map(
+		(t) => `| ${inlineCode(t.word)} | ${tableCell(t.description)} |`,
+	);
+	return [
+		"A person's reply that starts with one of these words, after your plan, approves the live task. Match the first word, ignoring case. Any words after it are extra instructions for this task.",
+		'',
+		'| Trigger | What to do |',
+		'| --- | --- |',
+		...rows,
+	].join('\n');
+}
+
+function tasksSection(opts: TaskSkillOptions): string {
+	const skip =
+		opts.inSkip === 'act'
+			? 'A task on a comment in a **Skip** category is still a task: a person marked it on purpose. Plan it like any other. Skip still covers the rest of that comment.'
+			: 'Leave a task on a comment in a **Skip** category alone, like the rest of that comment.';
+	return `## Tasks
+
+A person can mark one message in a thread as a **task**: the comment itself, or one reply. A task asks you to *do* something, and the work may be outside this note (code, configuration, another file), not only an edit to the prose. Each marked message has one line, after the \`[reply ...]\` lines:
+
+\`\`\`
+[task <author> <timestamp>]: <state>
+\`\`\`
+
+\`<author> <timestamp>\` name the marked reply exactly as its \`[reply ...]\` line does. \`@comment\` as the author means the comment itself; its timestamp is only when it was marked. In the end-of-file store the same lines sit in the entry's \`unknownLines\` array; change a state by editing its line there.
+
+Work only on the **live task**: the LAST \`[task ...]\` line in the thread. Ignore every earlier one.
+
+| State | Set by | What you do |
+| --- | --- | --- |
+| \`open\` | the person | Read the whole thread. Reply with a plan: what you will change, where, and any question. Then change the state to \`planned\`. Do nothing else yet. |
+| \`planned\` | you | Wait for approval. If the person replies with changes instead, reply with a revised plan. |
+| \`approved\` | the person | Do the work the thread agreed. Then reply with what you changed (files, commands, results) and change the state to \`done\`. |
+| \`done\`, \`replaced\` | you, the plugin | Nothing. |
+
+${triggerSection(opts.triggers)}
+
+Rules:
+
+- Never add a \`[task ...]\` line and never set a task to \`open\` or \`approved\`. Only a person marks or approves a task.
+- The instruction is the marked message, read with the thread around it. A later reply from the person can refine it.
+- If you cannot do the work (no access to where it is, an unclear instruction, a step that fails), reply with what is in the way and leave the state as it is. Never do part of it silently.
+- Finishing a task does not resolve the comment, and it is not an \`[addressed ...]\` edit unless you also changed the prose the comment is on.
+- ${skip}
+`;
+}
+
 export function buildSkillMarkdown(
 	categories: CategoryDefinition[],
 	authorTag: string | undefined,
@@ -225,6 +288,7 @@ export function buildSkillMarkdown(
 	// default: an assistant told the summary is off scans markers, which is
 	// slower but never misses a note.
 	summaryOn = false,
+	tasks: TaskSkillOptions = { triggers: [], inSkip: 'act' },
 ): string {
 	// Read, not repaired. `normalizeSettings` is the single ingress for
 	// data.json and already runs the tag through the token grammar, so the
@@ -281,7 +345,7 @@ The Q3 forecast assumes a hiring freeze through December.
 -->
 \`\`\`
 
-Structured lines sit at the END of the comment, after all body text, one per line, in this order: \`[id=]\`, \`[date=]\`, \`[author=]\`, \`[source=]\`, \`[anchor=]\`, \`[range=closed]\`, then \`[reply ...]\` lines oldest first, then at most one \`[addressed ...]\` line (with its optional \`annoteca-original\` fence), then at most one \`[resolved ...]\` line.
+Structured lines sit at the END of the comment, after all body text, one per line, in this order: \`[id=]\`, \`[date=]\`, \`[author=]\`, \`[source=]\`, \`[anchor=]\`, \`[range=closed]\`, then \`[reply ...]\` lines oldest first, then any \`[task ...]\` lines (see Tasks below), then at most one \`[addressed ...]\` line (with its optional \`annoteca-original\` fence), then at most one \`[resolved ...]\` line.
 
 ### Where a marker may not go
 
@@ -345,6 +409,7 @@ Field rules (match these exactly; the plugin's parser enforces them):
 - Reply: \`[reply <author> <timestamp>]: <inline markdown>\`.
 - Addressed: \`[addressed <author> <timestamp>]: <note>\`, at most one, after the replies and before any \`[resolved ...]\` line. It means "I applied an edit; the reviewer still needs to accept, revise, or reject." When the edit *replaced* prose, store the verbatim old text in a fenced \`annoteca-original\` block on the lines directly after the \`[addressed ...]\` line so the reviewer can reject and auto-revert.
 - Resolved: \`[resolved <author> <timestamp>]: <optional note>\`.
+- Task: \`[task <author> <timestamp>]: <state>\`, one per marked message, after the replies. See Tasks below.
 - **No line breaks in a trailing line**: \`[anchor=]\`, \`[reply ...]\`, \`[addressed ...]\` and \`[resolved ...]\` are each exactly ONE line, and the parser matches them line by line. A line break inside any of them produces a continuation line that matches nothing, which ends the structured section there: that line, the \`[id=]\`, and every other trailing line collapse into the body as visible text, and the thread is lost along with the comment's identity. So write a reply or a note as a single line, however long. If you want list-like structure, use separators inline (\`first point; second point\`) rather than a newline. The two places multi-line text IS safe are the comment body and the \`annoteca-original\` fence, because neither is parsed line by line.
 - **The \`annoteca-original\` fence must outlast its content**: the block holds verbatim prose lifted from the document, which can itself contain a fenced code block, and the first line that is just the fence delimiter closes it. Ending it early loses the original, the \`[addressed ...]\` line, and the comment's id. So count the longest run of backticks that starts a line inside the text you are storing and open and close with a run at least one longer: plain prose gets the usual three, text containing a \`\`\` block gets four, and so on. Do not escape the backticks; the whole point of the block is that the text comes back byte for byte.
 - **Escaping \`-->\`**: the marker is an HTML comment, so a literal \`-->\` anywhere inside one would end it early, truncating the comment and spilling the rest into the document as visible text. Write it as \`--\\>\` instead, in every free-text field: the body, \`[anchor=]\`, reply bodies, the \`[addressed ...]\` and \`[resolved ...]\` notes, and inside the \`annoteca-original\` fence. The plugin displays \`--\\>\` as \`-->\`. If the text you are storing already contains \`--\\>\`, add one more backslash (\`--\\\\>\`); the rule is that reading removes one backslash from the run, so writing adds one.
@@ -405,7 +470,7 @@ That is a **lean marker**: category and id only, no body or thread. Its real con
 
 Find every store entry with this regex: \`<!--\\s*annoteca:store\\b[\\s\\S]*?-->\`. A comment is in this mode when its marker body is empty AND its id matches a store entry. A marker that still carries an inline body is NOT in this mode: leave it in the bracket format above.
 
-The JSON mirrors the comment model: \`v\` (schema version, currently 1), \`id\` (required, the join key), \`category\`, \`body\`, and the optional \`date\`, \`author\`, \`anchor\` (\`{ "text": "...", "truncated": false }\`), \`range\` (\`"closed"\` for a comment made with a closer), \`replies\` (array of \`{ "author", "date", "body" }\`), \`addressed\` (\`{ "author", "date", "note", "original"? }\`) and \`resolution\` (\`{ "author", "date", "note" }\`). Absent fields are omitted.
+The JSON mirrors the comment model: \`v\` (schema version, currently 1), \`id\` (required, the join key), \`category\`, \`body\`, and the optional \`date\`, \`author\`, \`anchor\` (\`{ "text": "...", "truncated": false }\`), \`range\` (\`"closed"\` for a comment made with a closer), \`replies\` (array of \`{ "author", "date", "body" }\`), \`addressed\` (\`{ "author", "date", "note", "original"? }\`), \`resolution\` (\`{ "author", "date", "note" }\`) and \`unknownLines\` (marker lines carried as text, including any \`[task ...]\` lines). Absent fields are omitted.
 
 **Edit both sites, and put each change in the right one.** To reply to, address, resolve or edit the body of an eof comment, change its **store entry's JSON**, never the lean marker: append to the \`replies\` array, add an \`addressed\` or \`resolution\` object, or edit \`body\`. Leave the marker lean. Category is the one field the marker owns, so changing it rewrites the marker (\`<!-- annoteca/<new-category>: [id=<id>] -->\`) and the entry's \`category\` together. To create a comment in this mode, insert a lean marker at the start of the passage and add a matching store entry at the end of the file.
 
@@ -428,5 +493,6 @@ The reviewer sets, per category, what you may do with its comments. Check the ca
 - **Skip**: leave the comment entirely alone. Do not reply to it, address it, resolve it, or edit the passage it is on. These are notes the reviewer wrote for themself, such as a reminder to rework a section, and they are not addressed to you. Do not count them as work outstanding.
 
 A category that is not in the table (a comment filed under one that has since been removed) is **Act on it**, unless the reviewer tells you otherwise.
-`;
+
+${tasksSection(tasks)}`;
 }
