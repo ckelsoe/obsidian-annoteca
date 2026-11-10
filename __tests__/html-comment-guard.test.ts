@@ -154,6 +154,13 @@ describe('the diagnostics report', () => {
 		expect(JSON.parse(json)).toEqual([finding]);
 	});
 
+	it('neutralises --!> too, which also ends an HTML comment', () => {
+		const odd = { ...finding, excerpt: 'x --!> y' };
+		const json = reportJson([odd]);
+		expect(json).not.toContain('--!>');
+		expect(JSON.parse(json)).toEqual([odd]);
+	});
+
 	it('is not reported by the next validation run', () => {
 		const note = [
 			'# Malformed markers',
@@ -218,6 +225,16 @@ describe('an HTML comment copied into a comment’s original text', () => {
 		expect(r.updated.slice(c?.marker.end)).toBe(
 			' New paragraph. <!-- c:09-82 --> Next.\n\n## Next heading\n',
 		);
+	});
+
+	it('escapes a --!> in the quoted original too', () => {
+		const bang = ORIGINAL.replace('<!-- c:09-82 -->', '<!-- c:09-82 --!>');
+		const note = [...head, bang, tail].join('\n');
+		const r = repairQuotedOriginals(note);
+		expect(r.converted).toBe(1);
+		const [c] = parseAll(r.updated);
+		expect(c?.addressed?.original).toBe(bang);
+		expect(r.updated.slice(0, c?.marker.end)).not.toContain('--!>');
 	});
 
 	it('is repaired once: a second run changes nothing', () => {

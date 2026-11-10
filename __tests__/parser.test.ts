@@ -874,6 +874,35 @@ describe('parser: the `-->` escape is reversible at every depth', () => {
 		expect(roundTripBody('a --\\\\> b')).toBe('a --\\\\> b');
 	});
 
+	// HTML also ends a comment at `--!>`, so it is escaped like `-->`: never
+	// written raw, and read back as the user typed it.
+	it('never writes a raw --!> and round-trips it', () => {
+		const out = serialize({
+			category: 'note',
+			body: 'bang --!> here',
+			id: 'abc12345',
+			replies: [{ author: 'ai', date: '2026-11-10', body: 'r --!> r' }],
+			anchor: { text: 'a --!> a', truncated: false },
+			addressed: {
+				author: 'ai',
+				date: '2026-11-10',
+				note: 'n --!> n',
+				original: 'o --!> o',
+			},
+		});
+		expect(out).not.toContain('--!>');
+		const c = parseAll(out)[0];
+		expect(c?.body).toBe('bang --!> here');
+		expect(c?.replies[0]?.body).toBe('r --!> r');
+		expect(c?.anchor?.text).toBe('a --!> a');
+		expect(c?.addressed?.note).toBe('n --!> n');
+		expect(c?.addressed?.original).toBe('o --!> o');
+	});
+
+	it('round-trips a literal --!\\> written by the user', () => {
+		expect(roundTripBody('a --!\\> b')).toBe('a --!\\> b');
+	});
+
 	it('round-trips the real terminator and a literal escape side by side', () => {
 		expect(roundTripBody('real --> and literal --\\> together')).toBe(
 			'real --> and literal --\\> together',

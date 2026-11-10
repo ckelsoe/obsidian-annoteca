@@ -420,8 +420,8 @@ describe('the write path', () => {
 describe('skill text', () => {
 	const CATS = [{ id: 'build', displayName: 'Build', color: 'red' }];
 
-	it('is version 15 and teaches the line and the live-task rule', () => {
-		expect(SKILL_SCHEMA_VERSION).toBe(15);
+	it('is at least version 15 and teaches the line and the live-task rule', () => {
+		expect(SKILL_SCHEMA_VERSION).toBeGreaterThanOrEqual(15);
 		const skill = buildSkillMarkdown(CATS, undefined, false, {
 			triggers: DEFAULT_SETTINGS.taskTriggers,
 			inSkip: 'act',

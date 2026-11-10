@@ -347,20 +347,28 @@ const ID_BASE36_ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyz';
 // The alternative is a version sentinel in the format, which means a breaking
 // change and the migration machinery data-format.md requires for one. That is
 // not worth it against a corruption bug that loses whole lines today.
-const TERMINATOR_RUN_RE = /--(\\*)>/g;
-const ESCAPED_RUN_RE = /--(\\+)>/g;
+//
+// `--!>` gets the same treatment. HTML ends a comment there too, so a body
+// holding it rendered fine in the editor (this parser ends a marker only at
+// `-->`) but cut the marker short in reading view and export, spilling the rest
+// as text. `--!>` <-> `--!\>` and so on, by the same run rule. Text written by
+// an older build that already held a literal `--!\>` now reads back one
+// backslash shorter, the same one-character cost accepted above.
+const TERMINATOR_RUN_RE = /--(!?)(\\*)>/g;
+const ESCAPED_RUN_RE = /--(!?)(\\+)>/g;
 
 function escapeTerminator(text: string): string {
 	return text.replace(
 		TERMINATOR_RUN_RE,
-		(_match, slashes: string) => `--\\${slashes}>`,
+		(_match, bang: string, slashes: string) => `--${bang}\\${slashes}>`,
 	);
 }
 
 function unescapeTerminator(text: string): string {
 	return text.replace(
 		ESCAPED_RUN_RE,
-		(_match, slashes: string) => `--${slashes.slice(1)}>`,
+		(_match, bang: string, slashes: string) =>
+			`--${bang}${slashes.slice(1)}>`,
 	);
 }
 
