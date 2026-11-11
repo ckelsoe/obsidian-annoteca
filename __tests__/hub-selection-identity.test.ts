@@ -1,6 +1,6 @@
 /**
- * @jest-environment jsdom
- * @jest-environment-options {"html": "<html><body><div id=\"seeds\"><div></div><span></span><button></button><textarea></textarea><select><option></option></select></div></body></html>"}
+ * @vitest-environment jsdom
+ * @vitest-environment-options {"html": "<html><body><div id=\"seeds\"><div></div><span></span><button></button><textarea></textarea><select><option></option></select></div></body></html>"}
  */
 // M10 and m3, both about the Thread tab naming things by offset.
 //
@@ -105,6 +105,9 @@ const expandedCount = (c: HTMLElement): number =>
 
 beforeAll(() => {
 	installObsidianDomHelpers();
+	// jsdom has no layout, so no scrollIntoView. The panel calls it on the next
+	// animation frame, which can land after a test ends and fail the run.
+	Element.prototype.scrollIntoView = () => undefined;
 	window.activeDocument = document;
 	window.activeWindow = window;
 });

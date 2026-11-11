@@ -1,5 +1,5 @@
 /**
- * @jest-environment jsdom
+ * @vitest-environment jsdom
  */
 import type { App } from 'obsidian';
 
@@ -244,8 +244,8 @@ describe('CommentEventTracker', () => {
 });
 
 describe('debounceWithMaxWait', () => {
-	beforeEach(() => jest.useFakeTimers());
-	afterEach(() => jest.useRealTimers());
+	beforeEach(() => vi.useFakeTimers());
+	afterEach(() => vi.useRealTimers());
 
 	it('runs once after things go quiet', () => {
 		let runs = 0;
@@ -253,14 +253,14 @@ describe('debounceWithMaxWait', () => {
 			() => (runs += 1),
 			100,
 			1000,
-			() => jest.now(),
+			() => Date.now(),
 		);
 		d.trigger();
-		jest.advanceTimersByTime(50);
+		vi.advanceTimersByTime(50);
 		d.trigger();
-		jest.advanceTimersByTime(99);
+		vi.advanceTimersByTime(99);
 		expect(runs).toBe(0);
-		jest.advanceTimersByTime(1);
+		vi.advanceTimersByTime(1);
 		expect(runs).toBe(1);
 	});
 
@@ -270,11 +270,11 @@ describe('debounceWithMaxWait', () => {
 			() => (runs += 1),
 			100,
 			300,
-			() => jest.now(),
+			() => Date.now(),
 		);
 		for (let i = 0; i < 10; i++) {
 			d.trigger();
-			jest.advanceTimersByTime(50);
+			vi.advanceTimersByTime(50);
 		}
 		expect(runs).toBeGreaterThanOrEqual(1);
 	});
@@ -285,11 +285,11 @@ describe('debounceWithMaxWait', () => {
 			() => (runs += 1),
 			100,
 			1000,
-			() => jest.now(),
+			() => Date.now(),
 		);
 		d.trigger();
 		d.cancel();
-		jest.advanceTimersByTime(2000);
+		vi.advanceTimersByTime(2000);
 		expect(runs).toBe(0);
 	});
 });

@@ -1056,7 +1056,7 @@ describe('AnnotecaSettingTab.setControlValue: the promotion budget ingress', () 
 			setControlValue(key: string, value: unknown): Promise<void>;
 		};
 		// A repaired entry re-renders the tab so the field snaps back to what was
-		// stored. `update` comes from the real PluginSettingTab, which the Jest
+		// stored. `update` comes from the real PluginSettingTab, which the test
 		// stub does not have, so it is counted here instead.
 		Object.assign(tab, {
 			update: () => {

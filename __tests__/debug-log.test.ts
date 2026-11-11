@@ -99,7 +99,7 @@ describe('DebugLog', () => {
 
 	it('writes to the console, not a file, when that is the destination', async () => {
 		const h = makeLog({ debugMode: true, debugLogTarget: 'console' });
-		const spy = jest.spyOn(console, 'debug').mockImplementation(() => {});
+		const spy = vi.spyOn(console, 'debug').mockImplementation(() => {});
 		h.log.log('rebuild', { path: 'a.md' });
 		await h.log.flushed();
 		expect(h.adapter.files.size).toBe(0);

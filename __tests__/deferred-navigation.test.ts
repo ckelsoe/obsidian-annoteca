@@ -1,5 +1,5 @@
 /**
- * @jest-environment jsdom
+ * @vitest-environment jsdom
  */
 // The deferred-leaf half of M12, plus the two things that hang off it.
 //
@@ -263,7 +263,7 @@ describe('navigateToOffset against a leaf that is still loading', () => {
 		// busy running the rest of the suite. The editor wait polls on a
 		// timer shorter than the 20 ms the fake openFile takes to fill the
 		// buffer; the highlight flash after the jump runs far longer.
-		const timers = jest.spyOn(window, 'setTimeout');
+		const timers = vi.spyOn(window, 'setTimeout');
 		try {
 			await plugin.navigateToOffset('notes/empty.md', 0);
 			const polls = timers.mock.calls.filter((c) => (c[1] ?? 0) < 20);

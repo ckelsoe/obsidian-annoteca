@@ -1,6 +1,6 @@
 /**
- * @jest-environment jsdom
- * @jest-environment-options {"html": "<html><body><div id=\"seeds\"><h4></h4><div></div><span></span><button></button><p></p></div></body></html>"}
+ * @vitest-environment jsdom
+ * @vitest-environment-options {"html": "<html><body><div id=\"seeds\"><h4></h4><div></div><span></span><button></button><p></p></div></body></html>"}
  */
 // M12a: the Outline tab marks the cursor's heading even when the note is showing
 // in a tab restored from a saved workspace and never activated. Such a leaf holds

@@ -1,6 +1,6 @@
 // Shared `DecorationContext` double.
 //
-// Not named `*.test.ts` so Jest does not collect it as a suite. Extracted when
+// Not named `*.test.ts` so Vitest does not collect it as a suite. Extracted when
 // a second suite needed the same eighteen no-op members; the only thing the two
 // callers differ on is how settings are supplied, so that is the one parameter.
 

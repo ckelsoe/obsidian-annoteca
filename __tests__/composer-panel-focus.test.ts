@@ -1,6 +1,6 @@
 /**
- * @jest-environment jsdom
- * @jest-environment-options {"html": "<html><body><div id=\"seeds\"><div></div><textarea></textarea><p></p></div></body></html>"}
+ * @vitest-environment jsdom
+ * @vitest-environment-options {"html": "<html><body><div id=\"seeds\"><div></div><textarea></textarea><p></p></div></body></html>"}
  */
 // The side-panel composer puts the caret in the body field when a comment is
 // requested, and at no other time.
@@ -56,8 +56,8 @@ beforeAll(() => {
 });
 
 afterEach(() => {
-	jest.restoreAllMocks();
-	jest.useRealTimers();
+	vi.restoreAllMocks();
+	vi.useRealTimers();
 });
 
 describe('side-panel composer focus routing', () => {
@@ -74,17 +74,15 @@ describe('side-panel composer focus routing', () => {
 	beforeEach(() => {
 		focusCalls = 0;
 		closeHook = undefined;
-		jest.spyOn(ComposerForm.prototype, 'render').mockImplementation(
-			function (this: ComposerForm) {
-				// The hooks the panel passed, so a test can drive Save or Cancel.
-				closeHook = (this as unknown as FormInternals).hooks.close;
-			},
-		);
-		jest.spyOn(ComposerForm.prototype, 'focusBody').mockImplementation(
-			() => {
-				focusCalls += 1;
-			},
-		);
+		vi.spyOn(ComposerForm.prototype, 'render').mockImplementation(function (
+			this: ComposerForm,
+		) {
+			// The hooks the panel passed, so a test can drive Save or Cancel.
+			closeHook = (this as unknown as FormInternals).hooks.close;
+		});
+		vi.spyOn(ComposerForm.prototype, 'focusBody').mockImplementation(() => {
+			focusCalls += 1;
+		});
 	});
 
 	it('focuses the body when a comment is requested', () => {
@@ -137,18 +135,19 @@ describe('side-panel composer focus in the DOM', () => {
 	let container: HTMLDivElement;
 
 	beforeEach(() => {
-		jest.useFakeTimers();
+		vi.useFakeTimers();
 		container = window.createDiv();
 		document.body.append(container);
 		// Stands in for the real render's body field: a textarea in the
 		// container, recorded where focusBody looks for it.
-		jest.spyOn(ComposerForm.prototype, 'render').mockImplementation(
-			function (this: ComposerForm, el: HTMLElement) {
-				const area = el.createEl('textarea');
-				area.value = 'existing text';
-				(this as unknown as FormInternals).bodyArea = area;
-			},
-		);
+		vi.spyOn(ComposerForm.prototype, 'render').mockImplementation(function (
+			this: ComposerForm,
+			el: HTMLElement,
+		) {
+			const area = el.createEl('textarea');
+			area.value = 'existing text';
+			(this as unknown as FormInternals).bodyArea = area;
+		});
 	});
 
 	afterEach(() => {
@@ -167,7 +166,7 @@ describe('side-panel composer focus in the DOM', () => {
 		// Deferred, because Obsidian moves focus itself right after a view
 		// opens and would overwrite an immediate focus.
 		expect(document.activeElement).not.toBe(area);
-		jest.runOnlyPendingTimers();
+		vi.runOnlyPendingTimers();
 
 		expect(document.activeElement).toBe(area);
 		expect(area?.selectionStart).toBe('existing text'.length);
@@ -182,9 +181,9 @@ describe('side-panel composer focus in the DOM', () => {
 		if (!area) throw new Error('render made no textarea');
 		// jsdom ignores focus() on a detached element, so activeElement alone
 		// would pass without the guard. Watch the call itself.
-		const focus = jest.spyOn(area, 'focus');
+		const focus = vi.spyOn(area, 'focus');
 		container.empty();
-		jest.runOnlyPendingTimers();
+		vi.runOnlyPendingTimers();
 
 		expect(area.isConnected).toBe(false);
 		expect(focus).not.toHaveBeenCalled();

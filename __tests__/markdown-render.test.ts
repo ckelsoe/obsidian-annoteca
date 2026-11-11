@@ -1,6 +1,6 @@
 /**
- * @jest-environment jsdom
- * @jest-environment-options {"html": "<html><body><div id=\"seed\"></div></body></html>"}
+ * @vitest-environment jsdom
+ * @vitest-environment-options {"html": "<html><body><div id=\"seed\"></div></body></html>"}
  */
 
 // Per-file jsdom, matching live-views.test.ts, so the other suites keep the
@@ -59,10 +59,10 @@ function div(): HTMLElement {
 // Lets the .then() on MarkdownRenderer.render settle.
 const flush = (): Promise<void> => Promise.resolve().then(() => undefined);
 
-let renderSpy: jest.SpyInstance;
+let renderSpy: import('vitest').MockInstance;
 
 beforeEach(() => {
-	renderSpy = jest
+	renderSpy = vi
 		.spyOn(MarkdownRenderer, 'render')
 		.mockResolvedValue(undefined);
 	// replaceChildren rather than innerHTML: same effect, and it is a DOM call
@@ -142,7 +142,7 @@ describe('renderCommentMarkdown: when it renders and when it does not', () => {
 describe('renderCommentMarkdown: the post-render callback', () => {
 	it('fires once the render settles, for an element in the document', async () => {
 		const el = div();
-		const onRendered = jest.fn();
+		const onRendered = vi.fn();
 		renderCommentMarkdown(el, '# heading', makeHost({ onRendered }));
 
 		expect(onRendered).not.toHaveBeenCalled(); // async, not synchronous
@@ -155,7 +155,7 @@ describe('renderCommentMarkdown: the post-render callback', () => {
 	// Repositioning a tooltip that is already gone is at best wasted work.
 	it('does not fire when the element left the document first', async () => {
 		const el = div();
-		const onRendered = jest.fn();
+		const onRendered = vi.fn();
 		renderCommentMarkdown(el, '# heading', makeHost({ onRendered }));
 
 		el.remove();
@@ -168,7 +168,7 @@ describe('renderCommentMarkdown: the post-render callback', () => {
 	it('falls back to the source text when the render rejects', async () => {
 		renderSpy.mockRejectedValueOnce(new Error('post-processor blew up'));
 		const el = div();
-		const onRendered = jest.fn();
+		const onRendered = vi.fn();
 		renderCommentMarkdown(el, '**bold**', makeHost({ onRendered }));
 
 		await flush();
@@ -181,7 +181,7 @@ describe('renderCommentMarkdown: the post-render callback', () => {
 	it('does not fall back into an element that already left the document', async () => {
 		renderSpy.mockRejectedValueOnce(new Error('post-processor blew up'));
 		const el = div();
-		const onRendered = jest.fn();
+		const onRendered = vi.fn();
 		renderCommentMarkdown(el, '**bold**', makeHost({ onRendered }));
 
 		el.remove();
@@ -201,8 +201,8 @@ describe('renderCommentMarkdown: the post-render callback', () => {
 // component, and nothing else unloads them.
 describe('markdown render lifetimes', () => {
 	it('cycleLifetime unloads the previous one and loads a fresh one', () => {
-		const loadSpy = jest.spyOn(MarkdownLifetime.prototype, 'load');
-		const unloadSpy = jest.spyOn(MarkdownLifetime.prototype, 'unload');
+		const loadSpy = vi.spyOn(MarkdownLifetime.prototype, 'load');
+		const unloadSpy = vi.spyOn(MarkdownLifetime.prototype, 'unload');
 		try {
 			const first = cycleLifetime(undefined);
 			expect(loadSpy).toHaveBeenCalledTimes(1);

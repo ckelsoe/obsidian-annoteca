@@ -1,5 +1,5 @@
 /**
- * @jest-environment jsdom
+ * @vitest-environment jsdom
  */
 // The live-view registry, exercised against REAL EditorViews.
 //
@@ -173,8 +173,8 @@ describe('the arrival flash clears itself', () => {
 		return m.marker.start;
 	};
 
-	beforeEach(() => jest.useFakeTimers());
-	afterEach(() => jest.useRealTimers());
+	beforeEach(() => vi.useFakeTimers());
+	afterEach(() => vi.useRealTimers());
 
 	it('paints the anchored passage, then clears after the duration', () => {
 		const view = openView();
@@ -182,29 +182,29 @@ describe('the arrival flash clears itself', () => {
 		expect(
 			view.dom.querySelector('.annoteca-flash-comment')?.textContent,
 		).toBe(ANCHOR);
-		jest.advanceTimersByTime(1499);
+		vi.advanceTimersByTime(1499);
 		expect(flashCount(view)).toBe(1);
-		jest.advanceTimersByTime(1);
+		vi.advanceTimersByTime(1);
 		expect(flashCount(view)).toBe(0);
 	});
 
 	it('a second flash restarts the window instead of being cut short', () => {
 		const view = openView();
 		flashComment(view, markerStart());
-		jest.advanceTimersByTime(1000);
+		vi.advanceTimersByTime(1000);
 		flashComment(view, markerStart());
-		jest.advanceTimersByTime(1000);
+		vi.advanceTimersByTime(1000);
 		expect(flashCount(view)).toBe(1);
-		jest.advanceTimersByTime(500);
+		vi.advanceTimersByTime(500);
 		expect(flashCount(view)).toBe(0);
 	});
 
 	it('does not dispatch into an editor destroyed inside the window', () => {
 		const view = openView();
 		flashComment(view, markerStart());
-		const dispatch = jest.spyOn(view, 'dispatch');
+		const dispatch = vi.spyOn(view, 'dispatch');
 		views.pop()?.destroy();
-		jest.advanceTimersByTime(1500);
+		vi.advanceTimersByTime(1500);
 		expect(dispatch).not.toHaveBeenCalled();
 	});
 });

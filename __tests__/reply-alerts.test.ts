@@ -1,5 +1,5 @@
 /**
- * @jest-environment jsdom
+ * @vitest-environment jsdom
  */
 import type { CommentEvent } from '../comment-events';
 import {
@@ -175,8 +175,8 @@ describe('describeAlert', () => {
 });
 
 describe('AlertCooldown', () => {
-	beforeEach(() => jest.useFakeTimers());
-	afterEach(() => jest.useRealTimers());
+	beforeEach(() => vi.useFakeTimers());
+	afterEach(() => vi.useRealTimers());
 
 	it('gives the first batch at once and holds the rest until the cooldown ends', () => {
 		const emitted: CommentEvent[][] = [];
@@ -185,12 +185,12 @@ describe('AlertCooldown', () => {
 		cd.push([reply('kilo', 'a.md', '2')]);
 		cd.push([reply('kilo', 'a.md', '3')]);
 		expect(emitted.map((b) => b.length)).toEqual([1]);
-		jest.advanceTimersByTime(1000);
+		vi.advanceTimersByTime(1000);
 		expect(emitted.map((b) => b.length)).toEqual([1, 2]);
 		// The held batch started a new cooldown.
 		cd.push([reply('kilo', 'a.md', '4')]);
 		expect(emitted).toHaveLength(2);
-		jest.advanceTimersByTime(1000);
+		vi.advanceTimersByTime(1000);
 		expect(emitted).toHaveLength(3);
 	});
 
@@ -200,7 +200,7 @@ describe('AlertCooldown', () => {
 		cd.push([]);
 		expect(emitted).toHaveLength(0);
 		cd.push([reply('kilo')]);
-		jest.advanceTimersByTime(1000);
+		vi.advanceTimersByTime(1000);
 		cd.push([reply('kilo')]);
 		expect(emitted).toHaveLength(2);
 	});
@@ -211,14 +211,14 @@ describe('AlertCooldown', () => {
 		cd.push([reply('kilo')]);
 		cd.push([reply('kilo')]);
 		cd.cancel();
-		jest.advanceTimersByTime(5000);
+		vi.advanceTimersByTime(5000);
 		expect(emitted).toHaveLength(1);
 	});
 });
 
 describe('ReplyAlerts routing', () => {
-	beforeEach(() => jest.useFakeTimers());
-	afterEach(() => jest.useRealTimers());
+	beforeEach(() => vi.useFakeTimers());
+	afterEach(() => vi.useRealTimers());
 
 	function rig(s: AlertSettings, systemShown = true, soundFails = false) {
 		const calls: string[] = [];
@@ -343,7 +343,7 @@ describe('ReplyAlerts routing', () => {
 			true,
 		);
 		r.alerts.push([reply('kilo')]);
-		jest.advanceTimersByTime(ALERT_COOLDOWN_MS);
+		vi.advanceTimersByTime(ALERT_COOLDOWN_MS);
 		r.alerts.push([reply('kilo')]);
 		expect(r.calls).toEqual([
 			'tone:chime:0.7',
@@ -357,7 +357,7 @@ describe('ReplyAlerts routing', () => {
 		r.alerts.push([reply('kilo', 'a.md', '1')]);
 		r.alerts.push([reply('kilo', 'a.md', '2')]);
 		r.alerts.push([reply('kilo', 'b.md', '3')]);
-		jest.advanceTimersByTime(ALERT_COOLDOWN_MS);
+		vi.advanceTimersByTime(ALERT_COOLDOWN_MS);
 		expect(r.calls).toEqual([
 			'notice:Annoteca: kilo replied in a',
 			'tone:chime:0.7',
@@ -372,7 +372,7 @@ describe('ReplyAlerts routing', () => {
 		r.alerts.push([reply('kilo')]);
 		r.alerts.dispose();
 		r.alerts.push([reply('kilo')]);
-		jest.advanceTimersByTime(ALERT_COOLDOWN_MS);
+		vi.advanceTimersByTime(ALERT_COOLDOWN_MS);
 		expect(r.calls).toEqual([
 			'notice:Annoteca: kilo replied in Ch1',
 			'dispose',

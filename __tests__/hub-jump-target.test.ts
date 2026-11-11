@@ -1,6 +1,6 @@
 /**
- * @jest-environment jsdom
- * @jest-environment-options {"html": "<html><body><div id=\"seeds\"><div></div><span></span><button></button><textarea></textarea><select><option></option></select><a></a></div></body></html>"}
+ * @vitest-environment jsdom
+ * @vitest-environment-options {"html": "<html><body><div id=\"seeds\"><div></div><span></span><button></button><textarea></textarea><select><option></option></select><a></a></div></body></html>"}
  */
 // #82: the Thread tab's "Original text" block jumps to its comment in the note,
 // and every way into the document from a card moves the editor's active
@@ -38,10 +38,10 @@ function harness(navigate: () => Promise<void> = () => Promise.resolve()) {
 	const tfile = (p: string): TFile =>
 		Object.assign(new TFile(), { path: p, extension: 'md', basename: p });
 
-	const navigateToOffset = jest.fn(
+	const navigateToOffset = vi.fn(
 		(_path: string, _offset: number, _force?: boolean) => navigate(),
 	);
-	const highlightActiveComment = jest.fn(
+	const highlightActiveComment = vi.fn(
 		(_path: string, _start: number | null) => undefined,
 	);
 	const plugin = {

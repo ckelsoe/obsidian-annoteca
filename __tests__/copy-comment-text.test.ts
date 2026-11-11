@@ -72,7 +72,7 @@ describe('copyCommentText', () => {
 
 	it('reports a refused clipboard write instead of rejecting', async () => {
 		refuse = true;
-		const error = jest.spyOn(console, 'error').mockImplementation(() => {});
+		const error = vi.spyOn(console, 'error').mockImplementation(() => {});
 		await expect(
 			plugin().copyCommentText(comment('hello'), win),
 		).resolves.toBeUndefined();
@@ -100,7 +100,7 @@ describe('copyCommentsText', () => {
 
 	it('reports a refused clipboard write instead of rejecting', async () => {
 		refuse = true;
-		const error = jest.spyOn(console, 'error').mockImplementation(() => {});
+		const error = vi.spyOn(console, 'error').mockImplementation(() => {});
 		await expect(
 			plugin().copyCommentsText(
 				[{ path: 'a.md', comments: [comment('one')] }],
@@ -127,7 +127,7 @@ describe('copyCommentId', () => {
 
 	it('reports a refused clipboard write instead of rejecting', async () => {
 		refuse = true;
-		const error = jest.spyOn(console, 'error').mockImplementation(() => {});
+		const error = vi.spyOn(console, 'error').mockImplementation(() => {});
 		await expect(
 			plugin().copyCommentId(comment('x'), win),
 		).resolves.toBeUndefined();

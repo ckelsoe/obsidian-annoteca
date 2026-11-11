@@ -6,7 +6,7 @@
 // the button is only one of the ways out. Escape and a click on the background
 // both go straight to onClose, and those are the common dismissals.
 //
-// Driven by calling the lifecycle methods directly. The Jest Modal stub has no
+// Driven by calling the lifecycle methods directly. The Modal stub has no
 // contentEl (the real one comes from the plugin host), so the test supplies the
 // one thing onClose touches.
 
@@ -86,7 +86,7 @@ describe('ConfirmDeleteCommentModal cancellation', () => {
 // The promotion budget prompt (F-286). Same lifecycle hazard as the delete
 // modal above: comment-service awaits a promise this modal settles, so an exit
 // that answers nothing leaves a write pending for the life of the session.
-// Driven by calling the lifecycle methods directly, since the Jest Modal stub
+// Driven by calling the lifecycle methods directly, since the Modal stub
 // has no contentEl.
 describe('ConfirmPromotionModal decision', () => {
 	function makeModal(onDecision: (approved: boolean) => void) {

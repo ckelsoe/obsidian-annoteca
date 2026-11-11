@@ -966,11 +966,11 @@ describe('#12: a write aimed at a missing file reports instead of no-oping', () 
 		'<!-- annoteca/clarify: which products?\n[id=gonefile]\n-->',
 	);
 
-	// The Notice text itself is not asserted here. jest.spyOn cannot call through
+	// The Notice text itself is not asserted here. vi.spyOn cannot call through
 	// to an ES class constructor ("cannot be invoked without 'new'"), and the
 	// ways around that are a type assertion on the mock or a recording member on
 	// the Obsidian stub that the real obsidian.d.ts does not have, which would
-	// compile under Jest and fail `npm run build`. What IS asserted is the
+	// compile in tests and fail `npm run build`. What IS asserted is the
 	// contract the caller depends on, which is the part that can silently rot.
 	it('appendReply refuses rather than reporting a write it did not do', async () => {
 		const service = makeHarnessWithNoFile();

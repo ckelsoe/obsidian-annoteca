@@ -34,6 +34,7 @@ import {
 	repairQuotedOriginals,
 } from '../quote-repair';
 import { findMalformedMarkers, parseAll } from '../parser';
+import { timeBudget } from './time-budget';
 
 const DIAGRAM =
 	'<!-- diagram: D01-1 | type: sequence | shows: AMS360, ImageRight, Indio, producer | status: final -->';
@@ -346,7 +347,7 @@ describe('code spans, at the edges', () => {
 		const note = '`x` '.repeat(40000) + '<!-- real -->';
 		const t = performance.now();
 		expect(htmlCommentRanges(note)).toHaveLength(1);
-		expect(performance.now() - t).toBeLessThan(500);
+		expect(performance.now() - t).toBeLessThan(timeBudget(500));
 	});
 });
 

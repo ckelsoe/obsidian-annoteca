@@ -227,7 +227,7 @@ describe('MarkerDamageReporter', () => {
 	it('does not re-read the note when no notice will show', () => {
 		const r = new MarkerDamageReporter();
 		r.report('a.md', 'A', [damage('x')]);
-		const repairable = jest.fn(() => true);
+		const repairable = vi.fn(() => true);
 		expect(
 			r.report('a.md', 'A', [damage('x')], repairable),
 		).toBeUndefined();
