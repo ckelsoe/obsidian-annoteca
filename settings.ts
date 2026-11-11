@@ -512,7 +512,7 @@ const validNamespaceAllowlist: SettingValidator<
 
 // A trigger word: `/` then up to 31 characters with no spaces and none of the
 // characters that would break the skill's table. Matched ignoring case.
-export const TASK_TRIGGER_WORD_RE = /^\/[^\s|`\][<>]{1,31}$/;
+const TASK_TRIGGER_WORD_RE = /^\/[^\s|`\][<>]{1,31}$/;
 
 function validTaskTrigger(raw: unknown): TaskTrigger | undefined {
 	if (!isRecord(raw)) return undefined;

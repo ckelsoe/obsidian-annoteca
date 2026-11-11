@@ -132,7 +132,7 @@ describe('commentTabState', () => {
 		{ path: '', id: 'aaaaaaaa' },
 		{ path: A, id: 'NOT-AN-ID' },
 		{ path: A, id: 42 },
-	])('rejects %p', (state) => {
+	])('rejects %o', (state) => {
 		expect(commentTabState(state)).toBeUndefined();
 	});
 });
@@ -258,7 +258,7 @@ describe('the comment tab reply box and Send comment on Enter', () => {
 	});
 
 	it.each([{ ctrlKey: true }, { metaKey: true }])(
-		'sends on %p plus Enter when the setting is off',
+		'sends on %o plus Enter when the setting is off',
 		async (mods) => {
 			const h = await openWithDraft(false);
 			const e = press(h.box, mods);

@@ -185,7 +185,7 @@ describe('shouldSubmitOnKeydown', () => {
 			[true, {}],
 			[false, { ctrlKey: true }],
 			[false, { metaKey: true }],
-		])('never submits (submitOnEnter %p, %p)', (submitOnEnter, mods) => {
+		])('never submits (submitOnEnter %o, %o)', (submitOnEnter, mods) => {
 			expect(
 				shouldSubmitOnKeydown(
 					{ ...key('Enter', mods), isComposing: true },
