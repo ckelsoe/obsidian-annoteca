@@ -14,7 +14,7 @@
     "importHelpers": true,
     "isolatedModules": true,
     "allowSyntheticDefaultImports": true,
-    "types": ["node"],
+    "types": ["node", "vitest/globals"],
     "lib": [
       "DOM",
       "ES5",
