@@ -763,7 +763,17 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 				type: 'group',
 				heading: 'Categories',
 				items: [
-					this.customBlock((host) => this.renderPresetSection(host)),
+					this.customBlock((host) => this.renderPresetSection(host), {
+						name: 'Category presets',
+						desc: 'Browse, apply and save sets of categories.',
+						aliases: [
+							'preset',
+							'scholarly',
+							'fiction',
+							'code review',
+							'project planning',
+						],
+					}),
 					{
 						name: 'Index-entry preset',
 						desc: "Adds an 'Index entry' category for marking terms that belong in a book's back-of-book index. Tag a term with a comment like <!-- annoteca/index-entry: Holy Spirit -->; on export to PDF, the Pandoc filter in the plugin's docs folder turns each one into a LaTeX index entry (use 'term > subterm' for a sub-entry). Leave off unless you publish an indexed document.",
@@ -781,8 +791,24 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 							options: categoryOptions,
 						},
 					},
-					this.customBlock((host) => this.renderCategoryList(host)),
-					this.customBlock((host) => this.renderAddCategory(host)),
+					this.customBlock((host) => this.renderCategoryList(host), {
+						name: 'Category list',
+						desc: "Each category's name, icon, color, underline tier, default text and agent handling, and their order.",
+						aliases: [
+							'category',
+							'color',
+							'icon',
+							'tier',
+							'agent handling',
+							'reorder',
+							'note to self',
+						],
+					}),
+					this.customBlock((host) => this.renderAddCategory(host), {
+						name: 'Add category',
+						desc: 'Create a new comment category.',
+						aliases: ['new category'],
+					}),
 				],
 			},
 			{
@@ -1065,7 +1091,16 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 							},
 						},
 					},
-					this.customBlock((host) => this.renderAuthorStyles(host)),
+					this.customBlock((host) => this.renderAuthorStyles(host), {
+						name: 'Collaborators and author colors',
+						desc: 'Tags and colors for the people and assistants who reply.',
+						aliases: [
+							'author',
+							'collaborator',
+							'color',
+							'reply picker',
+						],
+					}),
 				],
 			},
 			{
@@ -1190,7 +1225,18 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 				type: 'group',
 				heading: 'AI assistant',
 				items: [
-					this.customBlock((host) => this.renderSkillExport(host)),
+					this.customBlock((host) => this.renderSkillExport(host), {
+						name: 'Export AI skill',
+						desc: 'Write the skill file that teaches an AI assistant the comment format.',
+						aliases: [
+							'skill',
+							'AI',
+							'agent',
+							'assistant',
+							'Claude',
+							'export',
+						],
+					}),
 					{
 						name: 'Skill export destination',
 						desc: 'Vault folder the exported skill file is written to. Claude Code reads .claude/skills; some other assistants read a .agent folder.',
@@ -1204,7 +1250,17 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 							},
 						},
 					},
-					this.customBlock((host) => this.renderTaskTriggers(host)),
+					this.customBlock((host) => this.renderTaskTriggers(host), {
+						name: 'Task trigger words',
+						desc: 'Words that approve a task an AI assistant has planned.',
+						aliases: [
+							'task',
+							'trigger',
+							'/go',
+							'/build',
+							'approve',
+						],
+					}),
 					{
 						name: 'Tasks in Skip categories',
 						desc: 'What an AI assistant does with a task marked on a comment whose category is set to Skip.',
@@ -1324,8 +1380,18 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 							},
 						},
 					},
-					this.customBlock((host) =>
-						this.renderNamespaceAllowlist(host),
+					this.customBlock(
+						(host) => this.renderNamespaceAllowlist(host),
+						{
+							name: 'Known comment namespaces',
+							desc: "Other tools' comment prefixes the marker-conflict check should not report.",
+							aliases: [
+								'namespace',
+								'conflict',
+								'plumbline',
+								'allowlist',
+							],
+						},
 					),
 					this.customBlock((host) => this.renderFooter(host)),
 				],
@@ -1575,10 +1641,19 @@ export class AnnotecaSettingTab extends PluginSettingTab {
 	// form) in a full-width settings row. These keep the workspace stacked-row /
 	// picker UX that the default control layout cannot reproduce, so they render
 	// imperatively and stay out of settings search.
-	private customBlock(build: (host: HTMLElement) => void) {
+	// A section drawn by hand. `search` names it for Obsidian's settings search
+	// (name, description, extra terms); without it the section is invisible to
+	// search, which is right only for chrome such as the footer.
+	private customBlock(
+		build: (host: HTMLElement) => void,
+		search?: { name: string; desc: string; aliases?: string[] },
+	) {
 		return {
-			name: '',
-			searchable: false,
+			name: search?.name ?? '',
+			...(search
+				? { desc: search.desc, aliases: search.aliases ?? [] }
+				: {}),
+			searchable: search !== undefined,
 			render: (setting: Setting) => {
 				const host = setting.settingEl;
 				host.empty();
