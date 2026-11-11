@@ -70,7 +70,7 @@ export default tseslint.config(
 		files: ["__tests__/**/*.ts"],
 		languageOptions: {
 			globals: {
-				...globals.jest,
+				...globals.vitest,
 			},
 		},
 		rules: {
@@ -98,7 +98,7 @@ export default tseslint.config(
 		"package.json",
 		"package-lock.json",
 		"tsconfig.json",
-		"jest.config.cjs",
+		"vitest.config.mts",
 		// Scorecard-scan reproduction tsconfig; not a source file to lint.
 		"tsconfig.scan.json",
 		// The config is inside the type-aware TS project, so 0.4.1 lints this file

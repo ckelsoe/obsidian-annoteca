@@ -1,6 +1,6 @@
 /**
- * @jest-environment jsdom
- * @jest-environment-options {"html": "<html><body><div id=\"seeds\"><div></div><span></span><button></button><textarea></textarea><select><option></option></select></div></body></html>"}
+ * @vitest-environment jsdom
+ * @vitest-environment-options {"html": "<html><body><div id=\"seeds\"><div></div><span></span><button></button><textarea></textarea><select><option></option></select></div></body></html>"}
  */
 // Three things that decide whether an unsent reply survives.
 //

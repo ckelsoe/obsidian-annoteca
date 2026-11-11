@@ -2,11 +2,12 @@
 # accepted and what would let us drop it. Revisit whenever the dependency tree
 # changes (a new lockfile may remove the transitive path entirely).
 #
-# One active suppression, below: deepmerge has no fixed release at all. The
-# minimatch advisory is fixed through version-keyed `overrides` (2026-11-11):
-# `minimatch@9` and `minimatch@10` move to 11, which keeps the named exports
-# those tools import, while eslint's own 3.x copies are left alone. The glob
-# advisory is fixed through `overrides` (2026-11-04). The braces entry was dropped 2026-11-04: GitHub
+# No active suppressions. The deepmerge advisory left with Jest (2026-11-11):
+# Vitest does not use deepmerge. The minimatch advisory is fixed through
+# version-keyed `overrides` (2026-11-11): `minimatch@9` and `minimatch@10`
+# move to 11, which keeps the named exports those tools import, while eslint's
+# own 3.x copies are left alone. The glob advisory is fixed through
+# `overrides` (2026-11-04). The braces entry was dropped 2026-11-04: GitHub
 # withdrew GHSA-vfj7-8cjw-p6xm on 2026-10-23.
 #
 # The brace-expansion entry for GHSA-mh99-v99m-4gvg was dropped on 2026-08-03,
@@ -29,8 +30,3 @@
 #
 # If a transitive dependency drags a vulnerable brace-expansion back in, the
 # right response is another `npm update brace-expansion`, not a new entry here.
-
-[[IgnoredVulns]]
-id = "GHSA-gcqx-w48m-w2h4"
-ignoreUntil = 2026-12-31
-reason = "deepmerge: prototype poisoning of objects returned by mergeObject(). No fixed release exists (4.3.1 is the latest and is affected). Dev-only: reached through jest > @jest/core > jest-config, which merges this repo's own test config and never ships in main.js. Drop this entry, and add a package.json override, as soon as deepmerge publishes a fixed version."

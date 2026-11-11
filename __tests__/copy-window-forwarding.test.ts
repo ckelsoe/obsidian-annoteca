@@ -1,6 +1,6 @@
 /**
- * @jest-environment jsdom
- * @jest-environment-options {"html": "<html><body><div id=\"seeds\"><div></div><span></span><button></button><textarea></textarea><select><option></option></select><p></p></div></body></html>"}
+ * @vitest-environment jsdom
+ * @vitest-environment-options {"html": "<html><body><div id=\"seeds\"><div></div><span></span><button></button><textarea></textarea><select><option></option></select><p></p></div></body></html>"}
  */
 // Every copy button hands the plugin the window it was clicked in. The
 // clipboard is written through that window's navigator, because in a pop-out

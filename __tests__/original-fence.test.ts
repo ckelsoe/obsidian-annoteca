@@ -2,6 +2,7 @@
 // pattern backtracked over the rest of the body for every unclosed opener.
 
 import { findOriginalFences } from '../parser';
+import { timeBudget } from './time-budget';
 
 const OLD_RE = /^(`{3,})annoteca-original[ \t]*\r?\n([\s\S]*?)\r?\n\1[ \t]*$/gm;
 
@@ -68,6 +69,6 @@ describe('findOriginalFences', () => {
 		const inner = '```annoteca-original\nx\n'.repeat(40000);
 		const t0 = performance.now();
 		expect(findOriginalFences(inner)).toEqual([]);
-		expect(performance.now() - t0).toBeLessThan(2000);
+		expect(performance.now() - t0).toBeLessThan(timeBudget(2000));
 	});
 });

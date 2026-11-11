@@ -1,6 +1,6 @@
 /**
- * @jest-environment jsdom
- * @jest-environment-options {"html": "<html><body><div id=\"seeds\"><div></div><span></span><button></button><textarea></textarea><select><option></option></select></div></body></html>"}
+ * @vitest-environment jsdom
+ * @vitest-environment-options {"html": "<html><body><div id=\"seeds\"><div></div><span></span><button></button><textarea></textarea><select><option></option></select></div></body></html>"}
  */
 // #82: the arrival flash as it is DRAWN, in the default indicator style.
 //
@@ -58,10 +58,10 @@ beforeAll(() => {
 	window.activeWindow = window;
 });
 
-beforeEach(() => jest.useFakeTimers());
+beforeEach(() => vi.useFakeTimers());
 
 afterEach(() => {
-	jest.useRealTimers();
+	vi.useRealTimers();
 	while (views.length > 0) views.pop()?.destroy();
 	document.body.querySelectorAll('.cm-editor').forEach((e) => e.remove());
 });
@@ -73,7 +73,7 @@ describe('#82: the flash on a marker drawn as an icon', () => {
 		expect(flashingIcon(view)).toBeNull();
 		flashComment(view, start());
 		expect(flashingIcon(view)).not.toBeNull();
-		jest.advanceTimersByTime(1500);
+		vi.advanceTimersByTime(1500);
 		expect(flashingIcon(view)).toBeNull();
 		// The icon is still there, only the flash is gone.
 		expect(view.dom.querySelector('.annoteca-icon')).not.toBeNull();
@@ -83,7 +83,7 @@ describe('#82: the flash on a marker drawn as an icon', () => {
 		const view = openView();
 		flashComment(view, start());
 		const first = flashingIcon(view);
-		jest.advanceTimersByTime(500);
+		vi.advanceTimersByTime(500);
 		flashComment(view, start());
 		const second = flashingIcon(view);
 		expect(first).not.toBeNull();

@@ -1,6 +1,6 @@
 /**
- * @jest-environment jsdom
- * @jest-environment-options {"html": "<html><body><div id=\"seeds\"><div></div><span></span><button></button><textarea></textarea><select><option></option></select><p></p></div></body></html>"}
+ * @vitest-environment jsdom
+ * @vitest-environment-options {"html": "<html><body><div id=\"seeds\"><div></div><span></span><button></button><textarea></textarea><select><option></option></select><p></p></div></body></html>"}
  */
 // #83: focus mode in the Thread tab. One comment, nothing else, until the
 // reader asks for the list back or picks a different comment elsewhere.

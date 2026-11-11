@@ -28,7 +28,7 @@ Before opening a pull request, run:
 ```bash
 npm run lint       # ESLint (zero warnings allowed) + Prettier format check + submission pre-check
 npm run build      # TypeScript strict type-check + esbuild production bundle
-npm test           # Jest unit tests
+npm test           # Vitest unit tests
 ```
 
 All three must pass. Pull requests that break CI will not be reviewed until green.

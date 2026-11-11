@@ -3,7 +3,7 @@ import type { FindingSeverity, PlumblineFinding } from './plumbline-client';
 // What the Findings lane draws, as data rather than DOM.
 //
 // Kept out of the renderer so it can be tested: that module imports Obsidian,
-// and this project's jest runs on the 'node' environment. Same split the rest of
+// and this project's tests run in the 'node' environment. Same split the rest of
 // the hub tabs would benefit from.
 
 // Severities shown as their own rows. Anything below collapses into one counted

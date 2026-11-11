@@ -6,7 +6,7 @@ import {
 	supportsDragAndDrop,
 } from '../platform';
 
-jest.mock('obsidian');
+vi.mock('obsidian');
 
 // The point of these tests is not that the wrappers return the right boolean,
 // which is trivial. It is that they READ the object per call. Capturing

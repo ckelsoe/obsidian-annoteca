@@ -1,6 +1,6 @@
 /**
- * @jest-environment jsdom
- * @jest-environment-options {"html": "<html><body><div id=\"seeds\"><div></div><textarea></textarea></div></body></html>"}
+ * @vitest-environment jsdom
+ * @vitest-environment-options {"html": "<html><body><div id=\"seeds\"><div></div><textarea></textarea></div></body></html>"}
  */
 // The hub panel rebuilds on every index change, which arrives while the reader
 // is typing a reply. captureFocus has to put the cursor back in the SAME

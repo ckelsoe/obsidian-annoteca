@@ -40,8 +40,8 @@ All TypeScript source files are in the **root** of the repository (not in a `src
 | `platform.ts` | The only place that reads Obsidian's `Platform`; per-platform decisions go through it |
 | `globals.d.ts` | Obsidian API type augmentations (`editor.cm`, `manifest.version`) |
 | `styles.css` | All plugin CSS |
-| `__tests__/` | Jest unit tests |
-| `__mocks__/obsidian.ts` | Minimal Obsidian stub for Jest (no real plugin host) |
+| `__tests__/` | Vitest unit tests |
+| `__mocks__/obsidian.ts` | Minimal Obsidian stub for Vitest (no real plugin host) |
 | `scripts/check-submission.mjs` | Obsidian marketplace submission pre-check (runs as part of lint) |
 | `docs/pandoc-annoteca.lua` | Pandoc Lua filter that strips markers at export time |
 | `esbuild.config.mjs` | esbuild config; dev build auto-copies artifacts into a sibling `obs-test-vault` if it exists |
@@ -57,7 +57,7 @@ npm run dev          # dev build with file watching (auto-copies to obs-test-vau
 npm run build        # TypeScript type-check (noEmit) + esbuild production bundle → main.js
 npm run lint         # ESLint (zero warnings allowed) + prettier --check "**/*.ts"
                      #   + scripts/check-submission.mjs
-npm test             # Jest unit tests
+npm test             # Vitest unit tests
 ```
 
 All three gates (`lint`, `build`, `test`) must pass before opening a pull request. CI runs them in order on every push/PR to `main`.
@@ -205,10 +205,10 @@ Two consequences, both load-bearing:
 ## Adding or editing tests
 
 - Tests live in `__tests__/` and are named `*.test.ts`.
-- The Jest environment is `node` by default, so there is no DOM. Obsidian APIs are stubbed by `__mocks__/obsidian.ts`.
-- A test that needs a real DOM (constructing a CodeMirror `EditorView`, for instance) opts in per file with a `/** @jest-environment jsdom */` docblock, as `__tests__/live-views.test.ts` does. Do not switch the whole suite; the rest does not need it and jsdom is slower.
+- The Vitest environment is `node` by default, so there is no DOM. Obsidian APIs are stubbed by `__mocks__/obsidian.ts`.
+- A test that needs a real DOM (constructing a CodeMirror `EditorView`, for instance) opts in per file with a `/** @vitest-environment jsdom */` docblock, as `__tests__/live-views.test.ts` does. Do not switch the whole suite; the rest does not need it and jsdom is slower.
 - Under jsdom you still do NOT get Obsidian's injected DOM helpers (`document.win.createSpan`, `el.createDiv`, and friends). Prefer arranging the test so they are never called, the way `live-views.test.ts` uses `indicatorStyle: 'underline'` to avoid constructing any widget. When the surface under test is itself BUILT from them (the reply composer, the tooltip host), call `installObsidianDomHelpers()` from `__mocks__/obsidian.ts` instead of hand-writing a stub: it installs a strict subset of the real API and clones elements from seeds the test's jsdom `html` option supplies, which is what keeps it clear of `obsidianmd/prefer-create-el`'s ban on `createElement`. See `reply-composer-dismiss.test.ts` for the shape. An ad-hoc injected stub in a test file is still wrong: it puts a second, drifting imitation of Obsidian between the test and the code.
-- Shared test doubles go in a non-`*.test.ts` file under `__tests__/` so Jest does not collect them as a suite. `__tests__/stub-context.ts` is the `DecorationContext` double used by more than one suite.
+- Shared test doubles go in a non-`*.test.ts` file under `__tests__/` so Vitest does not collect them as a suite. `__tests__/stub-context.ts` is the `DecorationContext` double used by more than one suite.
 - Pure modules (`parser.ts`, `categories.ts`, `types.ts`, `skill-export.ts`, etc.) can be tested directly. Modules that import `obsidian` work via the stub — add new stubs to `__mocks__/obsidian.ts` if a class or function is missing.
 - Never remove or disable existing tests.
 

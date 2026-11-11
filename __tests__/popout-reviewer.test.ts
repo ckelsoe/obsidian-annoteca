@@ -1,6 +1,6 @@
 /**
- * @jest-environment jsdom
- * @jest-environment-options {"html": "<html><body><div id=\"seeds\"><div></div></div></body></html>"}
+ * @vitest-environment jsdom
+ * @vitest-environment-options {"html": "<html><body><div id=\"seeds\"><div></div></div></body></html>"}
  */
 // Opening a comment from a note in a pop-out window. A pop-out has no
 // sidebar, so the hub would open in the main window, behind the note, on

@@ -1,5 +1,5 @@
 /**
- * @jest-environment jsdom
+ * @vitest-environment jsdom
  */
 // Anchoring hardening, part B: noticing a comment that disappeared.
 
@@ -24,15 +24,15 @@ function rig(located: Set<string> = new Set(), exists = true) {
 }
 
 describe('LossGuard', () => {
-	beforeEach(() => jest.useFakeTimers());
-	afterEach(() => jest.useRealTimers());
+	beforeEach(() => vi.useFakeTimers());
+	afterEach(() => vi.useRealTimers());
 
 	it('reports a comment that vanished from a note it had seen', () => {
 		const { guard, reports } = rig();
 		guard.changed('a.md', comments('aaaa1111', 'bbbb2222'));
 		guard.changed('a.md', comments('bbbb2222'));
 		expect(reports).toHaveLength(0);
-		jest.advanceTimersByTime(1000);
+		vi.advanceTimersByTime(1000);
 		expect(reports.map((b) => b.map((l) => l.id))).toEqual([['aaaa1111']]);
 		expect(guard.lost.map((l) => l.id)).toEqual(['aaaa1111']);
 	});
@@ -42,7 +42,7 @@ describe('LossGuard', () => {
 		guard.changed('a.md', comments('aaaa1111'));
 		guard.expectRemoval('aaaa1111');
 		guard.changed('a.md', []);
-		jest.advanceTimersByTime(1000);
+		vi.advanceTimersByTime(1000);
 		expect(reports).toHaveLength(0);
 	});
 
@@ -52,7 +52,7 @@ describe('LossGuard', () => {
 		guard.changed('a.md', comments('aaaa1111'));
 		guard.changed('a.md', []);
 		located.add('aaaa1111');
-		jest.advanceTimersByTime(1000);
+		vi.advanceTimersByTime(1000);
 		expect(reports).toHaveLength(0);
 	});
 
@@ -60,19 +60,19 @@ describe('LossGuard', () => {
 		const { guard, reports } = rig(new Set(), false);
 		guard.changed('a.md', comments('aaaa1111'));
 		guard.changed('a.md', []);
-		jest.advanceTimersByTime(1000);
+		vi.advanceTimersByTime(1000);
 		expect(reports).toHaveLength(0);
 		const second = rig();
 		second.guard.changed('b.md', comments('bbbb2222'));
 		second.guard.removed('b.md');
-		jest.advanceTimersByTime(1000);
+		vi.advanceTimersByTime(1000);
 		expect(second.reports).toHaveLength(0);
 	});
 
 	it('ignores the first sighting of a note', () => {
 		const { guard, reports } = rig();
 		guard.changed('a.md', []);
-		jest.advanceTimersByTime(1000);
+		vi.advanceTimersByTime(1000);
 		expect(reports).toHaveLength(0);
 	});
 
@@ -80,7 +80,7 @@ describe('LossGuard', () => {
 		const { guard, reports } = rig();
 		guard.changed('a.md', comments('aaaa1111', 'bbbb2222'));
 		guard.changed('a.md', []);
-		jest.advanceTimersByTime(1000);
+		vi.advanceTimersByTime(1000);
 		expect(reports).toHaveLength(1);
 		expect(reports[0]).toHaveLength(2);
 		guard.forget('aaaa1111');
@@ -92,7 +92,7 @@ describe('LossGuard', () => {
 		guard.changed('a.md', comments('aaaa1111'));
 		guard.renamed('a.md', 'b.md');
 		guard.changed('b.md', []);
-		jest.advanceTimersByTime(1000);
+		vi.advanceTimersByTime(1000);
 		expect(reports[0]?.[0]?.path).toBe('b.md');
 	});
 });

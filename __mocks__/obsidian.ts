@@ -1,4 +1,4 @@
-// Minimal Obsidian module stub for Jest. Provides empty class/function
+// Minimal Obsidian module stub for the test runner. Provides empty class/function
 // shims so non-test modules that `import { ... } from "obsidian"` can be
 // loaded under Node without the real plugin host present. Tests that
 // exercise pure helpers (parser, scope dispatch, color conversion,
@@ -59,7 +59,7 @@ export class App {}
 //
 // This is not a member added to a mocked class, which the Component note below
 // rightly forbids: production code type-checks against the real obsidian.d.ts,
-// so a convenience member there would compile under Jest and fail `npm run
+// so a convenience member there would compile in tests and fail `npm run
 // build`. A module-level export is only ever reachable through the relative
 // import, so the mock stays a subset of the real API.
 //
@@ -83,7 +83,7 @@ export class Plugin {}
 // Deliberately no `loaded` flag, though it would make the lifetime tests read
 // more naturally. Type-checking runs against the REAL obsidian.d.ts, where
 // Component has no such member, so a convenience added here would compile under
-// Jest and fail `npm run build`. The mock stays a subset of the real API; tests
+// tests and fail `npm run build`. The mock stays a subset of the real API; tests
 // observe lifetimes by spying on load/unload instead.
 export class Component {
 	load(): void {

@@ -1,6 +1,6 @@
 /**
- * @jest-environment jsdom
- * @jest-environment-options {"html": "<html><body><div id=\"seeds\"><h4></h4><div></div><span></span><button></button><p></p></div></body></html>"}
+ * @vitest-environment jsdom
+ * @vitest-environment-options {"html": "<html><body><div id=\"seeds\"><h4></h4><div></div><span></span><button></button><p></p></div></body></html>"}
  */
 // The Outline tab as a tree: what it draws, and what each control does.
 
