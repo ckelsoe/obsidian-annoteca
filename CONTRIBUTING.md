@@ -59,15 +59,7 @@ it locally.
 
 ## Releases
 
-Releases are cut by the maintainer. The release workflow runs automatically on tag push and:
-
-1. Builds and tests the plugin.
-2. Generates SLSA build provenance attestation for `main.js`, `manifest.json`, and `styles.css`.
-3. Submits artifacts to VirusTotal for malware analysis (requires `VT_API_KEY` repo secret).
-4. Extracts the matching `CHANGELOG.md` section as release notes.
-5. Publishes the GitHub release.
-
-Contributors do not need to bump versions or create release artifacts.
+Releases are cut by the maintainer. Contributors do not need to bump versions or create release artifacts.
 
 ## License
 
