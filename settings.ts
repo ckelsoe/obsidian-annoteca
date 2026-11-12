@@ -211,8 +211,9 @@ function arrayOf<T>(
 ): (raw: unknown) => T[] | undefined {
 	return (raw) => {
 		if (!Array.isArray(raw)) return undefined;
+		const items: readonly unknown[] = raw;
 		const kept: T[] = [];
-		for (const item of raw) {
+		for (const item of items) {
 			const value = validate(item);
 			if (value !== undefined) kept.push(value);
 		}

@@ -316,8 +316,9 @@ function coerceAnchor(value: unknown): AnchorText | undefined {
 // drops the whole entry rather than a silent partial thread.
 function coerceReplies(value: unknown): Reply[] | undefined {
 	if (!Array.isArray(value)) return undefined;
+	const items: readonly unknown[] = value;
 	const out: Reply[] = [];
-	for (const item of value) {
+	for (const item of items) {
 		if (typeof item !== 'object' || item === null) return undefined;
 		const obj = item as Record<string, unknown>;
 		const author = optString(obj.author);
@@ -368,8 +369,9 @@ function coerceResolution(value: unknown): Resolution | undefined | null {
 function coerceUnknownLines(value: unknown): string[] | undefined | null {
 	if (value === undefined) return null;
 	if (!Array.isArray(value)) return undefined;
+	const items: readonly unknown[] = value;
 	const out: string[] = [];
-	for (const item of value) {
+	for (const item of items) {
 		if (typeof item !== 'string') return undefined;
 		out.push(item);
 	}

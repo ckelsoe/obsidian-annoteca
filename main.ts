@@ -2782,7 +2782,9 @@ export default class AnnotecaPlugin extends Plugin {
 		const cache = this.app.metadataCache.getFileCache(active);
 		if (!cache) return result;
 		if (cache.frontmatter) {
-			for (const [key, raw] of Object.entries(cache.frontmatter)) {
+			for (const [key, raw] of Object.entries<unknown>(
+				cache.frontmatter,
+			)) {
 				if (key === 'position') continue;
 				if (
 					typeof raw === 'string' ||
@@ -2791,7 +2793,8 @@ export default class AnnotecaPlugin extends Plugin {
 				) {
 					result.properties.push({ key, value: String(raw) });
 				} else if (Array.isArray(raw)) {
-					for (const v of raw) {
+					const values: readonly unknown[] = raw;
+					for (const v of values) {
 						if (
 							typeof v === 'string' ||
 							typeof v === 'number' ||
