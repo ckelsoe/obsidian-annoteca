@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.31.3] - 2026-11-13
+
+### Changed
+
+- Internal maintenance: built with TypeScript 6 and an updated toolchain. No change in behavior.
+
 ## [1.31.2] - 2026-11-10
 
 ### Fixed
