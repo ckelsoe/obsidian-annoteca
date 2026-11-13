@@ -7,6 +7,8 @@
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"ci": "node scripts/ci-local.mjs",
+		"scan-rules": "node scripts/check-scan-rules.mjs",
 		"typecheck:marketplace": "tsc --noEmit -p tsconfig.scan.json",
 		"lint": "eslint . --max-warnings 0 && prettier --check \"**/*.ts\" && node scripts/check-submission.mjs && npm run typecheck:marketplace",
 		"test": "vitest run",
